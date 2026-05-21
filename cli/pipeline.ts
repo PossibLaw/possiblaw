@@ -19,6 +19,9 @@ import type {
   RunContext,
   TestResult,
   GuardrailResult,
+  BranchRecord,
+  BranchOutput,
+  DebateRound,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -74,6 +77,7 @@ export async function runPipeline(
   const agentCalls: AgentCallRecord[] = [];
   const testResults: { name: string; result: TestResult }[] = [];
   const guardrailResults: { name: string; result: GuardrailResult }[] = [];
+  const branchRecords: BranchRecord[] = [];
   let deliverable = '';
   let escalationReason: string | undefined;
 
@@ -167,6 +171,7 @@ export async function runPipeline(
           testResults,
           guardrailResults,
           auditLogPath: audit.path,
+          branches: branchRecords,
         });
       }
 
@@ -184,92 +189,313 @@ export async function runPipeline(
     }
 
     // -----------------------------------------------------------------------
-    // Phase 2: Specialist
+    // Phase 2: Specialist (or parallel/debate override)
     // -----------------------------------------------------------------------
     const specialist: Agent = loadAgent(specialistName);
     const skills = specialist.skills.map((skillName) => loadSkill(skillName));
 
-    const runSpecialist = async (model?: string) => {
-      const agentOverride: Agent = model
-        ? { ...specialist, model }
-        : specialist;
-
-      const effectiveModel = agentOverride.model;
+    const runOneAgent = async (
+      agentToRun: Agent,
+      promptText: string,
+      agentSkills: ReturnType<typeof loadSkill>[],
+      temperature?: number
+    ) => {
+      const effectiveModel = agentToRun.model;
       const applyFilter = shouldApplyPrivacyFilter(privacyProfile, effectiveModel);
 
       if (applyFilter) {
-        // Encode: replace entities in user prompt before sending to cloud LLM
-        const encoded = await encode(userPrompt, matterId);
+        const encoded = await encode(promptText, matterId);
         if (opts.verbose) {
           console.error(
             `[privacy-filter] Encoded prompt (mode=${encoded.mode ?? 'llm'}). ` +
             `Key store has ${Object.keys(encoded.key_store).length} entries.`
           );
         }
-
-        // Audit: log privacy-filter encode step
         audit.log({
           step: 'privacy-filter:encode',
           parent_step: parentStep,
           prompt: `[privacy-filter mode=${encoded.mode ?? 'llm'}] masked_text_length=${encoded.masked_text.length}`,
           output: JSON.stringify(Object.keys(encoded.key_store)),
         });
-
-        const rawResult = await runAgent(agentOverride, encoded.masked_text, { skills, verbose: opts.verbose });
-
-        // Decode: rehydrate entities in the model response
+        const rawResult = await runAgent(agentToRun, encoded.masked_text, {
+          skills: agentSkills,
+          verbose: opts.verbose,
+          temperature,
+        });
         let decodedOutput: string;
         try {
           decodedOutput = await decode(rawResult.output, encoded.key_store);
         } catch (pfErr: unknown) {
-          if (pfErr instanceof PrivacyFilterError) {
-            throw pfErr;
-          }
+          if (pfErr instanceof PrivacyFilterError) throw pfErr;
           throw pfErr;
         }
-
         if (opts.verbose) {
           console.error(`[privacy-filter] Decoded response. Output length=${decodedOutput.length}.`);
         }
-
         audit.log({
           step: 'privacy-filter:decode',
           parent_step: 'privacy-filter:encode',
           output: '[privacy-filter] rehydration complete',
         });
-
         return { ...rawResult, output: decodedOutput };
       }
 
-      return runAgent(agentOverride, userPrompt, { skills, verbose: opts.verbose });
+      return runAgent(agentToRun, promptText, {
+        skills: agentSkills,
+        verbose: opts.verbose,
+        temperature,
+      });
     };
 
-    let specialistResult = await runSpecialist();
-    deliverable = specialistResult.output;
-
-    let specialistRecord: AgentCallRecord = {
-      agent: specialist.name,
-      model: specialistResult.model,
-      output: specialistResult.output,
-      tokens: specialistResult.tokens,
+    // Convenience wrapper matching the old signature (no temperature, no custom agent/prompt)
+    const runSpecialist = async (model?: string) => {
+      const agentOverride: Agent = model ? { ...specialist, model } : specialist;
+      return runOneAgent(agentOverride, userPrompt, skills);
     };
-    agentCalls.push(specialistRecord);
-    const specialistStepName = `specialist:${specialist.name}`;
-    stepResults.push({
-      stepName: specialistStepName,
-      agentCallRecord: specialistRecord,
-    });
 
-    // Audit: log specialist call
-    audit.log({
-      step: specialistStepName,
-      agent: specialist.name,
-      model: specialistResult.model,
-      prompt: userPrompt,
-      output: specialistResult.output,
-      parent_step: parentStep,
-    });
-    parentStep = specialistStepName;
+    // -----------------------------------------------------------------------
+    // Detect Sprint 8 step kinds in the pipeline
+    // -----------------------------------------------------------------------
+    const parallelStep = workflow.pipeline.find(
+      (p): p is { step: 'parallel'; count: number; temperatures: number[]; resolved_by: string } =>
+        p.step === 'parallel'
+    );
+    const reconcileStep = workflow.pipeline.find(
+      (p): p is { step: 'reconcile'; agent: string } => p.step === 'reconcile'
+    );
+    const debateStep = workflow.pipeline.find(
+      (p): p is { step: 'debate'; participants: string[]; rounds: number; judge: string } =>
+        p.step === 'debate'
+    );
+
+    if (debateStep) {
+      // -----------------------------------------------------------------------
+      // Phase 2-debate: Multi-round debate
+      // -----------------------------------------------------------------------
+      const participants = debateStep.participants;
+      const numRounds = debateStep.rounds ?? 3;
+      const debateRounds: DebateRound[] = [];
+
+      // Each round: build positions map
+      let previousPositions: Record<string, string> = {};
+
+      for (let round = 1; round <= numRounds; round++) {
+        const roundPositions: Record<string, string> = {};
+
+        const roundResults = await Promise.all(
+          participants.map(async (participantName) => {
+            const participantAgent = loadAgent(participantName);
+            const participantSkills = participantAgent.skills.map((s) => loadSkill(s));
+
+            let debatePrompt: string;
+            if (round === 1) {
+              debatePrompt = userPrompt;
+            } else {
+              // Build context from previous round positions
+              const otherPositions = participants
+                .filter((p) => p !== participantName)
+                .map((p) => `### Position from ${p}:\n${previousPositions[p] ?? '(no position)'}`)
+                .join('\n\n');
+              debatePrompt =
+                `${userPrompt}\n\n---\n\n## Previous round positions (round ${round - 1}):\n\n${otherPositions}\n\n---\n\nUpdate your position in light of the above.`;
+            }
+
+            const result = await runOneAgent(participantAgent, debatePrompt, participantSkills);
+            return { participantName, result };
+          })
+        );
+
+        for (const { participantName, result } of roundResults) {
+          roundPositions[participantName] = result.output;
+          const rec: AgentCallRecord = {
+            agent: participantName,
+            model: result.model,
+            output: result.output,
+            tokens: result.tokens,
+          };
+          agentCalls.push(rec);
+          const stepName = `debate:round${round}:${participantName}`;
+          stepResults.push({ stepName, agentCallRecord: rec });
+          audit.log({
+            step: stepName,
+            agent: participantName,
+            model: result.model,
+            prompt: userPrompt,
+            output: result.output,
+            parent_step: parentStep,
+          });
+        }
+
+        debateRounds.push({ round, positions: roundPositions });
+        previousPositions = roundPositions;
+        parentStep = `debate:round${round}:${participants[participants.length - 1]}`;
+      }
+
+      // Judge synthesizes final verdict
+      const judgeAgent = loadAgent(debateStep.judge);
+      const judgeSkills = judgeAgent.skills.map((s) => loadSkill(s));
+      const transcriptText = debateRounds
+        .map((r) => {
+          const positionsText = Object.entries(r.positions)
+            .map(([agent, pos]) => `#### ${agent}:\n${pos}`)
+            .join('\n\n');
+          return `## Round ${r.round}\n\n${positionsText}`;
+        })
+        .join('\n\n');
+
+      const judgePrompt = `${userPrompt}\n\n---\n\n## Full debate transcript:\n\n${transcriptText}\n\n---\n\nWrite your verdict.`;
+      const judgeResult = await runOneAgent(judgeAgent, judgePrompt, judgeSkills);
+      deliverable = judgeResult.output;
+
+      const judgeRecord: AgentCallRecord = {
+        agent: judgeAgent.name,
+        model: judgeResult.model,
+        output: judgeResult.output,
+        tokens: judgeResult.tokens,
+      };
+      agentCalls.push(judgeRecord);
+      const judgeStepName = `debate:judge:${judgeAgent.name}`;
+      stepResults.push({ stepName: judgeStepName, agentCallRecord: judgeRecord });
+      audit.log({
+        step: judgeStepName,
+        agent: judgeAgent.name,
+        model: judgeResult.model,
+        prompt: judgePrompt,
+        output: judgeResult.output,
+        parent_step: parentStep,
+      });
+      parentStep = judgeStepName;
+
+      const branchRecord: BranchRecord = {
+        kind: 'debate',
+        rounds: debateRounds,
+        verdict: judgeResult.output,
+      };
+      branchRecords.push(branchRecord);
+      stepResults[stepResults.length - 1].branchRecord = branchRecord;
+
+    } else if (parallelStep) {
+      // -----------------------------------------------------------------------
+      // Phase 2-parallel: Run specialist N times in parallel at diverse temperatures
+      // -----------------------------------------------------------------------
+      const count = parallelStep.count ?? 3;
+      const temperatures = parallelStep.temperatures ?? [0.2, 0.7, 1.0];
+
+      const branchOutputs: BranchOutput[] = [];
+
+      const parallelResults = await Promise.all(
+        Array.from({ length: count }, (_, i) => {
+          const temp = temperatures[i] ?? temperatures[temperatures.length - 1];
+          return runOneAgent(specialist, userPrompt, skills, temp).then((result) => ({
+            index: i,
+            temperature: temp,
+            result,
+          }));
+        })
+      );
+
+      for (const { index, temperature, result } of parallelResults) {
+        branchOutputs.push({ agent: specialist.name, temperature, output: result.output });
+        const rec: AgentCallRecord = {
+          agent: specialist.name,
+          model: result.model,
+          output: result.output,
+          tokens: result.tokens,
+        };
+        agentCalls.push(rec);
+        const stepName = `parallel:${specialist.name}:branch${index + 1}`;
+        stepResults.push({ stepName, agentCallRecord: rec });
+        audit.log({
+          step: stepName,
+          agent: specialist.name,
+          model: result.model,
+          prompt: userPrompt,
+          output: result.output,
+          parent_step: parentStep,
+        });
+      }
+      parentStep = `parallel:${specialist.name}:branch${count}`;
+
+      // Use the first branch as deliverable until reconcile step runs
+      deliverable = parallelResults[0].result.output;
+
+      const parallelBranchRecord: BranchRecord = {
+        kind: 'parallel',
+        branches: branchOutputs,
+      };
+      branchRecords.push(parallelBranchRecord);
+      stepResults[stepResults.length - 1].branchRecord = parallelBranchRecord;
+
+      // -----------------------------------------------------------------------
+      // Phase 2-reconcile: Merge parallel outputs
+      // -----------------------------------------------------------------------
+      if (reconcileStep) {
+        const reconcilerAgent = loadAgent(reconcileStep.agent);
+        const reconcilerSkills = reconcilerAgent.skills.map((s) => loadSkill(s));
+
+        const labeledBlocks = branchOutputs
+          .map((b, i) => `### Output from ${b.agent} (branch ${i + 1}, temperature ${b.temperature}):\n${b.output}`)
+          .join('\n\n');
+
+        const reconcilePrompt =
+          `${userPrompt}\n\n---\n\n## Parallel specialist outputs to reconcile:\n\n${labeledBlocks}\n\n---\n\nSynthesize into a single merged deliverable.`;
+
+        const reconcileResult = await runOneAgent(reconcilerAgent, reconcilePrompt, reconcilerSkills);
+        deliverable = reconcileResult.output;
+        parallelBranchRecord.verdict = reconcileResult.output;
+
+        const reconcileRecord: AgentCallRecord = {
+          agent: reconcilerAgent.name,
+          model: reconcileResult.model,
+          output: reconcileResult.output,
+          tokens: reconcileResult.tokens,
+        };
+        agentCalls.push(reconcileRecord);
+        const reconcileStepName = `reconcile:${reconcilerAgent.name}`;
+        stepResults.push({ stepName: reconcileStepName, agentCallRecord: reconcileRecord });
+        audit.log({
+          step: reconcileStepName,
+          agent: reconcilerAgent.name,
+          model: reconcileResult.model,
+          prompt: reconcilePrompt,
+          output: reconcileResult.output,
+          parent_step: parentStep,
+        });
+        parentStep = reconcileStepName;
+      }
+
+    } else {
+      // -----------------------------------------------------------------------
+      // Phase 2-standard: Single specialist (existing behavior)
+      // -----------------------------------------------------------------------
+      let specialistResult = await runSpecialist();
+      deliverable = specialistResult.output;
+
+      let specialistRecord: AgentCallRecord = {
+        agent: specialist.name,
+        model: specialistResult.model,
+        output: specialistResult.output,
+        tokens: specialistResult.tokens,
+      };
+      agentCalls.push(specialistRecord);
+      const specialistStepName = `specialist:${specialist.name}`;
+      stepResults.push({
+        stepName: specialistStepName,
+        agentCallRecord: specialistRecord,
+      });
+
+      // Audit: log specialist call
+      audit.log({
+        step: specialistStepName,
+        agent: specialist.name,
+        model: specialistResult.model,
+        prompt: userPrompt,
+        output: specialistResult.output,
+        parent_step: parentStep,
+      });
+      parentStep = specialistStepName;
+
+    }
 
     // -----------------------------------------------------------------------
     // Phase 3: Tests
@@ -311,22 +537,22 @@ export async function runPipeline(
           });
 
           if (action.action === 'retry_with') {
-            // Re-run specialist with better model
+            // Re-run specialist with better model (only for standard single-specialist path)
             const retryModel = action.model;
             const retryResult = await runSpecialist(retryModel);
             deliverable = retryResult.output;
 
-            specialistRecord = {
+            const retryRecord: AgentCallRecord = {
               agent: specialist.name,
               model: retryResult.model,
               output: retryResult.output,
               tokens: retryResult.tokens,
             };
-            agentCalls.push(specialistRecord);
+            agentCalls.push(retryRecord);
             const retryStepName = `specialist:${specialist.name}:retry`;
             stepResults.push({
               stepName: retryStepName,
-              agentCallRecord: specialistRecord,
+              agentCallRecord: retryRecord,
             });
 
             audit.log({
@@ -378,6 +604,7 @@ export async function runPipeline(
                 testResults,
                 guardrailResults,
                 auditLogPath: audit.path,
+                branches: branchRecords,
               });
             }
           } else if (action.action === 'escalate_to') {
@@ -393,6 +620,7 @@ export async function runPipeline(
               testResults,
               guardrailResults,
               auditLogPath: audit.path,
+              branches: branchRecords,
             });
           }
         }
@@ -452,6 +680,7 @@ export async function runPipeline(
             testResults,
             guardrailResults,
             auditLogPath: audit.path,
+            branches: branchRecords,
           });
         }
       }
@@ -470,6 +699,7 @@ export async function runPipeline(
       testResults,
       guardrailResults,
       auditLogPath: audit.path,
+      branches: branchRecords,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -488,6 +718,7 @@ export async function runPipeline(
       testResults,
       guardrailResults,
       auditLogPath: audit.path,
+      branches: branchRecords,
     });
   }
 }
@@ -507,6 +738,7 @@ interface BuildReportArgs {
   testResults: { name: string; result: TestResult }[];
   guardrailResults: { name: string; result: GuardrailResult }[];
   auditLogPath: string;
+  branches?: BranchRecord[];
 }
 
 function computeCost(steps: RunStepResult[], agentCalls: AgentCallRecord[]): CostBreakdown {
@@ -565,5 +797,6 @@ function buildReport(args: BuildReportArgs): RunReport {
   };
   if (args.status === 'escalated') report.escalationReason = args.escalationOrError;
   if (args.status === 'error') report.error = args.escalationOrError;
+  if (args.branches && args.branches.length > 0) report.branches = args.branches;
   return report;
 }

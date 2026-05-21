@@ -1,0 +1,16 @@
+name: stress-test
+description: "Adversarial debate workflow. nda-drafter and risk-spotter argue 3 rounds; debate-judge writes the verdict and risks."
+router: chief-counsel
+pipeline:
+  - step: route
+    agent: chief-counsel
+  - step: route
+    agent: <determined-by-previous-step>
+  - step: debate
+    participants: [nda-drafter, risk-spotter]
+    rounds: 3
+    judge: debate-judge
+  - step: guardrail
+    suite: [signed-document]
+on_test_failure: retry_with_better_model_then_escalate
+on_guardrail_hit: escalate_to_human

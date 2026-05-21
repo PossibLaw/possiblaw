@@ -3,10 +3,11 @@
  * PossibLaw v2 — CLI entry point.
  */
 import { readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync, renameSync, readdirSync, statSync } from 'node:fs';
+import { createInterface } from 'node:readline';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
-import { loadWorkflow, loadTemplate, loadAgent, listAgentNames, listCustomAgentNames, REPO_ROOT } from './loader.js';
+import { loadWorkflow, loadTemplate, loadAgent, listAgentNames, listCustomAgentNames, listWorkflowNames, REPO_ROOT } from './loader.js';
 import { runPipeline } from './pipeline.js';
 import {
   printBanner,
@@ -872,9 +873,176 @@ teamCmd
   });
 
 // ---------------------------------------------------------------------------
-// possiblaw workflows show <name>
+// possiblaw workflows list / show / pick
 // ---------------------------------------------------------------------------
 const workflowsCmd = program.command('workflows').description('Workflow commands');
+
+/**
+ * Build a compact pipeline shape summary string, e.g.
+ * "router → 3 parallel → reconcile → tests"
+ */
+function pipelineShapeSummary(workflow: import('./types.js').Workflow): string {
+  const parts: string[] = ['router'];
+  for (const step of workflow.pipeline) {
+    if (step.step === 'parallel') {
+      parts.push(`${step.count}× parallel`);
+    } else if (step.step === 'reconcile') {
+      parts.push('reconcile');
+    } else if (step.step === 'debate') {
+      parts.push(`debate(${step.participants.length}p, ${step.rounds}r)`);
+    } else if (step.step === 'specialist') {
+      parts.push('specialist');
+    } else if (step.step === 'test') {
+      if (step.suite.length > 0) parts.push('tests');
+    } else if (step.step === 'guardrail') {
+      if (step.suite.length > 0) parts.push('guardrails');
+    }
+    // skip route steps — already captured by "router" prefix
+  }
+  return parts.join(' → ');
+}
+
+/** Resolve the router chain and parallel/debate agents for cost estimation. */
+function resolveAgentsForCost(workflow: import('./types.js').Workflow): {
+  routerCalls: Array<{ agent: string; model: string }>;
+  specialistCalls: Array<{ agent: string; model: string }>;
+  testCalls: Array<{ agent: string; model: string }>;
+  guardrailCalls: Array<{ agent: string; model: string }>;
+} {
+  const routerCalls: Array<{ agent: string; model: string }> = [];
+  const specialistCalls: Array<{ agent: string; model: string }> = [];
+  const testCalls: Array<{ agent: string; model: string }> = [];
+  const guardrailCalls: Array<{ agent: string; model: string }> = [];
+
+  const visited = new Set<string>();
+  let currentName = workflow.router;
+  let hops = 0;
+  let resolvedSpecialistName: string | null = null;
+
+  while (hops < 5) {
+    hops++;
+    if (visited.has(currentName)) break;
+    visited.add(currentName);
+    try {
+      const a = loadAgent(currentName);
+      if (a.role === 'specialist') {
+        resolvedSpecialistName = a.name;
+        specialistCalls.push({ agent: a.name, model: a.model });
+        break;
+      } else {
+        routerCalls.push({ agent: a.name, model: a.model });
+        if (a.manages.length > 0) {
+          currentName = a.manages[0];
+        } else {
+          break;
+        }
+      }
+    } catch {
+      break;
+    }
+  }
+
+  // For parallel: multiply specialist by branch count
+  const parallelStep = workflow.pipeline.find(
+    (p): p is { step: 'parallel'; count: number; temperatures: number[]; resolved_by: string } =>
+      p.step === 'parallel'
+  );
+  if (parallelStep && resolvedSpecialistName) {
+    // We already pushed one specialistCall above; add the rest
+    for (let i = 1; i < parallelStep.count; i++) {
+      const a = loadAgent(resolvedSpecialistName);
+      specialistCalls.push({ agent: a.name, model: a.model });
+    }
+    // Add reconciler
+    const reconcileStep = workflow.pipeline.find(
+      (p): p is { step: 'reconcile'; agent: string } => p.step === 'reconcile'
+    );
+    if (reconcileStep) {
+      try {
+        const rec = loadAgent(reconcileStep.agent);
+        specialistCalls.push({ agent: rec.name, model: rec.model });
+      } catch { /* skip */ }
+    }
+  }
+
+  // For debate: add all participants + judge
+  const debateStep = workflow.pipeline.find(
+    (p): p is { step: 'debate'; participants: string[]; rounds: number; judge: string } =>
+      p.step === 'debate'
+  );
+  if (debateStep) {
+    const rounds = debateStep.rounds ?? 3;
+    for (const p of debateStep.participants) {
+      try {
+        const pa = loadAgent(p);
+        // Each participant runs `rounds` times
+        for (let r = 0; r < rounds; r++) {
+          specialistCalls.push({ agent: pa.name, model: pa.model });
+        }
+      } catch { /* skip */ }
+    }
+    try {
+      const judgeAgent = loadAgent(debateStep.judge);
+      specialistCalls.push({ agent: judgeAgent.name, model: judgeAgent.model });
+    } catch { /* skip */ }
+  }
+
+  const testStep = workflow.pipeline.find(
+    (p): p is { step: 'test'; suite: string[] } => p.step === 'test'
+  );
+  if (testStep) {
+    for (const t of testStep.suite) {
+      testCalls.push({ agent: `test:${t}`, model: 'stub' });
+    }
+  }
+
+  const guardrailStep = workflow.pipeline.find(
+    (p): p is { step: 'guardrail'; suite: string[] } => p.step === 'guardrail'
+  );
+  if (guardrailStep) {
+    for (const g of guardrailStep.suite) {
+      guardrailCalls.push({ agent: `guardrail:${g}`, model: 'rule-based' });
+    }
+  }
+
+  return { routerCalls, specialistCalls, testCalls, guardrailCalls };
+}
+
+workflowsCmd
+  .command('list')
+  .description('List all workflows with shape summary and estimated cost')
+  .option('--no-color', 'Disable ANSI colour output')
+  .action((opts: { color: boolean }) => {
+    try {
+      const names = listWorkflowNames();
+      console.log('');
+      console.log(
+        `${'NAME'.padEnd(30)} ${'SHAPE'.padEnd(42)} ${'EST. COST'}`
+      );
+      console.log('-'.repeat(85));
+
+      for (const name of names) {
+        try {
+          const wf = loadWorkflow(name);
+          const shape = pipelineShapeSummary(wf);
+          const { routerCalls, specialistCalls, testCalls, guardrailCalls } = resolveAgentsForCost(wf);
+          const cost = estimateWorkflowCost(routerCalls, specialistCalls, testCalls, guardrailCalls);
+          const costStr = formatCost(cost.total);
+          console.log(`${name.padEnd(30)} ${shape.padEnd(42)} ${costStr}`);
+        } catch {
+          console.log(`${name.padEnd(30)} ${'(could not load)'.padEnd(42)} -`);
+        }
+      }
+      console.log('');
+      console.log(`Total: ${names.length} workflows`);
+      console.log('');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+    void opts;
+  });
 
 workflowsCmd
   .command('show')
@@ -889,6 +1057,7 @@ workflowsCmd
       console.log(`Workflow: ${workflow.name}`);
       console.log(`Description: ${workflow.description}`);
       console.log(`Router: ${workflow.router}`);
+      console.log(`Shape: ${pipelineShapeSummary(workflow)}`);
       console.log('');
       console.log('Pipeline steps:');
       for (const step of workflow.pipeline) {
@@ -900,65 +1069,16 @@ workflowsCmd
           console.log(`  test       → [${step.suite.join(', ')}]`);
         } else if (step.step === 'guardrail') {
           console.log(`  guardrail  → [${step.suite.join(', ')}]`);
+        } else if (step.step === 'parallel') {
+          console.log(`  parallel   → ${step.count}× specialist (temps: ${step.temperatures.join(', ')})`);
+        } else if (step.step === 'reconcile') {
+          console.log(`  reconcile  → ${step.agent}`);
+        } else if (step.step === 'debate') {
+          console.log(`  debate     → [${step.participants.join(', ')}] × ${step.rounds} rounds, judge: ${step.judge}`);
         }
       }
 
-      // Resolve the router chain for cost estimation
-      // We enumerate what agents are typically involved:
-      //   - Start at workflow.router and follow the chain until we hit specialists
-      //   - Use typical token assumptions
-      const routerCalls: Array<{ agent: string; model: string }> = [];
-      const specialistCalls: Array<{ agent: string; model: string }> = [];
-      const testCalls: Array<{ agent: string; model: string }> = [];
-      const guardrailCalls: Array<{ agent: string; model: string }> = [];
-
-      // Walk pipeline: route steps use router model, specialist step uses specialist model
-      // We must load agents to get their effective models
-      const visited = new Set<string>();
-      let currentName = workflow.router;
-      let hops = 0;
-      while (hops < 5) {
-        hops++;
-        if (visited.has(currentName)) break;
-        visited.add(currentName);
-        try {
-          const a = loadAgent(currentName);
-          if (a.role === 'specialist') {
-            specialistCalls.push({ agent: a.name, model: a.model });
-            break;
-          } else {
-            routerCalls.push({ agent: a.name, model: a.model });
-            // Try to follow the first managed agent
-            if (a.manages.length > 0) {
-              currentName = a.manages[0];
-            } else {
-              break;
-            }
-          }
-        } catch {
-          break;
-        }
-      }
-
-      // Test suite entries (use a stub model)
-      const testStep = workflow.pipeline.find(
-        (p): p is { step: 'test'; suite: string[] } => p.step === 'test'
-      );
-      if (testStep) {
-        for (const t of testStep.suite) {
-          testCalls.push({ agent: `test:${t}`, model: 'stub' });
-        }
-      }
-
-      const guardrailStep = workflow.pipeline.find(
-        (p): p is { step: 'guardrail'; suite: string[] } => p.step === 'guardrail'
-      );
-      if (guardrailStep) {
-        for (const g of guardrailStep.suite) {
-          guardrailCalls.push({ agent: `guardrail:${g}`, model: 'rule-based' });
-        }
-      }
-
+      const { routerCalls, specialistCalls, testCalls, guardrailCalls } = resolveAgentsForCost(workflow);
       const cost = estimateWorkflowCost(routerCalls, specialistCalls, testCalls, guardrailCalls);
 
       console.log('');
@@ -974,6 +1094,48 @@ workflowsCmd
       console.log('Estimated typical cost per run:');
       printCostReport(cost, { color: opts.color });
       console.log('');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+workflowsCmd
+  .command('pick')
+  .description('Interactive workflow picker — lists workflows, accepts a number, returns name')
+  .action(async () => {
+    try {
+      const names = listWorkflowNames();
+      console.log('');
+      console.log('Available workflows:');
+      names.forEach((name, i) => {
+        try {
+          const wf = loadWorkflow(name);
+          console.log(`  ${String(i + 1).padStart(2)}. ${name.padEnd(30)} ${wf.description}`);
+        } catch {
+          console.log(`  ${String(i + 1).padStart(2)}. ${name}`);
+        }
+      });
+      console.log('');
+
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await new Promise<string>((resolve) => {
+        rl.question('Enter number: ', (ans) => {
+          rl.close();
+          resolve(ans.trim());
+        });
+      });
+
+      const idx = parseInt(answer, 10) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= names.length) {
+        console.error(`Invalid selection: ${answer}`);
+        process.exit(1);
+      }
+
+      const chosen = names[idx];
+      console.log(`\nSelected: ${chosen}`);
+      process.exit(0);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`\nError: ${message}`);

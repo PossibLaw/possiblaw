@@ -307,4 +307,74 @@ node dist/cli/index.js connectors capabilities imanage
 
 # 5. View connector inventory (live + deferred v1 targets)
 # See docs/connectors-inventory.md for Clio, Slack, Google Workspace, M365, etc.
+
+---
+
+## Demo 8 — Workflow library (Sprint 8)
+
+Sprint 8 adds 5 new workflows (9 total), 3 meta-agents, and the `workflows list/show/pick` CLI surface.
+
+### 8a. List all workflows
+
+```bash
+node dist/cli/index.js workflows list
+```
+
+Prints a table of 9 workflows with shape summary and estimated live cost.
+
+### 8b. Show deep-review shape and cost
+
+```bash
+node dist/cli/index.js workflows show deep-review
+```
+
+Shows: router → 3× parallel (temps 0.2/0.7/1.0) → reconcile → tests → guardrails. Cost multiplied by 3 parallel branches.
+
+### 8c. Deep Review — high-stakes NDA with parallel synthesis
+
+```bash
+env -u ANTHROPIC_API_KEY node dist/cli/index.js run deep-review \
+  "draft NDA for ACME Corp and Beta Corp for software evaluation"
+```
+
+Three parallel `nda-drafter` branches at diverse temperatures → `reconciler` synthesizes → `## Reconciliation notes` in output.
+
+### 8d. Stress Test — adversarial debate
+
+```bash
+env -u ANTHROPIC_API_KEY node dist/cli/index.js run stress-test \
+  "review NDA for ACME Corp for hidden risks"
+```
+
+`nda-drafter` defends; `risk-spotter` attacks; 3 rounds; `debate-judge` issues verdict + dissent + risks.
+
+### 8e. Roundtable — cross-surface
+
+```bash
+env -u ANTHROPIC_API_KEY node dist/cli/index.js run roundtable \
+  "review NDA for ACME Corp from legal, finance, and marketing perspectives"
+```
+
+Legal (`nda-drafter`) + Finance (`billing-prep`) + Marketing (`pitch-polisher`) debate 3 rounds.
+
+### 8f. Per-surface variants
+
+```bash
+# Quick pitch polish
+env -u ANTHROPIC_API_KEY node dist/cli/index.js run quick-pitch-polish \
+  "polish this pitch: Our firm has 30 years of experience in commercial litigation."
+
+# Quick expense categorize
+env -u ANTHROPIC_API_KEY node dist/cli/index.js run quick-expense-categorize \
+  "categorize: Nobu dinner $245, Uber to courthouse $42, Westlaw research $180"
+```
+
+### 8g. Interactive picker
+
+```bash
+node dist/cli/index.js workflows pick
+# Lists numbered workflows → type a number → returns chosen name
+```
+
+Full walkthrough: `docs/sprint-8-demo.md`.
 ```

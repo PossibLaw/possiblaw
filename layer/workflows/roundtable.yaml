@@ -1,0 +1,14 @@
+name: roundtable
+description: "Cross-surface debate. Legal, finance, and marketing specialists each review the same matter from their domain perspective; debate-judge synthesizes."
+router: chief-of-staff
+pipeline:
+  - step: route
+    agent: chief-of-staff
+  - step: debate
+    participants: [nda-drafter, billing-prep, pitch-polisher]
+    rounds: 3
+    judge: debate-judge
+  - step: guardrail
+    suite: [signed-document]
+on_test_failure: retry_with_better_model_then_escalate
+on_guardrail_hit: escalate_to_human

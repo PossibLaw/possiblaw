@@ -32,7 +32,39 @@ export type PipelineStep =
   | { step: 'route'; agent: string }
   | { step: 'specialist'; agent: string }
   | { step: 'test'; suite: string[] }
-  | { step: 'guardrail'; suite: string[] };
+  | { step: 'guardrail'; suite: string[] }
+  | { step: 'parallel'; count: number; temperatures: number[]; resolved_by: string }
+  | { step: 'reconcile'; agent: string }
+  | { step: 'debate'; participants: string[]; rounds: number; judge: string };
+
+// ---------------------------------------------------------------------------
+// Sprint 8 — Branch record types
+// ---------------------------------------------------------------------------
+
+export interface BranchOutput {
+  /** Agent name that produced this branch output. */
+  agent: string;
+  /** Temperature used for this branch (0–1). */
+  temperature: number;
+  /** The output text. */
+  output: string;
+}
+
+export interface DebateRound {
+  round: number;
+  /** Keyed by participant agent name. */
+  positions: Record<string, string>;
+}
+
+export interface BranchRecord {
+  kind: 'parallel' | 'debate';
+  /** For parallel: collected per-branch outputs. */
+  branches?: BranchOutput[];
+  /** For debate: transcript of all rounds. */
+  rounds?: DebateRound[];
+  /** Final judge output (debate) or reconciler output (parallel). */
+  verdict?: string;
+}
 
 export interface Template {
   name: string;
@@ -189,6 +221,8 @@ export interface RunStepResult {
   guardrailName?: string;
   guardrailHit?: boolean;
   escalationReason?: string;
+  /** Sprint 8: branch data for parallel/debate steps. */
+  branchRecord?: BranchRecord;
 }
 
 export interface RunReport {
@@ -204,6 +238,8 @@ export interface RunReport {
   guardrail_results: { name: string; result: GuardrailResult }[];
   audit_log_path: string;
   cost?: import('./pricing.js').CostBreakdown;
+  /** Sprint 8: per-step branch data (parallel outputs, debate transcripts). */
+  branches?: BranchRecord[];
 }
 
 export interface RunContext {

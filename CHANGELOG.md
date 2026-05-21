@@ -9,6 +9,43 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Sprint 8 — Workflow library (Deep Review, Stress Test, Roundtable + per-surface variants + CLI workflow picker)
+
+- **`cli/types.ts`** — Extended `PipelineStep` union with three new step kinds:
+  - `parallel: { count, temperatures, resolved_by }` — N-branch parallel specialist dispatch
+  - `reconcile: { agent }` — merge N parallel outputs into a single deliverable
+  - `debate: { participants, rounds, judge }` — multi-round adversarial exchange + judge verdict
+  - New types: `BranchOutput`, `DebateRound`, `BranchRecord`. `RunReport` extended with `branches?: BranchRecord[]`. `RunStepResult` extended with `branchRecord?: BranchRecord`.
+- **`cli/anthropic.ts`** — `RunAgentOpts` extended with optional `temperature?: number`; passed to Anthropic API via spread. `offlineFixture()` now handles `reconciler`, `risk-spotter`, and `debate-judge` with realistic multi-paragraph stubs. `marketingLeadRoute()` added: routes to `pitch-polisher` for pitch/polish/deck/proposal prompts, `intake-form-drafter` otherwise.
+- **`cli/pipeline.ts`** — Major extension:
+  - Refactored Phase 2 into `runOneAgent()` (accepts temperature) + `runSpecialist()` wrapper.
+  - New parallel branch: detects `parallel` step, dispatches specialist N times with `Promise.all` and diverse temperatures; collects `BranchOutput[]`.
+  - New reconcile branch: formats labeled blocks, calls reconciler agent, sets deliverable.
+  - New debate branch: multi-round round-robin; each participant sees all other positions from prior round; judge synthesizes verdict.
+  - All `buildReport()` calls updated to pass `branches: branchRecords`.
+- **`cli/loader.ts`** — `listWorkflowNames()` helper added (returns sorted list from `layer/workflows/`).
+- **`cli/index.ts`** — `workflows` subcommands expanded:
+  - `workflows list` — table: name, shape summary, estimated cost for all 9 workflows.
+  - `workflows show <name>` — updated to render `parallel`, `reconcile`, `debate` step kinds; uses new `resolveAgentsForCost()` helper that multiplies specialist calls for parallel/debate shapes.
+  - `workflows pick` — interactive numbered picker via `readline`; prints name and exits.
+- **Meta-agents** (workflow primitives, not domain specialists):
+  - `layer/agents/specialists/legal/_meta/reconciler.md` — model `claude-opus-4-7`. Merges N labeled blocks; required `## Reconciliation notes` section.
+  - `layer/agents/specialists/legal/_meta/debate-judge.md` — model `claude-opus-4-7`. Verdict + Dissent + Risks structure.
+  - `layer/agents/specialists/legal/_meta/risk-spotter.md` — model `claude-sonnet-4-6`. Adversarial worst-case scenarios, missing clauses, ambiguous language.
+- **New cross-surface workflows:**
+  - `layer/workflows/deep-review.yaml` — router → 3× parallel (temps 0.2/0.7/1.0) → reconcile → tests → guardrails.
+  - `layer/workflows/stress-test.yaml` — router → debate(nda-drafter + risk-spotter, 3 rounds, judge: debate-judge) → guardrails.
+  - `layer/workflows/roundtable.yaml` — router → debate(nda-drafter + billing-prep + pitch-polisher, 3 rounds, judge: debate-judge) → guardrails.
+- **New per-surface variants:**
+  - `layer/workflows/quick-pitch-polish.yaml` — chief-of-staff → marketing-lead → pitch-polisher → tests.
+  - `layer/workflows/quick-expense-categorize.yaml` — chief-of-staff → finance-lead → expense-categorizer → no tests.
+- **Docs:**
+  - `docs/workflows.md` (new) — workflow schema reference: all 7 step kinds, meta-agent catalog, workflow catalog, extension guide.
+  - `docs/sprint-8-demo.md` (new) — end-to-end demo: all 4 cross-surface workflows on the same NDA prompt, comparison table.
+  - `docs/DEMO-SCRIPT.md` — "Workflow library" section appended.
+
+---
+
 ### Sprint 7 — Roster customization (team add/remove/rename/export/diff + customize-your-team guide)
 
 - **`cli/template-overrides.ts`** — New module: `.possiblaw/template-overrides.yaml` read/write. `addToTemplateRoster()`, `removeFromTemplateRoster()`, `renameInTemplateOverrides()`, `applyRosterOverrides()`. Schema: `templates.<name>.roster.<section>.add/remove` lists.

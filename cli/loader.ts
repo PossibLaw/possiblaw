@@ -122,6 +122,19 @@ export function loadWorkflow(name: string): Workflow {
   return data;
 }
 
+/** Return all workflow names found in layer/workflows/ (by filename, without extension). */
+export function listWorkflowNames(): string[] {
+  const workflowsDir = join(REPO_ROOT, 'layer', 'workflows');
+  const candidates = findFiles(workflowsDir, (p) => p.endsWith('.yaml') || p.endsWith('.yml'));
+  const names: string[] = [];
+  for (const filePath of candidates) {
+    const base = filePath.replace(/\.ya?ml$/, '');
+    const name = base.split('/').pop();
+    if (name) names.push(name);
+  }
+  return names.sort();
+}
+
 export function loadTemplate(name: string): Template {
   const filePath = join(REPO_ROOT, 'layer', 'templates', `${name}.yaml`);
   if (!existsSync(filePath)) {

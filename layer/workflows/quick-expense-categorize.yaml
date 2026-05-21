@@ -1,0 +1,14 @@
+name: quick-expense-categorize
+description: "Categorize a list of expenses — routes through Chief of Staff to Finance Lead to expense-categorizer specialist. No tests (categorization task)."
+router: chief-of-staff
+pipeline:
+  - step: route
+    agent: chief-of-staff
+  - step: route
+    agent: <determined-by-previous-step>
+  - step: specialist
+    agent: <determined-by-router-chain>
+  - step: guardrail
+    suite: []
+on_test_failure: retry_with_better_model_then_escalate
+on_guardrail_hit: escalate_to_human
