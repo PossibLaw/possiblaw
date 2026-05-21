@@ -9,6 +9,27 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Sprint 7 — Roster customization (team add/remove/rename/export/diff + customize-your-team guide)
+
+- **`cli/template-overrides.ts`** — New module: `.possiblaw/template-overrides.yaml` read/write. `addToTemplateRoster()`, `removeFromTemplateRoster()`, `renameInTemplateOverrides()`, `applyRosterOverrides()`. Schema: `templates.<name>.roster.<section>.add/remove` lists.
+- **`cli/loader.ts`** — `loadAgent()` now searches `.possiblaw/custom-agents/` before `layer/agents/` (custom agents shadow layer agents on name collision). `loadTemplate()` applies `applyRosterOverrides()` overlay. `listAgentNames()` merges both directories. New `listCustomAgentNames()` helper.
+- **`cli/anthropic.ts`** — `offlineFixture()` fallback returns `[OFFLINE STUB FOR <name>]` for any unrecognized agent (dynamic stub pattern; works for all future custom agents). `commercialLeadRoute()` added for content-based routing to employment/handbook specialists offline.
+- **`cli/index.ts`** — New team subcommands:
+  - `possiblaw team add specialist <domain/name> --lead <lead> [--template <t>]` — scaffolds `.possiblaw/custom-agents/<name>.md` + patches `template-overrides.yaml`.
+  - `possiblaw team add lead <domain/name> --router <router> [--template <t>]` — same pattern for lead agents.
+  - `possiblaw team add router <name> [--template <t>]` — same pattern for router agents.
+  - `possiblaw team remove <name> [--template <t>]` — removes from roster; preserves custom-agent file; refuses if another agent's `manages` list references the target.
+  - `possiblaw team rename <old> <new>` — renames file + frontmatter `name:` + refs in `template-overrides.yaml` and `overrides.yaml`; custom agents only.
+  - `possiblaw team list --diff` — shows added/removed vs. base template.
+  - `possiblaw team export <template> --output <path>` — full effective snapshot YAML (roster, per-agent frontmatter with overrides applied, custom_agents list, overrides_applied log).
+  - `possiblaw team diff <a> <b>` — structured diff: routers/leads/specialists added/removed, per-agent model changes, workflows added/removed.
+- **`.possiblaw/custom-agents/employee-handbook-drafter.md`** — Demo custom specialist created via Sprint 7 `team add` workflow; real system prompt filled in (PTO policy focus, US federal defaults, required disclaimer).
+- **`.possiblaw/template-overrides.yaml`** — Sprint 7 demo state: `employee-handbook-drafter` added to `small-firm.specialists`.
+- **`docs/customize-your-team.md`** — Non-engineer-facing guide: concepts in 30 seconds, 6 common-task recipes with copy-paste CLI examples, full frontmatter cheat-sheet, recovery instructions, what-you-can't-do-yet list.
+- **`docs/sprint-7-demo.md`** — End-to-end Sprint 7 demo walkthrough: add specialist, fill in prompt, verify roster, run offline, export, remove.
+
+---
+
 ### Sprint 6B — Live adapters for remaining named connectors + v1 inventory
 
 - **Legal enterprise connectors** (paid tier, HTTP-only adapters):

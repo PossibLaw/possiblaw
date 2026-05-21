@@ -57,8 +57,6 @@ function chiefOfStaffRoute(userPrompt: string): string {
 const OFFLINE_FIXTURES: Record<string, string> = {
   'chief-counsel':
     'ROUTE_TO: commercial-lead\nRationale: Operator requests an NDA, which is a commercial matter.',
-  'commercial-lead':
-    'ROUTE_TO: nda-drafter\nRationale: NDA draft is the nda-drafter\'s core competency.',
   'marketing-lead':
     'ROUTE_TO: intake-form-drafter\nRationale: Operator needs a new client intake questionnaire; routing to intake-form-drafter.',
   'finance-lead':
@@ -66,6 +64,21 @@ const OFFLINE_FIXTURES: Record<string, string> = {
   'admin-lead':
     'ROUTE_TO: calendar-coordinator\nRationale: Scheduling request — routing to calendar-coordinator.',
 };
+
+/** Returns the commercial-lead routing decision based on the prompt content. */
+function commercialLeadRoute(userPrompt: string): string {
+  const lower = userPrompt.toLowerCase();
+  if (
+    lower.includes('employee handbook') ||
+    lower.includes('handbook section') ||
+    lower.includes('pto policy') ||
+    lower.includes('time off policy') ||
+    lower.includes('employment policy')
+  ) {
+    return 'ROUTE_TO: employee-handbook-drafter\nRationale: Operator requests an employee handbook section; routing to employee-handbook-drafter.';
+  }
+  return 'ROUTE_TO: nda-drafter\nRationale: NDA draft is the nda-drafter\'s core competency.';
+}
 
 function loadFixtureFile(name: string): string {
   const fixturePath = join(__dirname, 'fixtures', name);
@@ -80,6 +93,10 @@ function offlineFixture(agentName: string, userPrompt: string): string {
   // Chief of Staff: route based on prompt content
   if (agentName === 'chief-of-staff') {
     return chiefOfStaffRoute(userPrompt);
+  }
+  // Commercial Lead: route based on prompt content (supports custom specialists)
+  if (agentName === 'commercial-lead') {
+    return commercialLeadRoute(userPrompt);
   }
   if (agentName in OFFLINE_FIXTURES) {
     return OFFLINE_FIXTURES[agentName];
@@ -99,7 +116,8 @@ function offlineFixture(agentName: string, userPrompt: string): string {
     case 'calendar-coordinator':
       return loadFixtureFile('calendar-coordinator-fixture.md');
     default:
-      return `[OFFLINE STUB for ${agentName}]`;
+      // Dynamic stub: works for any custom agent added via `team add`
+      return `[OFFLINE STUB FOR ${agentName}] — fill in .possiblaw/custom-agents/${agentName}.md to get real output.`;
   }
 }
 

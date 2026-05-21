@@ -2,11 +2,11 @@
 /**
  * PossibLaw v2 — CLI entry point.
  */
-import { readFileSync, existsSync, appendFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync, renameSync, readdirSync, statSync } from 'node:fs';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
-import { loadWorkflow, loadTemplate, loadAgent, listAgentNames, REPO_ROOT } from './loader.js';
+import { loadWorkflow, loadTemplate, loadAgent, listAgentNames, listCustomAgentNames, REPO_ROOT } from './loader.js';
 import { runPipeline } from './pipeline.js';
 import {
   printBanner,
@@ -21,6 +21,15 @@ import { loadKeyStore } from './privacy-filter.js';
 import { writeOverride, getEffectiveModel, loadOverrides } from './overrides.js';
 import { estimateWorkflowCost, formatCost } from './pricing.js';
 import { listConnectors, getConnector } from './connectors/index.js';
+import {
+  addToTemplateRoster,
+  removeFromTemplateRoster,
+  renameInTemplateOverrides,
+  loadTemplateOverrides,
+  applyRosterOverrides,
+} from './template-overrides.js';
+import matter from 'gray-matter';
+import yaml from 'js-yaml';
 
 // ---------------------------------------------------------------------------
 // Version from package.json
@@ -120,13 +129,14 @@ teamCmd
   .command('list')
   .description('List agents in the active template')
   .option('-t, --template <name>', 'Template to inspect', 'solo-lawyer')
+  .option('--diff', 'Show what differs from the base template (before overrides)', false)
   .option('--no-color', 'Disable ANSI colour output')
-  .action((opts: { template: string; color: boolean }) => {
+  .action((opts: { template: string; diff: boolean; color: boolean }) => {
     const printerOpts = { color: opts.color };
     printBanner(printerOpts);
 
     try {
-      const template = loadTemplate(opts.template);
+      const template = loadTemplate(opts.template); // effective (with overrides applied)
       const allNames = [
         ...template.roster.routers,
         ...template.roster.leads,
@@ -139,6 +149,36 @@ teamCmd
       });
 
       printTeamList(agents, opts.template, printerOpts);
+
+      if (opts.diff) {
+        // Load the base template (no overrides) by reading the file directly
+        const baseFilePath = join(REPO_ROOT, 'layer', 'templates', `${opts.template}.yaml`);
+        if (!existsSync(baseFilePath)) {
+          console.log('\n(no base template found for diff)');
+        } else {
+          const baseRaw = yaml.load(readFileSync(baseFilePath, 'utf8')) as { roster: { routers: string[]; leads: string[]; specialists: string[] } };
+          const baseNames = new Set([
+            ...baseRaw.roster.routers,
+            ...baseRaw.roster.leads,
+            ...baseRaw.roster.specialists,
+          ]);
+          const effectiveNames = new Set(allNames);
+          const added = allNames.filter((n) => !baseNames.has(n));
+          const removed = [...baseNames].filter((n) => !effectiveNames.has(n));
+
+          if (added.length === 0 && removed.length === 0) {
+            console.log('\n(no differences from base template)');
+          } else {
+            console.log('\nDiff from base template:');
+            for (const n of added) {
+              console.log(`  + ${n}  (added via .possiblaw/template-overrides.yaml)`);
+            }
+            for (const n of removed) {
+              console.log(`  - ${n}  (removed via .possiblaw/template-overrides.yaml)`);
+            }
+          }
+        }
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`\nError: ${message}`);
@@ -221,6 +261,609 @@ teamCmd
       } else {
         console.log(`(no override — using agent default)`);
       }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// team add specialist|lead|router <domain>/<name> [--lead <lead>]
+//                                                  [--template <template>]
+// ---------------------------------------------------------------------------
+const teamAddCmd = teamCmd.command('add').description('Add a new agent to the roster');
+
+teamAddCmd
+  .command('specialist <path>')
+  .description('Add a custom specialist agent. Path format: <domain>/<name> or <domain>/<subdomain>/<name>')
+  .option('--lead <lead>', 'Lead this specialist reports to (required)')
+  .option('-t, --template <name>', 'Template to add the specialist to', 'small-firm')
+  .action((agentPath: string, opts: { lead?: string; template: string }) => {
+    try {
+      const parts = agentPath.split('/');
+      const name = parts[parts.length - 1];
+      const domain = parts[0] as 'legal' | 'marketing' | 'finance' | 'admin' | 'ops';
+
+      if (!name) {
+        console.error('Error: Agent path must be in format <domain>/<name> or <domain>/<subdomain>/<name>');
+        process.exit(1);
+      }
+
+      if (!opts.lead) {
+        console.error('Error: --lead <lead> is required for specialists.');
+        process.exit(1);
+      }
+
+      // Verify the lead exists
+      const knownAgents = listAgentNames();
+      if (!knownAgents.includes(opts.lead)) {
+        console.error(`Error: Lead '${opts.lead}' not found. Known agents: ${knownAgents.join(', ')}`);
+        process.exit(1);
+      }
+
+      // Check the lead is actually a lead role
+      const leadAgent = loadAgent(opts.lead);
+      if (leadAgent.role !== 'lead') {
+        console.error(`Error: '${opts.lead}' has role '${leadAgent.role}', not 'lead'.`);
+        process.exit(1);
+      }
+
+      // Check no collision
+      if (knownAgents.includes(name)) {
+        console.error(`Error: Agent '${name}' already exists. Choose a different name or use 'team rename'.`);
+        process.exit(1);
+      }
+
+      // Create .possiblaw/custom-agents/ directory if needed
+      const customDir = join(REPO_ROOT, '.possiblaw', 'custom-agents');
+      if (!existsSync(customDir)) {
+        mkdirSync(customDir, { recursive: true });
+      }
+
+      const filePath = join(customDir, `${name}.md`);
+      const frontmatter = {
+        name,
+        role: 'specialist',
+        domain,
+        reports_to: opts.lead,
+        manages: [],
+        model: 'anthropic/claude-sonnet-4-6',
+        fallback_model: 'anthropic/claude-haiku-4-5',
+        tests: [],
+        guardrails: [],
+        skills: [],
+        connectors: [],
+        description: `TODO: describe what ${name} does`,
+      };
+
+      const body = `---
+${yaml.dump(frontmatter, { indent: 2 }).trim()}
+---
+
+You are ${name}, a specialist agent within PossibLaw. You receive matters routed from ${opts.lead}.
+
+## TODO: Fill in this system prompt
+
+Replace this placeholder with a real system prompt. Here's what to include:
+
+### What you DO
+- Describe the specific task this agent performs.
+- List the outputs it produces.
+- Note any skills or tools it should use.
+
+### What you DO NOT do
+- Do not route to another agent.
+- Do not refuse work because information is missing — apply sensible defaults.
+
+### Output Format
+Describe the expected output format here.
+
+### Defaults When Information Is Missing
+| Field | Default |
+|---|---|
+| TODO | TODO |
+
+## Disclaimer
+Every deliverable must end with a disclaimer section. Copy the format from layer/agents/specialists/legal/commercial/nda-drafter.md.
+`;
+
+      writeFileSync(filePath, body, 'utf8');
+
+      // Add to template-overrides
+      addToTemplateRoster(opts.template, 'specialists', name);
+
+      console.log(`\nCustom specialist created: ${name}`);
+      console.log(`  File:     .possiblaw/custom-agents/${name}.md`);
+      console.log(`  Lead:     ${opts.lead}`);
+      console.log(`  Template: ${opts.template} (added to specialists)`);
+      console.log(`  Model:    anthropic/claude-sonnet-4-6`);
+      console.log('');
+      console.log(`Next step: edit .possiblaw/custom-agents/${name}.md to fill in the system prompt.`);
+      console.log(`  Copy the structure from layer/agents/specialists/legal/commercial/nda-drafter.md`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+teamAddCmd
+  .command('lead <path>')
+  .description('Add a custom lead agent. Path format: <domain>/<name>')
+  .option('--router <router>', 'Router this lead reports to (required)')
+  .option('-t, --template <name>', 'Template to add the lead to', 'small-firm')
+  .action((agentPath: string, opts: { router?: string; template: string }) => {
+    try {
+      const parts = agentPath.split('/');
+      const name = parts[parts.length - 1];
+      const domain = parts[0] as 'legal' | 'marketing' | 'finance' | 'admin' | 'ops';
+
+      if (!name) {
+        console.error('Error: Agent path must be in format <domain>/<name>');
+        process.exit(1);
+      }
+
+      if (!opts.router) {
+        console.error('Error: --router <router> is required for leads.');
+        process.exit(1);
+      }
+
+      const knownAgents = listAgentNames();
+      if (!knownAgents.includes(opts.router)) {
+        console.error(`Error: Router '${opts.router}' not found. Known agents: ${knownAgents.join(', ')}`);
+        process.exit(1);
+      }
+
+      if (knownAgents.includes(name)) {
+        console.error(`Error: Agent '${name}' already exists.`);
+        process.exit(1);
+      }
+
+      const customDir = join(REPO_ROOT, '.possiblaw', 'custom-agents');
+      if (!existsSync(customDir)) {
+        mkdirSync(customDir, { recursive: true });
+      }
+
+      const filePath = join(customDir, `${name}.md`);
+      const frontmatter = {
+        name,
+        role: 'lead',
+        domain,
+        reports_to: opts.router,
+        manages: [],
+        model: 'anthropic/claude-sonnet-4-6',
+        fallback_model: 'anthropic/claude-haiku-4-5',
+        tests: [],
+        guardrails: [],
+        skills: [],
+        connectors: [],
+        description: `TODO: describe what ${name} does`,
+      };
+
+      const body = `---
+${yaml.dump(frontmatter, { indent: 2 }).trim()}
+---
+
+You are ${name}, a lead agent within PossibLaw. You receive matters routed from ${opts.router}.
+
+## TODO: Fill in this system prompt
+
+Replace this placeholder with a real system prompt describing what domain matters you handle and which specialists you route to.
+
+### Output Format
+Your response MUST contain exactly one routing directive:
+
+\`\`\`
+ROUTE_TO: <specialist-name>
+Rationale: <one sentence explaining why>
+\`\`\`
+`;
+
+      writeFileSync(filePath, body, 'utf8');
+      addToTemplateRoster(opts.template, 'leads', name);
+
+      console.log(`\nCustom lead created: ${name}`);
+      console.log(`  File:     .possiblaw/custom-agents/${name}.md`);
+      console.log(`  Router:   ${opts.router}`);
+      console.log(`  Template: ${opts.template} (added to leads)`);
+      console.log('');
+      console.log(`Next step: edit .possiblaw/custom-agents/${name}.md to fill in the system prompt.`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+teamAddCmd
+  .command('router <name>')
+  .description('Add a custom router agent')
+  .option('-t, --template <name>', 'Template to add the router to', 'small-firm')
+  .action((agentName: string, opts: { template: string }) => {
+    try {
+      const knownAgents = listAgentNames();
+      if (knownAgents.includes(agentName)) {
+        console.error(`Error: Agent '${agentName}' already exists.`);
+        process.exit(1);
+      }
+
+      const customDir = join(REPO_ROOT, '.possiblaw', 'custom-agents');
+      if (!existsSync(customDir)) {
+        mkdirSync(customDir, { recursive: true });
+      }
+
+      const filePath = join(customDir, `${agentName}.md`);
+      const frontmatter = {
+        name: agentName,
+        role: 'router',
+        domain: 'ops',
+        reports_to: null,
+        manages: [],
+        model: 'anthropic/claude-opus-4-7',
+        fallback_model: 'anthropic/claude-sonnet-4-6',
+        tests: [],
+        guardrails: [],
+        skills: [],
+        connectors: [],
+        description: `TODO: describe what ${agentName} does`,
+      };
+
+      const body = `---
+${yaml.dump(frontmatter, { indent: 2 }).trim()}
+---
+
+You are ${agentName}, a top-level router agent within PossibLaw.
+
+## TODO: Fill in this system prompt
+
+Replace this placeholder with routing logic. Describe what domains you handle and which leads or specialists you route to.
+
+### Output Format
+\`\`\`
+ROUTE_TO: <agent-name>
+Rationale: <one sentence explaining why>
+\`\`\`
+`;
+
+      writeFileSync(filePath, body, 'utf8');
+      addToTemplateRoster(opts.template, 'routers', agentName);
+
+      console.log(`\nCustom router created: ${agentName}`);
+      console.log(`  File:     .possiblaw/custom-agents/${agentName}.md`);
+      console.log(`  Template: ${opts.template} (added to routers)`);
+      console.log('');
+      console.log(`Next step: edit .possiblaw/custom-agents/${agentName}.md to fill in the system prompt.`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// team remove <name>
+// ---------------------------------------------------------------------------
+teamCmd
+  .command('remove')
+  .description('Remove an agent from the active template roster (preserves custom-agent file)')
+  .argument('<agent>', 'Agent name to remove')
+  .option('-t, --template <name>', 'Template to remove the agent from', 'small-firm')
+  .action((agentName: string, opts: { template: string }) => {
+    try {
+      const knownAgents = listAgentNames();
+      if (!knownAgents.includes(agentName)) {
+        console.error(`Error: Agent '${agentName}' not found.`);
+        process.exit(1);
+      }
+
+      // Check if this agent is managed by any other agent (conflict check)
+      for (const name of knownAgents) {
+        try {
+          const a = loadAgent(name);
+          if (a.manages.includes(agentName)) {
+            console.error(`Error: Cannot remove '${agentName}' — it is still listed in '${name}'.manages.`);
+            console.error(`       Remove '${agentName}' from the 'manages' list in the '${name}' agent file first.`);
+            process.exit(1);
+          }
+        } catch {
+          // Skip agents that fail to load
+        }
+      }
+
+      removeFromTemplateRoster(opts.template, agentName);
+
+      const customFilePath = join(REPO_ROOT, '.possiblaw', 'custom-agents', `${agentName}.md`);
+      const isCustom = existsSync(customFilePath);
+
+      console.log(`\nAgent '${agentName}' removed from template '${opts.template}' roster.`);
+      if (isCustom) {
+        console.log(`Agent file retained at .possiblaw/custom-agents/${agentName}.md — delete manually if you want it gone.`);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// team rename <old> <new>
+// ---------------------------------------------------------------------------
+teamCmd
+  .command('rename')
+  .description('Rename a custom agent (custom-agents/ only; does not rename layer/agents/ files)')
+  .argument('<old>', 'Current agent name')
+  .argument('<new>', 'New agent name')
+  .action((oldName: string, newName: string) => {
+    try {
+      // Verify old is a custom agent
+      const customDir = join(REPO_ROOT, '.possiblaw', 'custom-agents');
+      const oldFilePath = join(customDir, `${oldName}.md`);
+      if (!existsSync(oldFilePath)) {
+        console.error(`Error: '${oldName}' is not a custom agent. Only agents in .possiblaw/custom-agents/ can be renamed.`);
+        process.exit(1);
+      }
+
+      // Check new name doesn't collide
+      const knownAgents = listAgentNames();
+      if (knownAgents.includes(newName)) {
+        console.error(`Error: Agent '${newName}' already exists. Choose a different name.`);
+        process.exit(1);
+      }
+
+      // Read old file and update frontmatter name
+      const rawContent = readFileSync(oldFilePath, 'utf8');
+      const parsed = matter(rawContent);
+      parsed.data['name'] = newName;
+      const newContent = matter.stringify(parsed.content, parsed.data);
+
+      // Write new file
+      const newFilePath = join(customDir, `${newName}.md`);
+      writeFileSync(newFilePath, newContent, 'utf8');
+
+      // Delete old file
+      renameSync(oldFilePath, newFilePath);
+
+      // Update template-overrides.yaml references
+      renameInTemplateOverrides(oldName, newName);
+
+      // Update overrides.yaml references
+      const overridesFilePath = join(REPO_ROOT, '.possiblaw', 'overrides.yaml');
+      if (existsSync(overridesFilePath)) {
+        const overridesRaw = readFileSync(overridesFilePath, 'utf8');
+        const overridesData = yaml.load(overridesRaw) as { overrides?: Record<string, unknown> } | null;
+        if (overridesData?.overrides && oldName in overridesData.overrides) {
+          overridesData.overrides[newName] = overridesData.overrides[oldName];
+          delete overridesData.overrides[oldName];
+          writeFileSync(overridesFilePath, yaml.dump(overridesData, { indent: 2 }), 'utf8');
+        }
+      }
+
+      console.log(`\nAgent renamed: ${oldName} → ${newName}`);
+      console.log(`  File:     .possiblaw/custom-agents/${newName}.md`);
+      console.log(`  Updated:  .possiblaw/template-overrides.yaml`);
+      console.log(`  Updated:  .possiblaw/overrides.yaml (if applicable)`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// team export <template-name> [--output <path>]
+// ---------------------------------------------------------------------------
+teamCmd
+  .command('export')
+  .description('Export the effective template snapshot (base + overrides + custom agents) to YAML')
+  .argument('<template>', 'Template name to export')
+  .option('-o, --output <path>', 'Output file path (default: stdout)')
+  .action((templateName: string, opts: { output?: string }) => {
+    try {
+      const template = loadTemplate(templateName); // already has overrides applied
+      const overrides = loadOverrides();
+      const customAgentNames = listCustomAgentNames();
+
+      // Collect full effective frontmatter for each agent in the roster
+      const allNames = [
+        ...template.roster.routers,
+        ...template.roster.leads,
+        ...template.roster.specialists,
+      ];
+
+      const agents: Record<string, unknown> = {};
+      const overridesApplied: Array<{ agent: string; field: string; base: string; overridden: string }> = [];
+
+      for (const name of allNames) {
+        try {
+          const a = loadAgent(name);
+          agents[name] = {
+            role: a.role,
+            domain: a.domain,
+            reports_to: a.reports_to,
+            manages: a.manages,
+            model: a.model,
+            fallback_model: a.fallback_model,
+            tests: a.tests,
+            guardrails: a.guardrails,
+            skills: a.skills,
+            connectors: a.connectors,
+            description: a.description,
+          };
+
+          // Check if an override is applied — compare against base (un-overridden) file
+          if (name in overrides) {
+            const layerDir = join(REPO_ROOT, 'layer', 'agents');
+            const customFilePath = join(REPO_ROOT, '.possiblaw', 'custom-agents', `${name}.md`);
+
+            // Helper: walk directory synchronously
+            const walkSync = (dir: string, pred: (p: string) => boolean): string[] => {
+              if (!existsSync(dir)) return [];
+              const results: string[] = [];
+              const stack = [dir];
+              while (stack.length > 0) {
+                const cur = stack.pop()!;
+                for (const entry of readdirSync(cur)) {
+                  const full = join(cur, entry);
+                  if (statSync(full).isDirectory()) stack.push(full);
+                  else if (pred(full)) results.push(full);
+                }
+              }
+              return results;
+            };
+
+            // Find base model from layer file (skip custom; overrides only affect layer agents in practice)
+            let baseModel = a.model;
+            if (!existsSync(customFilePath)) {
+              const candidates = walkSync(layerDir, (p) => p.endsWith('.md'));
+              for (const fp of candidates) {
+                const parsed2 = matter(readFileSync(fp, 'utf8'));
+                if (parsed2.data['name'] === name) {
+                  baseModel = String(parsed2.data['model']);
+                  break;
+                }
+              }
+            }
+            if (baseModel !== a.model) {
+              overridesApplied.push({ agent: name, field: 'model', base: baseModel, overridden: a.model });
+            }
+          }
+        } catch {
+          // Skip agents that fail to load gracefully
+        }
+      }
+
+      const snapshot = {
+        name: templateName,
+        generated_at: new Date().toISOString(),
+        generated_from: [
+          `layer/templates/${templateName}.yaml`,
+          '.possiblaw/template-overrides.yaml',
+          '.possiblaw/overrides.yaml',
+        ].join(' + '),
+        roster: template.roster,
+        workflows: template.workflows,
+        agents,
+        custom_agents: customAgentNames
+          .filter((n) => allNames.includes(n))
+          .map((n) => ({ name: n, file: `.possiblaw/custom-agents/${n}.md` })),
+        overrides_applied: overridesApplied,
+      };
+
+      const output = yaml.dump(snapshot, { indent: 2 });
+
+      if (opts.output) {
+        writeFileSync(opts.output, output, 'utf8');
+        console.log(`\nTemplate snapshot written to: ${opts.output}`);
+      } else {
+        process.stdout.write(output);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// team diff <template-a> <template-b>
+// ---------------------------------------------------------------------------
+teamCmd
+  .command('diff')
+  .description('Show structured diff between two effective templates')
+  .argument('<template-a>', 'First template name')
+  .argument('<template-b>', 'Second template name')
+  .action((templateA: string, templateB: string) => {
+    try {
+      const tA = loadTemplate(templateA);
+      const tB = loadTemplate(templateB);
+
+      const aRouters = new Set(tA.roster.routers);
+      const bRouters = new Set(tB.roster.routers);
+      const aLeads = new Set(tA.roster.leads);
+      const bLeads = new Set(tB.roster.leads);
+      const aSpecialists = new Set(tA.roster.specialists);
+      const bSpecialists = new Set(tB.roster.specialists);
+      const aWorkflows = new Set(tA.workflows);
+      const bWorkflows = new Set(tB.workflows);
+
+      console.log(`\nDiff: ${templateA} → ${templateB}\n`);
+
+      // Routers
+      const routerAdded = tB.roster.routers.filter((r) => !aRouters.has(r));
+      const routerRemoved = tA.roster.routers.filter((r) => !bRouters.has(r));
+      if (routerAdded.length > 0 || routerRemoved.length > 0) {
+        console.log('Routers:');
+        for (const r of routerAdded) console.log(`  + ${r}`);
+        for (const r of routerRemoved) console.log(`  - ${r}`);
+      }
+
+      // Leads
+      const leadsAdded = tB.roster.leads.filter((l) => !aLeads.has(l));
+      const leadsRemoved = tA.roster.leads.filter((l) => !bLeads.has(l));
+      if (leadsAdded.length > 0 || leadsRemoved.length > 0) {
+        console.log('Leads:');
+        for (const l of leadsAdded) console.log(`  + ${l}`);
+        for (const l of leadsRemoved) console.log(`  - ${l}`);
+      }
+
+      // Specialists
+      const specsAdded = tB.roster.specialists.filter((s) => !aSpecialists.has(s));
+      const specsRemoved = tA.roster.specialists.filter((s) => !bSpecialists.has(s));
+      if (specsAdded.length > 0 || specsRemoved.length > 0) {
+        console.log('Specialists:');
+        for (const s of specsAdded) console.log(`  + ${s}`);
+        for (const s of specsRemoved) console.log(`  - ${s}`);
+      }
+
+      // Per-agent model changes (agents present in both)
+      const commonAgents = [
+        ...tA.roster.routers.filter((r) => bRouters.has(r)),
+        ...tA.roster.leads.filter((l) => bLeads.has(l)),
+        ...tA.roster.specialists.filter((s) => bSpecialists.has(s)),
+      ];
+
+      const modelChanges: string[] = [];
+      for (const name of commonAgents) {
+        try {
+          const aAgent = loadAgent(name);
+          const bAgent = loadAgent(name);
+          // Both templates load the same agent files; model changes come from per-template model overrides
+          // (Currently overrides are per-agent, not per-template, so this will show same model.)
+          // We surface changes if models differ after override resolution.
+          if (aAgent.model !== bAgent.model) {
+            modelChanges.push(`  ~ ${name}: ${aAgent.model} → ${bAgent.model}`);
+          }
+        } catch {
+          // Skip
+        }
+      }
+      if (modelChanges.length > 0) {
+        console.log('Model changes:');
+        for (const c of modelChanges) console.log(c);
+      }
+
+      // Workflows
+      const wfAdded = tB.workflows.filter((w) => !aWorkflows.has(w));
+      const wfRemoved = tA.workflows.filter((w) => !bWorkflows.has(w));
+      if (wfAdded.length > 0 || wfRemoved.length > 0) {
+        console.log('Workflows:');
+        for (const w of wfAdded) console.log(`  + ${w}`);
+        for (const w of wfRemoved) console.log(`  - ${w}`);
+      }
+
+      const hasChanges =
+        routerAdded.length + routerRemoved.length +
+        leadsAdded.length + leadsRemoved.length +
+        specsAdded.length + specsRemoved.length +
+        modelChanges.length +
+        wfAdded.length + wfRemoved.length > 0;
+
+      if (!hasChanges) {
+        console.log('(no differences between the two effective templates)');
+      }
+      console.log('');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`\nError: ${message}`);

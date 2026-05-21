@@ -252,6 +252,34 @@ env -u ANTHROPIC_API_KEY node dist/cli/index.js run quick-invoice-review \
 
 ---
 
+## Sprint 7: Customize Your Team
+
+See [docs/sprint-7-demo.md](./sprint-7-demo.md) for the full walkthrough: add a custom specialist, fill in the system prompt, verify the roster, run the pipeline in offline mode, export a team snapshot, and remove the agent.
+
+Quick commands:
+
+```bash
+# 1. Add a custom specialist
+node dist/cli/index.js team add specialist legal/employment/employee-handbook-drafter --lead commercial-lead
+
+# 2. Verify it appears in the roster
+node dist/cli/index.js team list --template small-firm
+
+# 3. Diff two templates
+node dist/cli/index.js team diff solo-lawyer small-firm
+
+# 4. Run offline — routes through new specialist
+env -u ANTHROPIC_API_KEY node dist/cli/index.js run quick-counsel "draft an employee handbook section on PTO policy for a 50-person tech company"
+
+# 5. Export effective team snapshot
+node dist/cli/index.js team export small-firm --output /tmp/team-snapshot.yaml
+
+# 6. Remove from roster (file retained)
+node dist/cli/index.js team remove employee-handbook-drafter
+```
+
+---
+
 ## Sprint 6A+6B: Connectors (14 total)
 
 See [docs/sprint-6-demo.md](./sprint-6-demo.md) for the full connector walkthrough.

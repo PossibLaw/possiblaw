@@ -10,6 +10,7 @@ import matter from 'gray-matter';
 import yaml from 'js-yaml';
 import type { Agent, Workflow, Template, TestConfig, GuardrailConfig, Skill } from './types.js';
 import { getEffectiveModel } from './overrides.js';
+import { applyRosterOverrides } from './template-overrides.js';
 
 // ---------------------------------------------------------------------------
 // Repo root discovery
@@ -70,8 +71,13 @@ function parseYaml(filePath: string): unknown {
 // ---------------------------------------------------------------------------
 
 export function loadAgent(name: string): Agent {
-  const agentDir = join(REPO_ROOT, 'layer', 'agents');
-  const candidates = findFiles(agentDir, (p) => p.endsWith('.md'));
+  // Custom agents in .possiblaw/custom-agents/ take priority over layer/agents/
+  const customAgentDir = join(REPO_ROOT, '.possiblaw', 'custom-agents');
+  const layerAgentDir = join(REPO_ROOT, 'layer', 'agents');
+
+  const customCandidates = findFiles(customAgentDir, (p) => p.endsWith('.md'));
+  const layerCandidates = findFiles(layerAgentDir, (p) => p.endsWith('.md'));
+  const candidates = [...customCandidates, ...layerCandidates];
 
   for (const filePath of candidates) {
     const parsed = matter(readFileSync(filePath, 'utf8'));
@@ -91,7 +97,7 @@ export function loadAgent(name: string): Agent {
         reports_to: fm['reports_to'] != null ? String(fm['reports_to']) : null,
         manages: Array.isArray(fm['manages']) ? (fm['manages'] as string[]) : [],
         model: effectiveModel,
-        fallback_model: String(fm['fallback_model']),
+        fallback_model: fm['fallback_model'] != null ? String(fm['fallback_model']) : '',
         tests: Array.isArray(fm['tests']) ? (fm['tests'] as string[]) : [],
         guardrails: Array.isArray(fm['guardrails']) ? (fm['guardrails'] as string[]) : [],
         skills: Array.isArray(fm['skills']) ? (fm['skills'] as string[]) : [],
@@ -103,7 +109,7 @@ export function loadAgent(name: string): Agent {
   }
 
   throw new Error(
-    `Agent '${name}' not found in layer/agents/. Looked at: ${candidates.join(', ')}`
+    `Agent '${name}' not found in layer/agents/ or .possiblaw/custom-agents/. Looked at: ${candidates.join(', ')}`
   );
 }
 
@@ -122,7 +128,9 @@ export function loadTemplate(name: string): Template {
     throw new Error(`Template '${name}' not found. Expected: ${filePath}`);
   }
   const data = parseYaml(filePath) as Template;
-  return data;
+  // Apply .possiblaw/template-overrides.yaml if present
+  const effectiveRoster = applyRosterOverrides(name, data.roster);
+  return { ...data, roster: effectiveRoster };
 }
 
 export function loadTest(name: string): TestConfig {
@@ -158,11 +166,45 @@ export function loadGuardrail(name: string): GuardrailConfig {
 }
 
 /**
- * Return all agent names found in layer/agents/ (scans frontmatter).
+ * Return all agent names found in layer/agents/ AND .possiblaw/custom-agents/ (scans frontmatter).
+ * Custom agents shadow layer agents on name collision.
  */
 export function listAgentNames(): string[] {
-  const agentDir = join(REPO_ROOT, 'layer', 'agents');
-  const candidates = findFiles(agentDir, (p) => p.endsWith('.md'));
+  const layerDir = join(REPO_ROOT, 'layer', 'agents');
+  const customDir = join(REPO_ROOT, '.possiblaw', 'custom-agents');
+
+  const layerCandidates = findFiles(layerDir, (p) => p.endsWith('.md'));
+  const customCandidates = findFiles(customDir, (p) => p.endsWith('.md'));
+
+  const names: string[] = [];
+  const seen = new Set<string>();
+
+  // Custom agents first (they shadow layer agents)
+  for (const filePath of customCandidates) {
+    const parsed = matter(readFileSync(filePath, 'utf8'));
+    const fm = parsed.data as Record<string, unknown>;
+    if (typeof fm['name'] === 'string' && !seen.has(fm['name'])) {
+      names.push(fm['name']);
+      seen.add(fm['name']);
+    }
+  }
+  for (const filePath of layerCandidates) {
+    const parsed = matter(readFileSync(filePath, 'utf8'));
+    const fm = parsed.data as Record<string, unknown>;
+    if (typeof fm['name'] === 'string' && !seen.has(fm['name'])) {
+      names.push(fm['name']);
+      seen.add(fm['name']);
+    }
+  }
+  return names;
+}
+
+/**
+ * Return agent names found only in .possiblaw/custom-agents/ (operator-created).
+ */
+export function listCustomAgentNames(): string[] {
+  const customDir = join(REPO_ROOT, '.possiblaw', 'custom-agents');
+  const candidates = findFiles(customDir, (p) => p.endsWith('.md'));
   const names: string[] = [];
   for (const filePath of candidates) {
     const parsed = matter(readFileSync(filePath, 'utf8'));
