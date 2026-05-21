@@ -29,3 +29,14 @@ layer/evals/datasets/ledgar/cache/samples.jsonl
 # Eval results — runtime artifacts, not source
 layer/evals/results/*.json
 layer/evals/results/*.md
+
+# Local agent continuity files (keep local; do not commit)
+.claude/history.md
+.agent/PLAN.md
+.agent/CONTEXT.md
+.agent/TASKS.md
+.agent/REVIEW.md
+.agent/TEST.md
+.agent/HANDOFF.md
+.agent/WIKI.md
+.agent/LEARNINGS.md

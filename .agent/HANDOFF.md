@@ -1,5 +1,7 @@
 # PossibLaw — Handoff for Next Coding Agent
 
+> **Starter Pack convention note (added 2026-05-21):** This file is normally **local-only / gitignored** under the PossibLaw Agent Starter Pack contract (see `CLAUDE.md` → "Local Continuity Files"). It is currently **tracked** because the Sprint 0–10 handoff state is load-bearing for the next coding agent that clones the repo. To switch to the standard local-only continuity going forward, run `git rm --cached .agent/HANDOFF.md .agent/PLAN.md .claude/history.md` and rely on `CHANGELOG.md` + `git log` + `docs/workflows/contracts.md` for source-of-truth.
+
 **As of:** 2026-05-21
 **Branch:** `main` (pushed to https://github.com/PossibLaw/possiblaw)
 **Last commit:** `c708d01 chore: gitignore privacy-filter per-matter key stores`

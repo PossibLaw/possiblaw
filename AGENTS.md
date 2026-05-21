@@ -1,8 +1,8 @@
-# CLAUDE.md
+# AGENTS.md
 
 Repo Root (absolute path, required): /Users/salvadorcarranza/possiblaw
 
-PossibLaw is a proof-of-concept layer on the paperclip control plane that demonstrates how to operate a legal business with AI — legal practice plus marketing, finance, admin, BD, and ops. Public, Apache 2.0, layer-not-fork posture; paperclip is wired as a pinned git submodule and never modified.
+Codex project instruction file for PossibLaw — a proof-of-concept layer on the paperclip control plane demonstrating how to operate a legal business with AI (practice + marketing + finance + admin + ops). Public, Apache 2.0, layer-not-fork; paperclip is wired as a pinned git submodule and never modified.
 
 ## Startup Contract
 1. This file is the only startup instruction. Do not read other files unless triggered.
@@ -21,7 +21,7 @@ PossibLaw is a proof-of-concept layer on the paperclip control plane that demons
    - Evals/help defining “done” → `docs/workflows/evals.md`
    - Unfamiliar term (e.g. "eval", "handoff", "trust boundary") → `docs/glossary.md`
 4. If more repo context is needed, read `.claude/history.md` next — not the whole repo.
-5. Global continuity stays in `~/.claude/CLAUDE.md`. Repo continuity is optional and on-demand.
+5. Global continuity stays in `~/.codex/AGENTS.md`. Repo continuity is optional and on-demand.
 6. When a sprint is wrapping, work is about to pause or ship, or context feels roughly half full, run a continuity checkpoint before losing state.
 
 ## Repo Root & State File Paths (Required)
@@ -36,9 +36,8 @@ PossibLaw is a proof-of-concept layer on the paperclip control plane that demons
 9. When saving, print the absolute path used; if it is not under `${REPO_ROOT}`, stop and ask for correction.
 
 ## Tool Ownership
-- Claude reads: `CLAUDE.md` (this file), `~/.claude/CLAUDE.md` (global), `.claude/agents/*.md`, `.claude/skills/*/SKILL.md`.
-- Ignore `AGENTS.md` and `.codex/` unless the user explicitly requests cross-agent sync.
-- Shared contracts in `docs/roles/`, `docs/workflows/`, and `docs/vendor/` apply to both Claude and Codex.
+- Codex reads: `AGENTS.md` (this file), `~/.codex/AGENTS.md` (global).
+- Ignore `CLAUDE.md` and `.claude/agents/` unless user explicitly requests cross-agent sync.
 
 ## Session Memory
 After completing work, append a summary to `${REPO_ROOT}/.claude/history.md` (local-only, gitignored):
@@ -79,35 +78,6 @@ When resuming prior work, read `${REPO_ROOT}/.claude/history.md` first.
   - `APPLY`: capture observations and propose specific skill/plugin/instruction updates.
 - This is additive. Do not replace `.claude/history.md` or `.agent/HANDOFF.md`.
 
-## Commands
-`pnpm run dev` - Primary local workflow command.
-`pnpm test` - Run tests.
-`pnpm run lint` - Run linting.
-`pnpm run typecheck` - Run type checks.
-`pnpm run build` - Build or package the project.
-
-Run `pnpm run lint && pnpm run typecheck && pnpm test` before handoff.
-
-## Stack
-- Runtime: Node.js ≥20.10 (CI on Node 22). TypeScript strict, ES2022, NodeNext modules with `.js` import extensions.
-- Framework: thin CLI (`commander`) + custom pipeline runner; no web framework in the PoC.
-- Data layer: filesystem-only — agent/skill/workflow/template YAML+Markdown under `layer/`; per-matter audit log at `layer/audit/<matter-id>.jsonl`; per-matter Privacy Filter key store at `layer/privacy-filter/keys/<matter-id>.json`.
-- LLM providers: `anthropic/*` (SDK, API key), `ollama/*` (local HTTP), planned `claude-cli/*` + `codex-cli/*` (subscription auth via local CLIs — Sprint 11).
-- Testing: in-tree LLM-as-judge + rule-based evaluators in `cli/test-runner.ts` / `cli/guardrail-runner.ts`. Eval harness for CUAD / MAUD / ACORD / UNFAIR-ToS / LEDGAR in `cli/eval.ts`.
-- Tooling: pnpm@9.15.4 (pinned via `packageManager`), tsx for dev mode, gray-matter for frontmatter, js-yaml for workflows/templates.
-
-## Code Map
-- Entry point: `bin/possiblaw` (compiled) / `bin/possiblaw.dev` (tsx). Both delegate to `cli/index.ts`.
-- Config files: `package.json`, `tsconfig.json`, `.github/workflows/ci.yml`, `.env.example`, `.possiblaw/overrides.yaml` (per-operator, gitignored).
-- CLI surface: `cli/index.ts` (commander setup). Subcommands: `run`, `team`, `workflows`, `audit`, `privacy`, `connectors`, `eval`.
-- Pipeline runtime: `cli/pipeline.ts` (router → specialist → tests → guardrails; `parallel` / `reconcile` / `debate` step kinds), `cli/test-runner.ts`, `cli/guardrail-runner.ts`, `cli/audit.ts`, `cli/privacy-filter.ts`, `cli/ollama.ts`, `cli/anthropic.ts`, `cli/pricing.ts`, `cli/loader.ts`, `cli/types.ts`, `cli/printer.ts`.
-- Connectors: `cli/connectors/<id>.ts` (14 total: 3 open-access stand-ins + 11 named live). Descriptors at `layer/connectors/<id>.yaml`.
-- Domain content (the layer's value): `layer/agents/` (Chief of Staff, Chief Counsel, 4 Leads, 8 specialists, 3 meta agents), `layer/skills/`, `layer/workflows/` (9 workflows), `layer/templates/` (solo-lawyer, small-firm), `layer/tests/`, `layer/guardrails/`.
-- Eval harness + datasets: `cli/eval.ts`, `cli/eval-scorers.ts`, `cli/eval-adapters.ts`, `layer/evals/datasets/<name>/fetch.ts` + `METADATA.json`.
-- Plan + handoff: `/Users/salvadorcarranza/.claude/plans/possiblaw-poc-clean-rebuild.md` (plan-of-record, local-only), `.agent/PLAN.md` (active work queue — Sprint 11), `.agent/HANDOFF.md` (per-sprint commit map).
-- Submodule: `paperclip/` (pinned, never modified).
-- Tests: no test runner wired in the PoC (placeholder `pnpm test`); verification is via `pnpm typecheck`, `pnpm build`, and the offline NDA demo run.
-
 ## Canonical Roles
 - `product-strategist` — Clarifies user value, scope, and success criteria. Source of truth: `docs/roles/product-strategist.md`.
 - `engineering-planner` — Produces an executable implementation plan with risks and eval IDs. Source of truth: `docs/roles/engineering-planner.md`.
@@ -116,20 +86,14 @@ Run `pnpm run lint && pnpm run typecheck && pnpm test` before handoff.
 - `qa-validator` — Executes evals and records receipts. Source of truth: `docs/roles/qa-validator.md`.
 - `docs-releaser` — Syncs handoff and user-facing docs after validation. Source of truth: `docs/roles/docs-releaser.md`.
 
-In Claude Code, invoke each role via its `@name` handle (for example `@reviewer`, `@qa-validator`). Name = canonical role.
-
 ## Routing Rules
-- Product framing, scope, or success-definition work → `@product-strategist`.
-- Implementation planning and architecture tradeoffs → `@engineering-planner`.
-- Test execution, eval receipts, and validation evidence → `@qa-validator`.
-- Correctness, regressions, and maintainability review → `@reviewer`.
-- Security-sensitive review or trust-boundary changes → `@security-reviewer`.
-- Release notes, handoff, and docs sync after validated changes → `@docs-releaser`.
+- Product framing, scope, or success-definition work → `product-strategist`.
+- Implementation planning and architecture tradeoffs → `engineering-planner`.
+- Test execution, eval receipts, and validation evidence → `qa-validator`.
+- Correctness, regressions, and maintainability review → `reviewer`.
+- Security-sensitive review or trust-boundary changes → `security-reviewer`.
+- Release notes, handoff, and docs sync after validated changes → `docs-releaser`.
 - If required facts are missing, escalate once with a targeted question.
-
-Supporting specialists (not canonical roles — use when a canonical role is not a fit):
-- Source extraction or fact gathering → `@research-agent`.
-- Markdown-heavy doc drafting without release ownership → `@docs-agent`.
 
 ## Contract Pipeline (Required)
 - Canonical source: `docs/workflows/contracts.md`. Read it for full rules, artifact schema, cross-artifact linkage, and validation commands.
@@ -145,22 +109,6 @@ Supporting specialists (not canonical roles — use when a canonical role is not
 - If a local MemPalace backend is enabled, ingest completed `PLAN/TEST/REVIEW/HANDOFF/history` artifacts after each task.
 - Use raw/verbatim retrieval mode for reliability.
 - Treat memory retrieval as advisory and resolve conflicts in favor of current local files.
-
-## Git Workflow Contract
-- Use focused branches and atomic commits.
-- Attach validation evidence to PRs and handoffs.
-- Never commit credentials.
-- Never commit `.agent/*` or `.claude/history.md`.
-- For novice-safe shipping, run this order:
-  1. `git status --short`
-  2. review `git diff --stat` and files changed
-  3. run relevant checks
-  4. refresh the plan/handoff/history checkpoint
-  5. commit a focused change
-  6. push the branch and open or update a PR when a remote exists
-- If local helper scripts exist, prefer:
-  - `.agent/integrations/run-checkpoint.sh --reason pre-git-cycle`
-  - `.agent/integrations/run-checkpoint.ps1 -Reason pre-git-cycle`
 
 ## Optional Skill Runtime Integration (gstack-inspired, Default OFF)
 - If stage skills are available, use them to produce structured outputs that feed the next artifact.
@@ -192,20 +140,37 @@ Supporting specialists (not canonical roles — use when a canonical role is not
 
 ## Boundary Rules
 Always do:
-- Keep edits scoped to requested files.
-- Reference exact paths and commands.
+- Keep edits within requested scope.
+- Cite exact file paths and commands.
 - Mark unknowns as `UNCONFIRMED`.
 
 Ask first:
-- Destructive operations or schema-changing edits.
-- Large refactors outside the stated objective.
+- Destructive actions, schema changes, or remote write operations.
+- Scope expansion beyond requested deliverables.
 
 Never do:
-- Invent evidence or claim completion without validation.
-- Remove failing tests to force a pass.
+- Invent facts or claim completion without validation.
+- Remove failing tests to force passing results.
 - Expose secrets.
+- Modify Claude-specific files (`CLAUDE.md`, `.claude/*`) unless user explicitly asks.
 - Read instruction files not triggered by the current task.
+
+## Git Workflow Contract
+- Use focused branches and atomic commits.
+- Attach validation evidence to PRs/handoffs.
+- Never commit credentials.
+- Never commit `.agent/*` or `.claude/history.md`.
+- For novice-safe shipping, run this order:
+  1. `git status --short`
+  2. review `git diff --stat` and files changed
+  3. run relevant checks
+  4. refresh the plan/handoff/history checkpoint
+  5. commit a focused change
+  6. push the branch and open or update a PR when a remote exists
+- If local helper scripts exist, prefer:
+  - `.agent/integrations/run-checkpoint.sh --reason pre-git-cycle`
+  - `.agent/integrations/run-checkpoint.ps1 -Reason pre-git-cycle`
 
 ## Local Norms
 - Persist repeated user corrections here so they survive across sessions.
-- Do not duplicate higher-layer policy from `~/.claude/CLAUDE.md`.
+- Do not duplicate higher-layer policy from `~/.codex/AGENTS.md`.

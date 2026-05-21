@@ -7,6 +7,26 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Governance — PossibLaw Agent Starter Pack adoption (2026-05-21)
+
+- Bootstrapped the official PossibLaw Agent Starter Pack contracts via `scripts/bootstrap-project.sh --preserve-progress`.
+- **New tracked files:**
+  - `AGENTS.md` — Codex project instruction file with full startup contract + routing + contract pipeline rules
+  - `CLAUDE.md` — replaced the session-written stub with the canonical scaffold; filled in Repo Root, project description, Stack, Code Map sections with PossibLaw specifics
+  - `docs/roles/{product-strategist,engineering-planner,reviewer,security-reviewer,qa-validator,docs-releaser,README}.md` — canonical role contracts
+  - `docs/workflows/{contracts,evals,wiki,graphify}.md` — typed PLAN→TEST→REVIEW→HANDOFF contract + evals + optional wiki/graphify modes
+  - `docs/vendor/{README,supabase}.md` — vendor reference contract (Supabase is the canonical example; not used by PossibLaw but the example pattern is the canonical one)
+  - `docs/glossary.md` — shared term definitions
+  - `.agent/{CONTEXT,TASKS,REVIEW,TEST,WIKI,LEARNINGS}.md` — scaffolded contract artifacts (LOCAL-only per Starter Pack convention; tracked here for the v0.1.0 baseline)
+  - `.agent/integrations/{run-checkpoint.sh,run-checkpoint.ps1,mempalace-ingest.sh,mempalace-ingest.ps1,README.md}` — optional continuity-checkpoint helpers
+  - `.claude/skills/{closing-sprint-and-syncing-state,running-novice-safe-git-cycle}/SKILL.md` — repo-local workflow skills
+- **`.gitignore`** updated by the bootstrap to mark `.agent/PLAN.md`, `.agent/HANDOFF.md`, `.claude/history.md`, and the new scaffolds as local-only going forward.
+- **`.agent/PLAN.md`, `.agent/HANDOFF.md`, `.claude/history.md`** preserved (real Sprint 0–10 + Sprint 11 content); HANDOFF carries a note that they remain tracked despite the new convention because the next coding agent needs them.
+
+---
+
 ## [0.1.0] — 2026-05-21 — Public launch readiness (Sprint 10)
 
 ### Sprint 10 — Public launch readiness
