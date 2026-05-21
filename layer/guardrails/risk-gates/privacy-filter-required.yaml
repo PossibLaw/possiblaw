@@ -1,0 +1,19 @@
+name: privacy-filter-required
+kind: guardrail
+type: rule
+description: For matters tagged sensitive, the Privacy Filter MUST be active. Blocks any unfiltered cloud call to a sensitive-ring artifact.
+rule:
+  kind: privacy-profile-check
+  required_when:
+    matter_tag:
+      - sensitive
+      - privileged
+      - client-confidential
+  forbid_profile: off
+reason_template: |
+  This matter is tagged sensitive, but the active Privacy Filter profile is "off".
+  Either set profile to "cloud-only" or "always", or change the matter's tag.
+stub_result:
+  human_required: false
+  reason_template: |
+    Privacy-filter-required guardrail stub result (not triggered).

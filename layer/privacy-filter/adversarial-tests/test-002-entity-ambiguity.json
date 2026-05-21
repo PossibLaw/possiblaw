@@ -1,0 +1,11 @@
+{
+  "id": "test-002",
+  "failure_mode": "entity-ambiguity",
+  "description": "Codename 'Apple' collides with the common English word 'apple'. The post-encode masked text should not replace the word 'apple' in non-entity contexts.",
+  "input_text": "We are representing Apple Inc. in the deal codenamed Apple. The contract mentions an apple orchard as collateral.",
+  "alias_hints": { "Apple": "Apple Inc." },
+  "expected_entities_to_mask": ["Apple Inc."],
+  "expected_post_rehydrate_text": "We are representing Apple Inc. in the deal codenamed Apple. The contract mentions an apple orchard as collateral.",
+  "detection": "Post-encode sanity check: verify the masked text is grammatical and the codename is not applied to non-entity occurrences. Ambiguous matches require a per-matter alias_hint declaration.",
+  "recovery": "Operator pre-registers known codenames via alias_hints. Ambiguous tokens are flagged and require manual confirmation."
+}

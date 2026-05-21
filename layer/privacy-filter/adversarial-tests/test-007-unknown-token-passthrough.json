@@ -1,0 +1,12 @@
+{
+  "id": "test-007",
+  "failure_mode": "rehydration-failure",
+  "description": "The cloud LLM introduces a token «ENT_ORG_099» that was not in the original key store (hallucinated token). The decoder must leave it untouched rather than fail silently.",
+  "input_masked_text": "This NDA is between «ENT_ORG_001» and «ENT_ORG_099» (an unknown party).",
+  "key_store": {
+    "«ENT_ORG_001»": "ACME Corp"
+  },
+  "expected_behavior": "«ENT_ORG_099» remains in the text after deterministic find-and-replace (not in key store). The pre-delivery scan fires PrivacyFilterError because «ENT_ prefix is still present.",
+  "detection": "Pre-delivery scan catches the leaked «ENT_ prefix.",
+  "recovery": "Hard error before write. Operator must inspect the cloud LLM response and re-run or manually resolve the unknown token."
+}

@@ -1,0 +1,13 @@
+{
+  "id": "test-003",
+  "failure_mode": "rehydration-failure",
+  "description": "A «ENT_ORG_001» placeholder leaks into the signed deliverable. The pre-delivery scan must catch and hard-error.",
+  "input_text": "This NDA is between «ENT_ORG_001» and Beta Holdings LLC, effective January 1, 2026.",
+  "key_store": {
+    "«ENT_ORG_001»": "ACME Corp"
+  },
+  "expected_post_rehydrate_text": "This NDA is between ACME Corp and Beta Holdings LLC, effective January 1, 2026.",
+  "deliberately_broken_scenario": "If «ENT_ORG_001» is NOT in the key store, the placeholder leaks. The pre-delivery scan for «ENT_ prefix must fire a PrivacyFilterError.",
+  "detection": "Pre-delivery scan: grep for «ENT_ prefix in final draft before write.",
+  "recovery": "Hard error before write. Do not deliver the document. Investigate why the token was not in the key store."
+}

@@ -1,0 +1,17 @@
+{
+  "id": "test-004",
+  "failure_mode": "key-store-concurrency",
+  "description": "Two matters (matter-A and matter-B) run concurrently. Their key stores must be isolated — tokens in matter-A must not bleed into matter-B.",
+  "matter_a": {
+    "matter_id": "matter-A",
+    "input_text": "Represent Alpha Corp (EIN 11-1111111) in the acquisition.",
+    "expected_key_store_file": "layer/privacy-filter/keys/matter-A.json"
+  },
+  "matter_b": {
+    "matter_id": "matter-B",
+    "input_text": "Represent Beta LLC (EIN 22-2222222) in the merger.",
+    "expected_key_store_file": "layer/privacy-filter/keys/matter-B.json"
+  },
+  "detection": "Keys are scoped per matter-id; each layer/privacy-filter/keys/<matter-id>.json is owned by its matter. Tokens are never shared across matters.",
+  "recovery": "No shared key store. Per-matter isolation is structural — there is no cross-matter lookup path."
+}

@@ -69,11 +69,21 @@ export interface TestConfig {
   };
 }
 
+export interface PrivacyProfileCheckRule {
+  kind: 'privacy-profile-check';
+  required_when: {
+    matter_tag: string[];
+  };
+  forbid_profile: string;
+}
+
 export interface GuardrailRuleConfig {
-  kind: 'regex' | 'token-count';
+  kind: 'regex' | 'token-count' | 'privacy-profile-check';
   pattern?: string;
   patterns?: string[];
   threshold?: number;
+  required_when?: { matter_tag: string[] };
+  forbid_profile?: string;
 }
 
 export interface GuardrailConfig {
@@ -198,4 +208,6 @@ export interface RunContext {
   userPrompt: string;
   verbose: boolean;
   offline: boolean;
+  privacyProfile?: 'always' | 'cloud-only' | 'off';
+  matterTag?: string;
 }

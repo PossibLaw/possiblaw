@@ -1,0 +1,24 @@
+{
+  "id": "test-008",
+  "failure_mode": "detector-miss",
+  "description": "Full offline NDA fixture. The rule-based encoder must mask all sensitive entities from the demo prompt; decoder must restore them in the final deliverable.",
+  "input_text": "draft an NDA for ACME Corp (EIN 12-3456789) at 100 Industrial Way, Wilmington DE; counterparty Beta Holdings LLC; deal codename 'Project Quetzal'; deal value $2,500,000.",
+  "expected_entities_to_mask": [
+    "ACME Corp",
+    "12-3456789",
+    "100 Industrial Way, Wilmington DE",
+    "Beta Holdings LLC",
+    "Project Quetzal",
+    "$2,500,000"
+  ],
+  "expected_token_types": ["ORG", "EIN", "ADDRESS", "ORG", "CODENAME", "MONEY"],
+  "expected_post_rehydrate_contains": [
+    "ACME Corp",
+    "12-3456789",
+    "Beta Holdings LLC",
+    "$2,500,000"
+  ],
+  "encoder_mode": "offline-fallback",
+  "detection": "Post-rehydrate output must contain all original entity strings. Rule-based encoder must produce mode='offline-fallback'.",
+  "recovery": "N/A — this is the happy path for offline mode."
+}

@@ -90,7 +90,44 @@ function runRuleGuardrail(input: GuardrailRunnerInput): GuardrailResult {
     return { human_required: false, reason: `Guardrail '${config.name}': no patterns matched — clear.` };
   }
 
+  if (rule.kind === 'privacy-profile-check') {
+    return runPrivacyProfileCheck(input);
+  }
+
   return { human_required: false, reason: `Unknown rule kind '${rule.kind}' — defaulting to clear.` };
+}
+
+// ---------------------------------------------------------------------------
+// Privacy-profile-check guardrail
+// ---------------------------------------------------------------------------
+
+function runPrivacyProfileCheck(input: GuardrailRunnerInput): GuardrailResult {
+  const { config, context } = input;
+  const rule = config.rule;
+  if (!rule || rule.kind !== 'privacy-profile-check') {
+    return { human_required: false, reason: 'No privacy-profile-check config.' };
+  }
+
+  const activeProfile = context.privacyProfile ?? 'cloud-only';
+  const matterTag = context.matterTag ?? '';
+  const requiredTags: string[] = rule.required_when?.matter_tag ?? [];
+  const forbidProfile = rule.forbid_profile ?? 'off';
+
+  const tagTriggered = requiredTags.some(
+    (t) => t.toLowerCase() === matterTag.toLowerCase()
+  );
+
+  if (tagTriggered && activeProfile === forbidProfile) {
+    const reasonTemplate = config.reason_template ?? config.stub_result?.reason_template ?? '';
+    const reason = reasonTemplate.trim() ||
+      `Privacy-filter-required guardrail fired: matter tag '${matterTag}' requires privacy filter, but active profile is '${activeProfile}'.`;
+    return { human_required: true, reason };
+  }
+
+  return {
+    human_required: false,
+    reason: `Privacy-filter-required: ${tagTriggered ? `matter tag '${matterTag}' matches but profile '${activeProfile}' is allowed` : `matter tag '${matterTag}' is not in the sensitive list`} — clear.`,
+  };
 }
 
 // ---------------------------------------------------------------------------

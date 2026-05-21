@@ -186,6 +186,33 @@ bin/possiblaw run quick-invoice-review "draft May invoice for ACME matter — 12
 - Real guardrail detection (Sprint 2). signed-document always fires; no real signature detection yet.
 - Paperclip integration (Sprint 2+). The submodule is present but not yet called by the CLI.
 - Non-legal surfaces (Sprint 3). Marketing/finance/admin Leads are not built yet.
-- Privacy Filter (Sprint 4). Cloud calls are unfiltered.
 - MCP connectors (Sprint 6). No external systems are wired in.
 - Eval suite (Sprint 9). The `eval` command is a placeholder.
+
+---
+
+## Demo 5 — Privacy Filter walkthrough (Sprint 4)
+
+See `docs/sprint-4-demo.md` for the full Privacy Filter demo, which covers:
+
+1. **Offline mode** (rule-based encoder): run quick-counsel with entity-rich NDA prompt; audit log shows `«ENT_*»` tokens in model traffic; final deliverable contains real entities.
+2. **Live Ollama mode** (Llama 3.1 8B encoder + Anthropic specialist): Anthropic sees only masked text; decoder rehydrates the final NDA.
+3. **Failure path**: `--privacy-profile off --matter-tag sensitive` triggers `privacy-filter-required` guardrail escalation.
+
+Quick-reference commands:
+
+```bash
+# Offline: rule-based encoder
+env -u ANTHROPIC_API_KEY node dist/cli/index.js run quick-counsel \
+  "draft an NDA for ACME Corp (EIN 12-3456789) at 100 Industrial Way, Wilmington DE; counterparty Beta Holdings LLC; codename Project Quetzal; value \$2,500,000" \
+  --privacy-profile cloud-only
+
+# Failure path: profile off + sensitive tag
+env -u ANTHROPIC_API_KEY node dist/cli/index.js run quick-counsel \
+  "anything sensitive" \
+  --privacy-profile off \
+  --matter-tag sensitive
+
+# Inspect key store
+node dist/cli/index.js privacy show <matter-id>
+```

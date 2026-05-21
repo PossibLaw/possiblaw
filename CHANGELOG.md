@@ -9,6 +9,28 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Sprint 4 — Privacy Filter (encoder-decoder via local LLM with reversible entity substitution)
+
+- **`cli/ollama.ts`** — Thin Ollama HTTP client using built-in `fetch`. `isOllamaAvailable()` pings `/api/version`; `chat()` streams `/api/chat` NDJSON and assembles full response. Configurable via `OLLAMA_HOST` and `OLLAMA_MODEL` env vars (default: `http://localhost:11434`, `llama3.1:8b`). Clear error messages distinguish "not installed" from "not running".
+- **`cli/privacy-filter.ts`** — Encoder + Decoder + KeyStore module.
+  - `encode(text, matterId, opts?)` — loads key store, applies alias hints, calls Ollama encoder (with offline-fallback to rule-based regex encoder when Ollama is unreachable). Returns `MaskedPayload` with `masked_text`, `key_store`, and `mode` tag.
+  - `decode(text, keyStore)` — deterministic find-and-replace (fast path) + optional Ollama cleanup pass for LLM-introduced token variants. Pre-delivery scan throws `PrivacyFilterError` if any `«ENT_` prefix leaks.
+  - `loadKeyStore(matterId)` / `saveKeyStore(matterId, store)` — per-matter persistence at `layer/privacy-filter/keys/<matter-id>.json`.
+  - Rule-based offline encoder: regex patterns for EIN, SSN, MONEY, EMAIL, PHONE, ORG, ADDRESS.
+  - `PrivacyFilterError` class for hard pre-delivery failures.
+- **`cli/pipeline.ts`** — Privacy filter wired in before/after specialist call. `shouldApplyPrivacyFilter()` checks profile + model. Encode/decode steps logged to audit. `PipelineOpts` extended with `privacyProfile` and `matterTag`.
+- **`cli/types.ts`** — `RunContext` extended with `privacyProfile` and `matterTag`; `GuardrailRuleConfig` extended with `privacy-profile-check` kind.
+- **`cli/guardrail-runner.ts`** — New `runPrivacyProfileCheck()` handler for rule kind `privacy-profile-check`.
+- **`cli/index.ts`** — `--privacy-profile <always|cloud-only|off>` and `--matter-tag <tag>` flags on `run` command; new `possiblaw privacy show <matter-id>` subcommand.
+- **`layer/guardrails/risk-gates/privacy-filter-required.yaml`** — Escalates when active profile is `off` for matters tagged `sensitive`, `privileged`, or `client-confidential`.
+- **`layer/workflows/quick-counsel.yaml`** — `privacy-filter-required` added to guardrail suite (runs before `signed-document`).
+- **`layer/privacy-filter/adversarial-tests/`** — 8 JSON adversarial test cases covering: detector miss, entity ambiguity, rehydration failure, key-store concurrency, profile misconfiguration, token variant normalization, unknown token passthrough, offline NDA demo.
+- **`docs/privacy-filter.md`** — Threat model: 5 failure modes, detection methods, recovery steps, token format reference, adversarial test index.
+- **`docs/sprint-4-demo.md`** — End-to-end demo walkthrough: offline mode, live Ollama + Anthropic mode, failure path.
+- **`docs/DEMO-SCRIPT.md`** — "Privacy Filter walkthrough" section appended pointing to `docs/sprint-4-demo.md`.
+
+---
+
 ### Sprint 3 — Non-legal surfaces (Marketing, Finance, Admin)
 
 - **3 new Leads** (all `reports_to: chief-of-staff`):

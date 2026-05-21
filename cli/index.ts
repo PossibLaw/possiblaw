@@ -16,6 +16,7 @@ import {
   printAuditLog,
 } from './printer.js';
 import { replay } from './audit.js';
+import { loadKeyStore } from './privacy-filter.js';
 
 // ---------------------------------------------------------------------------
 // Version from package.json
@@ -54,10 +55,14 @@ program
   .option('-t, --template <name>', 'Template to activate', 'solo-lawyer')
   .option('--verbose', 'Print full prompts and responses', false)
   .option('--no-color', 'Disable ANSI colour output')
+  .option('--privacy-profile <profile>', 'Privacy filter profile: always | cloud-only | off', 'cloud-only')
+  .option('--matter-tag <tag>', 'Matter tag (used by privacy-filter-required guardrail)', '')
   .action(async (workflowName: string, prompt: string, opts: {
     template: string;
     verbose: boolean;
     color: boolean;
+    privacyProfile: string;
+    matterTag: string;
   }) => {
     const printerOpts = { color: opts.color, verbose: opts.verbose };
     printBanner(printerOpts);
@@ -67,12 +72,20 @@ program
       console.log('[offline mode — ANTHROPIC_API_KEY not set; using deterministic fixtures]\n');
     }
 
+    const rawProfile = opts.privacyProfile;
+    const privacyProfile: 'always' | 'cloud-only' | 'off' =
+      rawProfile === 'always' || rawProfile === 'cloud-only' || rawProfile === 'off'
+        ? rawProfile
+        : 'cloud-only';
+
     try {
       const workflow = loadWorkflow(workflowName);
 
       const report = await runPipeline(workflow, prompt, {
         verbose: opts.verbose,
         offline,
+        privacyProfile,
+        matterTag: opts.matterTag,
       });
 
       // Print each step as it's surfaced from the report
@@ -148,6 +161,50 @@ auditCmd
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`\nError reading audit log: ${message}`);
+      process.exit(1);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// possiblaw privacy show <matter-id>
+// ---------------------------------------------------------------------------
+const privacyCmd = program.command('privacy').description('Privacy filter commands');
+
+privacyCmd
+  .command('show')
+  .description('Show the key store for a matter (read-only)')
+  .argument('<matter-id>', 'Matter ID (UUID from a previous run)')
+  .option('--no-color', 'Disable ANSI colour output')
+  .action((matterId: string) => {
+    try {
+      const store = loadKeyStore(matterId);
+      const entries = Object.entries(store);
+      if (entries.length === 0) {
+        console.log(`No key store found for matter ${matterId}.`);
+        process.exit(0);
+      }
+      console.log(`Privacy Filter — Key Store for matter: ${matterId}`);
+      console.log(`Entity count: ${entries.length}`);
+      console.log('');
+      const typeCounts: Record<string, number> = {};
+      for (const [token] of entries) {
+        // Extract type from «ENT_TYPE_NNN»
+        const m = /«ENT_([A-Z]+)_\d+»/.exec(token);
+        const t = m ? m[1] : 'UNKNOWN';
+        typeCounts[t] = (typeCounts[t] ?? 0) + 1;
+      }
+      console.log('Entities by type:');
+      for (const [type, count] of Object.entries(typeCounts)) {
+        console.log(`  ${type}: ${count}`);
+      }
+      console.log('');
+      console.log('Token → Original:');
+      for (const [token, original] of entries) {
+        console.log(`  ${token}  →  ${original}`);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError reading key store: ${message}`);
       process.exit(1);
     }
   });

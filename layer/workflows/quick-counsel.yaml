@@ -11,6 +11,6 @@ pipeline:
   - step: test
     suite: [groundedness]
   - step: guardrail
-    suite: [signed-document]
+    suite: [privacy-filter-required, signed-document]
 on_test_failure: retry_with_better_model_then_escalate
 on_guardrail_hit: escalate_to_human

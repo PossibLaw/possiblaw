@@ -7,6 +7,7 @@ import { runAgent } from './anthropic.js';
 import { runTest, handleTestFailure } from './test-runner.js';
 import { runGuardrail, handleGuardrailHit } from './guardrail-runner.js';
 import { createAuditLog } from './audit.js';
+import { encode, decode, PrivacyFilterError } from './privacy-filter.js';
 import type {
   Workflow,
   Agent,
@@ -32,6 +33,22 @@ function parseRoutingOutput(output: string): { routeTo: string | null; rationale
   };
 }
 
+/**
+ * Determine whether the privacy filter should apply to this agent call.
+ * Returns true if `profile === 'always'`, or if `profile === 'cloud-only'` and the
+ * agent model is a cloud/Anthropic model (model id starts with 'anthropic/' or 'claude').
+ */
+function shouldApplyPrivacyFilter(
+  profile: 'always' | 'cloud-only' | 'off',
+  agentModel: string
+): boolean {
+  if (profile === 'off') return false;
+  if (profile === 'always') return true;
+  // cloud-only: apply when the model is a cloud model
+  const normalized = agentModel.toLowerCase().replace(/^anthropic\//, '');
+  return normalized.startsWith('claude') || agentModel.startsWith('anthropic/');
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -39,6 +56,8 @@ function parseRoutingOutput(output: string): { routeTo: string | null; rationale
 export interface PipelineOpts {
   verbose?: boolean;
   offline: boolean;
+  privacyProfile?: 'always' | 'cloud-only' | 'off';
+  matterTag?: string;
 }
 
 export async function runPipeline(
@@ -56,11 +75,16 @@ export async function runPipeline(
   let deliverable = '';
   let escalationReason: string | undefined;
 
+  const privacyProfile = opts.privacyProfile ?? 'cloud-only';
+  const matterTag = opts.matterTag ?? '';
+
   const context: RunContext = {
     workflow,
     userPrompt,
     verbose: opts.verbose ?? false,
     offline: opts.offline,
+    privacyProfile,
+    matterTag,
   };
 
   try {
@@ -167,6 +191,54 @@ export async function runPipeline(
       const agentOverride: Agent = model
         ? { ...specialist, model }
         : specialist;
+
+      const effectiveModel = agentOverride.model;
+      const applyFilter = shouldApplyPrivacyFilter(privacyProfile, effectiveModel);
+
+      if (applyFilter) {
+        // Encode: replace entities in user prompt before sending to cloud LLM
+        const encoded = await encode(userPrompt, matterId);
+        if (opts.verbose) {
+          console.error(
+            `[privacy-filter] Encoded prompt (mode=${encoded.mode ?? 'llm'}). ` +
+            `Key store has ${Object.keys(encoded.key_store).length} entries.`
+          );
+        }
+
+        // Audit: log privacy-filter encode step
+        audit.log({
+          step: 'privacy-filter:encode',
+          parent_step: parentStep,
+          prompt: `[privacy-filter mode=${encoded.mode ?? 'llm'}] masked_text_length=${encoded.masked_text.length}`,
+          output: JSON.stringify(Object.keys(encoded.key_store)),
+        });
+
+        const rawResult = await runAgent(agentOverride, encoded.masked_text, { skills, verbose: opts.verbose });
+
+        // Decode: rehydrate entities in the model response
+        let decodedOutput: string;
+        try {
+          decodedOutput = await decode(rawResult.output, encoded.key_store);
+        } catch (pfErr: unknown) {
+          if (pfErr instanceof PrivacyFilterError) {
+            throw pfErr;
+          }
+          throw pfErr;
+        }
+
+        if (opts.verbose) {
+          console.error(`[privacy-filter] Decoded response. Output length=${decodedOutput.length}.`);
+        }
+
+        audit.log({
+          step: 'privacy-filter:decode',
+          parent_step: 'privacy-filter:encode',
+          output: '[privacy-filter] rehydration complete',
+        });
+
+        return { ...rawResult, output: decodedOutput };
+      }
+
       return runAgent(agentOverride, userPrompt, { skills, verbose: opts.verbose });
     };
 

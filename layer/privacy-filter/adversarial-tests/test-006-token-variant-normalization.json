@@ -1,0 +1,13 @@
+{
+  "id": "test-006",
+  "failure_mode": "rehydration-failure",
+  "description": "The cloud LLM returns a masked response where token case has been altered (e.g., «ent_org_001» instead of «ENT_ORG_001»). The decoder must normalize and rehydrate correctly.",
+  "input_masked_text": "This agreement is between «ent_org_001» and «ENT_ORG_002», effective today.",
+  "key_store": {
+    "«ENT_ORG_001»": "ACME Corp",
+    "«ENT_ORG_002»": "Beta Holdings LLC"
+  },
+  "expected_post_rehydrate_text": "This agreement is between ACME Corp and Beta Holdings LLC, effective today.",
+  "detection": "Decoder normalizes case-variant tokens to the KEY STORE canonical form before substitution.",
+  "recovery": "Decoder prompt instructs: 'If a token appears with slight variants, normalize to the KEY STORE form.'"
+}

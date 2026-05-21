@@ -1,0 +1,12 @@
+{
+  "id": "test-005",
+  "failure_mode": "profile-misconfiguration",
+  "description": "Profile 'off' is accidentally selected for a matter tagged 'sensitive'. The privacy-filter-required guardrail must escalate.",
+  "matter_tag": "sensitive",
+  "privacy_profile": "off",
+  "input_text": "Draft an engagement letter for privileged client Alpha Corp.",
+  "expected_guardrail_hit": true,
+  "expected_guardrail_name": "privacy-filter-required",
+  "detection": "Any guardrail with requires_privacy_filter: true checks the active profile and fires escalation if 'off'.",
+  "recovery": "Set profile to 'cloud-only' or 'always', or remove the sensitive tag from the matter."
+}

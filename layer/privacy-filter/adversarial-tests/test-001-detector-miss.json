@@ -1,0 +1,11 @@
+{
+  "id": "test-001",
+  "failure_mode": "detector-miss",
+  "description": "Entity reaches cloud model in cleartext — encoder failed to mask an EIN. Post-rehydrate hash should not match the key-store key set, triggering detection.",
+  "input_text": "Please draft a services agreement for Globex Corp (EIN 98-7654321). Our counsel is Jane Doe.",
+  "expected_entities_to_mask": ["Globex Corp", "98-7654321", "Jane Doe"],
+  "expected_tokens": ["«ENT_ORG_001»", "«ENT_EIN_001»", "«ENT_PERSON_001»"],
+  "expected_post_rehydrate_text": "Please draft a services agreement for Globex Corp (EIN 98-7654321). Our counsel is Jane Doe.",
+  "detection": "After rehydrate, compare hashes of detected-entity-set vs key_store keys; if cleartext entity slips through, the rehydrate hash will not match.",
+  "recovery": "Reject the response and re-encode with a stricter prompt."
+}
