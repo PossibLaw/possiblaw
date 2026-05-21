@@ -9,6 +9,32 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Sprint 6A — Connector framework + open-access stand-ins + 3 reference live connectors
+
+- **`cli/connectors/types.ts`** — `ConnectorMetadata`, `ConnectorClient`, `ConnectorFactory`, `HealthcheckResult` interfaces. Every connector implements `ConnectorClient`.
+- **`cli/connectors/registry.ts`** — `registerConnector()`, `getConnector()`, `listConnectors()`, `listConfigured()`. Self-registration pattern: each module calls `registerConnector` at load time.
+- **`cli/connectors/index.ts`** — Connector loader: imports all 6 connector modules (triggering registration) and re-exports registry helpers.
+- **Open-access stand-ins** (no credentials required, always work):
+  - `cli/connectors/local-fs-doc-store.ts` — iManage / NetDocuments stand-in. Reads/writes `layer/connectors/local-docs/`. Capabilities: `documents.list`, `documents.get`, `documents.put`.
+  - `cli/connectors/no-op-signature.ts` — DocuSign stand-in. Writes JSON to `layer/connectors/local-signatures/<uuid>.json`. Capabilities: `signature.request`, `signature.status`.
+  - `cli/connectors/courtlistener.ts` — Westlaw / Lexis stand-in. CourtListener free public API (`/search/` endpoint). Capabilities: `cases.search`, `cases.get`.
+- **Reference live connectors** (demonstrate the 3 SDK patterns Sprint 6B will replicate):
+  - `cli/connectors/stripe.ts` — official SDK pattern. `stripe` npm package. Env: `STRIPE_API_KEY`. Capabilities: `customers.list`, `customers.create`, `invoices.create`, `payment_links.create`.
+  - `cli/connectors/midpage.ts` — HTTP-only pattern. Plain `fetch` with Bearer token. Env: `MIDPAGE_API_KEY`. UNCONFIRMED schema — see `cli/connectors/midpage.README.md`.
+  - `cli/connectors/docusign.ts` — OAuth-ish enterprise pattern. `docusign-esign` npm package. JWT auth flow. Env: `DOCUSIGN_INTEGRATION_KEY`, `DOCUSIGN_USER_ID`, `DOCUSIGN_ACCOUNT_ID`, `DOCUSIGN_PRIVATE_KEY_PATH`, `DOCUSIGN_BASE_PATH`. Capabilities: `envelopes.create`, `envelopes.status`.
+- **`layer/connectors/<id>.yaml`** — Declarative descriptors for all 6 connectors.
+- **`cli/types.ts`** — `Agent` extended with `connectors: string[]` field.
+- **`cli/loader.ts`** — `loadAgent()` maps `fm['connectors']` to the new field.
+- **`layer/agents/specialists/finance/billing/billing-prep.md`** — Added `connectors: [stripe]`.
+- **`layer/agents/specialists/legal/commercial/nda-drafter.md`** — Added `connectors: [local-fs-doc-store]`.
+- **`cli/index.ts`** — New command group: `possiblaw connectors list / check <id> / capabilities <id>`.
+- **`.env.example`** — Created with grouped env vars for all 3 live connectors. Stand-ins need no env vars.
+- **`package.json`** — Added `stripe ^17`, `docusign-esign ^6`, `@types/docusign-esign ^5`.
+- **`docs/DEMO-SCRIPT.md`** — Sprint 6A connectors section appended.
+- **`docs/sprint-6-demo.md`** — Full Sprint 6 walkthrough scaffold (6A complete; 6B roadmap).
+
+---
+
 ### Sprint 5 — Per-agent model overrides + cost transparency
 
 - **`cli/overrides.ts`** — Per-operator model overrides. Reads `.possiblaw/overrides.yaml` (repo-local, gitignored); falls back to `~/.possiblaw/overrides.yaml`. `loadOverrides()`, `getEffectiveModel()`, `writeOverride()`.

@@ -95,6 +95,7 @@ export function loadAgent(name: string): Agent {
         tests: Array.isArray(fm['tests']) ? (fm['tests'] as string[]) : [],
         guardrails: Array.isArray(fm['guardrails']) ? (fm['guardrails'] as string[]) : [],
         skills: Array.isArray(fm['skills']) ? (fm['skills'] as string[]) : [],
+        connectors: Array.isArray(fm['connectors']) ? (fm['connectors'] as string[]) : [],
         description: String(fm['description'] ?? ''),
         body: parsed.content,
       };

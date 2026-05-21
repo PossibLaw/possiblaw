@@ -1,0 +1,25 @@
+id: docusign
+name: DocuSign
+category: legal
+tier: paid
+description: E-signature via DocuSign. JWT auth flow using docusign-esign SDK. Use DOCUSIGN_BASE_PATH pointing to demo.docusign.net for sandbox; na4.docusign.net for production.
+env_vars:
+  - name: DOCUSIGN_INTEGRATION_KEY
+    required: true
+    description: App integration key from DocuSign developer console
+  - name: DOCUSIGN_USER_ID
+    required: true
+    description: DocuSign user GUID (the impersonated user)
+  - name: DOCUSIGN_ACCOUNT_ID
+    required: true
+    description: DocuSign account GUID
+  - name: DOCUSIGN_PRIVATE_KEY_PATH
+    required: true
+    description: Absolute path to RSA private key PEM file for JWT auth
+  - name: DOCUSIGN_BASE_PATH
+    required: false
+    description: "API base path (default: https://demo.docusign.net/restapi)"
+capabilities:
+  - envelopes.create
+  - envelopes.status
+docs: https://developers.docusign.com/platform/auth/jwt-get-token/

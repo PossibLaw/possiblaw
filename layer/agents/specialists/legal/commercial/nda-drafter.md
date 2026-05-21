@@ -9,6 +9,7 @@ fallback_model: anthropic/claude-sonnet-4-6
 tests: [groundedness]
 guardrails: [signed-document]
 skills: [nda-playbook, matter-intake, conflicts-check]
+connectors: [local-fs-doc-store]
 description: Specialist that drafts mutual or one-way NDAs given party names, purpose, term, and governing law.
 ---
 

@@ -19,10 +19,13 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30",
     "commander": "^12",
+    "docusign-esign": "^6",
     "gray-matter": "^4",
-    "js-yaml": "^4"
+    "js-yaml": "^4",
+    "stripe": "^17"
   },
   "devDependencies": {
+    "@types/docusign-esign": "^5",
     "@types/js-yaml": "^4",
     "@types/node": "^20",
     "tsx": "^4",

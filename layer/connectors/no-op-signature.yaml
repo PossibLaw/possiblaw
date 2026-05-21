@@ -1,0 +1,13 @@
+id: no-op-signature
+name: No-Op Signature
+category: stand-in
+tier: open-access
+description: Stand-in for DocuSign. Writes signature-request JSON to layer/connectors/local-signatures/. Always reports status pending. No credentials required — always works for offline demos.
+env_vars: []
+capabilities:
+  - signature.request
+  - signature.status
+docs: https://github.com/possiblaw/possiblaw (internal)
+notes: >
+  Replace with the docusign connector (or docusign-esign SDK) for production e-signature.
+  See cli/connectors/docusign.ts for the live DocuSign connector.

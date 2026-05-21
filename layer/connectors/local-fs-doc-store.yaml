@@ -1,0 +1,15 @@
+id: local-fs-doc-store
+name: Local FS Doc Store
+category: stand-in
+tier: open-access
+description: Stand-in for iManage / NetDocuments. Reads and writes plain files under layer/connectors/local-docs/. No credentials required — always works for offline demos.
+env_vars: []
+capabilities:
+  - documents.list
+  - documents.get
+  - documents.put
+docs: https://github.com/possiblaw/possiblaw (internal)
+notes: >
+  Replace with iManage or NetDocuments connector in Sprint 6B for production use.
+  iManage: https://developer.imanage.com/
+  NetDocuments: https://support.netdocuments.com/hc/en-us/categories/200129705-API

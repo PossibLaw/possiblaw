@@ -1,0 +1,15 @@
+id: stripe
+name: Stripe
+category: business
+tier: open-access
+description: Payments + invoicing + customers. Use for invoice generation, AR follow-up, refunds. Stripe has a free dev tier (test mode with sk_test_... keys).
+env_vars:
+  - name: STRIPE_API_KEY
+    required: true
+    description: From https://dashboard.stripe.com/apikeys — use test key sk_test_... for dev
+capabilities:
+  - customers.list
+  - customers.create
+  - invoices.create
+  - payment_links.create
+docs: https://stripe.com/docs/api

@@ -1,0 +1,17 @@
+id: midpage
+name: midpage
+category: legal
+tier: paid
+description: Legal AI tool for brief research and drafting. Contact midpage.ai for API access. UNCONFIRMED — API schema is anticipated and must be reconciled with midpage's actual spec before production use.
+env_vars:
+  - name: MIDPAGE_API_KEY
+    required: true
+    description: API key from midpage.ai — contact them for access at https://midpage.ai
+capabilities:
+  - briefs.list
+  - briefs.get
+  - briefs.create
+docs: https://midpage.ai
+notes: >
+  UNCONFIRMED: Base URL (https://api.midpage.ai/v1), auth scheme, and request/response shapes
+  are anticipated. See cli/connectors/midpage.README.md for reconciliation checklist.

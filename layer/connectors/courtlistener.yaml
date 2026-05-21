@@ -1,0 +1,16 @@
+id: courtlistener
+name: CourtListener
+category: stand-in
+tier: open-access
+description: "Stand-in for Westlaw / Lexis. Uses CourtListener free public API (https://www.courtlistener.com/api/rest/v4/search/). No API key required for low-volume access via the /search/ endpoint. Falls back gracefully on rate limit."
+env_vars:
+  - name: COURTLISTENER_API_KEY
+    required: false
+    description: Optional API key for higher rate limits. Create free account at courtlistener.com.
+capabilities:
+  - cases.search
+  - cases.get
+docs: https://www.courtlistener.com/help/api/
+notes: >
+  CourtListener is a free, open legal research database maintained by the Free Law Project.
+  For production legal research at scale, supplement with Westlaw or Lexis in Sprint 6B.

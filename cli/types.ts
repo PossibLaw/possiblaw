@@ -12,6 +12,8 @@ export interface Agent {
   tests: string[];
   guardrails: string[];
   skills: string[];
+  /** Connector IDs this agent may use (e.g. ['stripe', 'local-fs-doc-store']). Sprint 6A — declaration only; runtime integration in Sprint 6B. */
+  connectors: string[];
   description: string;
   /** System-prompt body (markdown content after frontmatter). */
   body: string;

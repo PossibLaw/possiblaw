@@ -249,3 +249,28 @@ node dist/cli/index.js team show-model nda-drafter
 env -u ANTHROPIC_API_KEY node dist/cli/index.js run quick-invoice-review \
   "draft May invoice for ACME — 12.5 partner hours, 8 associate hours"
 ```
+
+---
+
+## Sprint 6A: Connectors
+
+See [docs/sprint-6-demo.md](./sprint-6-demo.md) for the full connector walkthrough.
+
+Quick commands:
+
+```bash
+# 1. List all 6 registered connectors with configured status
+node dist/cli/index.js connectors list
+
+# 2. Healthcheck the stand-in connectors (always ok, no creds)
+node dist/cli/index.js connectors check local-fs-doc-store
+node dist/cli/index.js connectors check no-op-signature
+node dist/cli/index.js connectors check courtlistener     # real HTTP to courtlistener.com
+
+# 3. Healthcheck a live connector — not configured without creds
+node dist/cli/index.js connectors check stripe            # ok: false (no STRIPE_API_KEY)
+
+# 4. Inspect capabilities
+node dist/cli/index.js connectors capabilities stripe
+node dist/cli/index.js connectors capabilities local-fs-doc-store
+```

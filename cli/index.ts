@@ -20,6 +20,7 @@ import { replay } from './audit.js';
 import { loadKeyStore } from './privacy-filter.js';
 import { writeOverride, getEffectiveModel, loadOverrides } from './overrides.js';
 import { estimateWorkflowCost, formatCost } from './pricing.js';
+import { listConnectors, getConnector } from './connectors/index.js';
 
 // ---------------------------------------------------------------------------
 // Version from package.json
@@ -402,6 +403,92 @@ privacyCmd
       console.error(`\nError reading key store: ${message}`);
       process.exit(1);
     }
+  });
+
+// ---------------------------------------------------------------------------
+// possiblaw connectors list / check / capabilities
+// ---------------------------------------------------------------------------
+const connectorsCmd = program.command('connectors').description('Connector management commands');
+
+connectorsCmd
+  .command('list')
+  .description('List all registered connectors')
+  .action(() => {
+    const connectors = listConnectors();
+    if (connectors.length === 0) {
+      console.log('No connectors registered.');
+      return;
+    }
+    // Header
+    console.log('');
+    console.log(
+      `${'ID'.padEnd(24)} ${'CATEGORY'.padEnd(12)} ${'TIER'.padEnd(14)} ${'CONFIGURED'}`
+    );
+    console.log('-'.repeat(70));
+    for (const meta of connectors) {
+      const client = getConnector(meta.id);
+      const configured = client?.isConfigured() ? 'yes' : 'no';
+      console.log(
+        `${meta.id.padEnd(24)} ${meta.category.padEnd(12)} ${meta.tier.padEnd(14)} ${configured}`
+      );
+    }
+    console.log('');
+  });
+
+connectorsCmd
+  .command('check')
+  .description('Run healthcheck on a connector')
+  .argument('<id>', 'Connector ID (e.g. stripe, local-fs-doc-store)')
+  .action(async (id: string) => {
+    const client = getConnector(id);
+    if (!client) {
+      console.error(`Connector '${id}' not found. Run 'possiblaw connectors list' to see all.`);
+      process.exit(1);
+    }
+    console.log(`\nRunning healthcheck for connector: ${id}`);
+    try {
+      const result = await client.healthcheck();
+      console.log(`  ok:     ${result.ok}`);
+      console.log(`  detail: ${result.detail}`);
+      console.log('');
+      process.exit(result.ok ? 0 : 1);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`  error: ${message}`);
+      process.exit(1);
+    }
+  });
+
+connectorsCmd
+  .command('capabilities')
+  .description('List capabilities of a connector')
+  .argument('<id>', 'Connector ID')
+  .action((id: string) => {
+    const client = getConnector(id);
+    if (!client) {
+      console.error(`Connector '${id}' not found. Run 'possiblaw connectors list' to see all.`);
+      process.exit(1);
+    }
+    const { metadata } = client;
+    console.log('');
+    console.log(`Connector: ${metadata.name} (${metadata.id})`);
+    console.log(`Category:  ${metadata.category}`);
+    console.log(`Tier:      ${metadata.tier}`);
+    console.log(`Configured: ${client.isConfigured() ? 'yes' : 'no'}`);
+    console.log('');
+    console.log('Capabilities:');
+    for (const cap of metadata.capabilities) {
+      console.log(`  - ${cap}`);
+    }
+    if (metadata.env_vars.length > 0) {
+      console.log('');
+      console.log('Env vars:');
+      for (const ev of metadata.env_vars) {
+        const req = ev.required ? '(required)' : '(optional)';
+        console.log(`  ${ev.name} ${req} — ${ev.description}`);
+      }
+    }
+    console.log('');
   });
 
 // ---------------------------------------------------------------------------
