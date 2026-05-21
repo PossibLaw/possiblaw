@@ -339,6 +339,11 @@ interface CliCallOpts {
   modelId: string;
   timeoutMs?: number;
   verbose?: boolean;
+  /**
+   * For claude-cli only: pass `--max-budget-usd <amount>` to bound subscription
+   * spend for this single invocation. Ignored by codex-cli.
+   */
+  maxBudgetUsd?: number;
 }
 
 /**
@@ -362,6 +367,13 @@ async function callClaudeCli(opts: CliCallOpts): Promise<string> {
     '--system-prompt', opts.systemPrompt,
     '--output-format', 'text',
   ];
+
+  // Thread eval --budget through to claude's own per-invocation cap so runaway
+  // spend is bounded at the provider layer. Only included when the caller asked
+  // for it; absent flag means no provider-level cap.
+  if (typeof opts.maxBudgetUsd === 'number' && Number.isFinite(opts.maxBudgetUsd) && opts.maxBudgetUsd > 0) {
+    args.push('--max-budget-usd', String(opts.maxBudgetUsd));
+  }
 
   if (opts.verbose) {
     console.error(`[verbose] claude-cli spawn: claude ${args.map((a) => (a.includes(' ') ? `"${a.slice(0, 40)}..."` : a)).join(' ')}`);
@@ -462,6 +474,15 @@ export interface RunAgentOpts {
   verbose?: boolean;
   /** Temperature override (0–1). Default: model default (unset). */
   temperature?: number;
+  /**
+   * For `claude-cli/*` provider only: pass `--max-budget-usd <amount>` to the
+   * spawned `claude -p` invocation. Ignored by other providers.
+   *
+   * The Claude CLI enforces this as a hard cap on subscription spend for the
+   * single invocation. Eval runs thread their `--budget` flag through here so
+   * runaway spend is bounded at the provider layer.
+   */
+  maxBudgetUsd?: number;
 }
 
 export async function runAgent(
@@ -525,6 +546,7 @@ export async function runAgent(
       userPrompt,
       modelId,
       verbose: opts.verbose,
+      maxBudgetUsd: opts.maxBudgetUsd,
     });
     if (opts.verbose) {
       console.error(`[verbose] claude-cli response for ${agent.name}:\n${output}\n`);

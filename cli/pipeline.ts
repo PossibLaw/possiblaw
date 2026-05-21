@@ -67,11 +67,76 @@ function shouldApplyPrivacyFilter(
 // Public API
 // ---------------------------------------------------------------------------
 
+/**
+ * Default model per provider when `--provider <name>` is set on the CLI and
+ * `--model <name>` is NOT supplied. Run-time uniform-provider override —
+ * applied to every agent for the duration of the run, regardless of the
+ * agent's per-file `.model` frontmatter or any per-agent `team set-model`
+ * override.
+ *
+ * Keep this in sync with the provider registry in cli/llm.ts. If you add a
+ * provider there, add a sensible default here too.
+ */
+const DEFAULT_MODEL_PER_PROVIDER: Record<string, string> = {
+  'anthropic': 'claude-sonnet-4-6',
+  'claude-cli': 'sonnet',
+  'codex-cli': 'gpt-5.5',
+  'ollama': 'llama3.1:8b',
+};
+
+/**
+ * If `providerOverride` is set, rewrite the agent's model to
+ * `<provider>/<model>` where `<model>` is either `modelOverride` or the
+ * provider default. Returns the same agent reference when no override is
+ * active so existing comparisons/identity checks downstream are unaffected.
+ *
+ * Special case: `--provider anthropic` is a valid uniform-override target
+ * — every agent gets the same anthropic model (overrides per-agent
+ * `team set-model`). When no override is set, the per-agent model field is
+ * preserved (existing behavior).
+ */
+function applyProviderOverride(
+  agent: Agent,
+  providerOverride?: string,
+  modelOverride?: string
+): Agent {
+  if (!providerOverride) return agent;
+  const model = modelOverride ?? DEFAULT_MODEL_PER_PROVIDER[providerOverride];
+  if (!model) {
+    throw new Error(
+      `Unknown provider '${providerOverride}'. Known providers: ${Object.keys(DEFAULT_MODEL_PER_PROVIDER).join(', ')}.`
+    );
+  }
+  return { ...agent, model: `${providerOverride}/${model}` };
+}
+
 export interface PipelineOpts {
   verbose?: boolean;
   offline: boolean;
   privacyProfile?: 'always' | 'cloud-only' | 'off';
   matterTag?: string;
+  /**
+   * Optional run-time provider override. When set, every agent in the
+   * workflow has its model rewritten to `<provider>/<model>` for this run.
+   * Overrides per-agent `team set-model` config — the operator's intent is
+   * "use this provider for this run".
+   *
+   * Valid: 'anthropic' | 'claude-cli' | 'codex-cli' | 'ollama'.
+   */
+  providerOverride?: string;
+  /**
+   * Optional model name to pair with `providerOverride`. When unset, the
+   * provider's default model is used (see `DEFAULT_MODEL_PER_PROVIDER`).
+   * Ignored when `providerOverride` is not set.
+   */
+  modelOverride?: string;
+  /**
+   * Optional per-call budget cap (passed to claude-cli's `--max-budget-usd`).
+   * Threaded into every runAgent call so the cap applies to every LLM
+   * invocation in the workflow. Used by the eval harness to enforce
+   * `--budget` when running via the claude-cli provider.
+   */
+  maxBudgetUsd?: number;
 }
 
 export async function runPipeline(
@@ -92,6 +157,28 @@ export async function runPipeline(
 
   const privacyProfile = opts.privacyProfile ?? 'cloud-only';
   const matterTag = opts.matterTag ?? '';
+  const providerOverride = opts.providerOverride;
+  const modelOverride = opts.modelOverride;
+  const maxBudgetUsd = opts.maxBudgetUsd;
+
+  /**
+   * Local wrapper around `loadAgent` that applies the run-time provider
+   * override (if any) before returning. Use this in place of `loadAgent`
+   * throughout the pipeline body so every agent we touch picks up the
+   * uniform-provider override.
+   */
+  const loadAgentEffective = (name: string): Agent =>
+    applyProviderOverride(loadAgent(name), providerOverride, modelOverride);
+
+  /**
+   * Common runAgent options threaded into every call inside this run.
+   * `maxBudgetUsd` is only meaningful for claude-cli (other providers ignore it),
+   * but it's safe to pass unconditionally — the LLM layer gates it on provider.
+   */
+  const sharedRunOpts: { verbose?: boolean; maxBudgetUsd?: number } = {
+    verbose: opts.verbose,
+    ...(maxBudgetUsd !== undefined ? { maxBudgetUsd } : {}),
+  };
 
   const context: RunContext = {
     workflow,
@@ -114,10 +201,10 @@ export async function runPipeline(
 
     while (hops < MAX_HOPS && specialistName === null) {
       hops++;
-      const agent: Agent = loadAgent(currentAgentName);
+      const agent: Agent = loadAgentEffective(currentAgentName);
       const stepName = `route:${currentAgentName}`;
 
-      const result = await runAgent(agent, userPrompt, { verbose: opts.verbose });
+      const result = await runAgent(agent, userPrompt, sharedRunOpts);
 
       const { routeTo, rationale } = parseRoutingOutput(result.output);
 
@@ -185,7 +272,7 @@ export async function runPipeline(
       }
 
       // Determine if next agent is a specialist or another router/lead
-      const nextAgent: Agent = loadAgent(routeTo);
+      const nextAgent: Agent = loadAgentEffective(routeTo);
       if (nextAgent.role === 'specialist') {
         specialistName = nextAgent.name;
       } else {
@@ -200,7 +287,7 @@ export async function runPipeline(
     // -----------------------------------------------------------------------
     // Phase 2: Specialist (or parallel/debate override)
     // -----------------------------------------------------------------------
-    const specialist: Agent = loadAgent(specialistName);
+    const specialist: Agent = loadAgentEffective(specialistName);
     const skills = specialist.skills.map((skillName) => loadSkill(skillName));
 
     const runOneAgent = async (
@@ -230,6 +317,7 @@ export async function runPipeline(
           skills: agentSkills,
           verbose: opts.verbose,
           temperature,
+          ...(maxBudgetUsd !== undefined ? { maxBudgetUsd } : {}),
         });
         let decodedOutput: string;
         try {
@@ -253,6 +341,7 @@ export async function runPipeline(
         skills: agentSkills,
         verbose: opts.verbose,
         temperature,
+        ...(maxBudgetUsd !== undefined ? { maxBudgetUsd } : {}),
       });
     };
 
@@ -293,7 +382,7 @@ export async function runPipeline(
 
         const roundResults = await Promise.all(
           participants.map(async (participantName) => {
-            const participantAgent = loadAgent(participantName);
+            const participantAgent = loadAgentEffective(participantName);
             const participantSkills = participantAgent.skills.map((s) => loadSkill(s));
 
             let debatePrompt: string;
@@ -341,7 +430,7 @@ export async function runPipeline(
       }
 
       // Judge synthesizes final verdict
-      const judgeAgent = loadAgent(debateStep.judge);
+      const judgeAgent = loadAgentEffective(debateStep.judge);
       const judgeSkills = judgeAgent.skills.map((s) => loadSkill(s));
       const transcriptText = debateRounds
         .map((r) => {
@@ -439,7 +528,7 @@ export async function runPipeline(
       // Phase 2-reconcile: Merge parallel outputs
       // -----------------------------------------------------------------------
       if (reconcileStep) {
-        const reconcilerAgent = loadAgent(reconcileStep.agent);
+        const reconcilerAgent = loadAgentEffective(reconcileStep.agent);
         const reconcilerSkills = reconcilerAgent.skills.map((s) => loadSkill(s));
 
         const labeledBlocks = branchOutputs

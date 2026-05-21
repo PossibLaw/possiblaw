@@ -63,6 +63,45 @@ program
 // ---------------------------------------------------------------------------
 // possiblaw run <workflow> <prompt>
 // ---------------------------------------------------------------------------
+
+/**
+ * Known provider names accepted by --provider. Must match the providers in
+ * cli/llm.ts and the DEFAULT_MODEL_PER_PROVIDER table in cli/pipeline.ts.
+ */
+const KNOWN_PROVIDERS = ['anthropic', 'claude-cli', 'codex-cli', 'ollama'] as const;
+type ProviderName = (typeof KNOWN_PROVIDERS)[number];
+
+/**
+ * Resolve the offline-mode flag based on the requested provider.
+ *
+ * - anthropic (or unset): offline if ANTHROPIC_API_KEY is unset.
+ * - claude-cli / codex-cli: NEVER offline (subscription auth via local CLI;
+ *   the CLIs have their own credentials).
+ * - ollama: never offline at this layer — cli/llm.ts handles daemon-unreachable
+ *   fallback internally.
+ *
+ * Returns true when offline fixtures should be used.
+ */
+function resolveOfflineMode(provider: ProviderName | undefined): boolean {
+  if (provider === 'claude-cli' || provider === 'codex-cli') return false;
+  if (provider === 'ollama') return false;
+  // anthropic (explicit or default)
+  return !process.env['ANTHROPIC_API_KEY'];
+}
+
+/**
+ * Validate that --provider, when supplied, is one of the known names.
+ * Exits the process with a clear error message on invalid input.
+ */
+function validateProvider(raw: string | undefined): ProviderName | undefined {
+  if (raw === undefined) return undefined;
+  if ((KNOWN_PROVIDERS as readonly string[]).includes(raw)) return raw as ProviderName;
+  console.error(
+    `Error: --provider '${raw}' is not recognised. Known: ${KNOWN_PROVIDERS.join(', ')}.`
+  );
+  process.exit(1);
+}
+
 program
   .command('run')
   .description('Run a workflow on a matter prompt')
@@ -73,17 +112,22 @@ program
   .option('--no-color', 'Disable ANSI colour output')
   .option('--privacy-profile <profile>', 'Privacy filter profile: always | cloud-only | off', 'cloud-only')
   .option('--matter-tag <tag>', 'Matter tag (used by privacy-filter-required guardrail)', '')
+  .option('--provider <name>', `Route every agent through this provider: ${KNOWN_PROVIDERS.join(' | ')}`)
+  .option('--model <name>', 'Model name to use with --provider (defaults: sonnet/gpt-5.5/llama3.1:8b/claude-sonnet-4-6)')
   .action(async (workflowName: string, prompt: string, opts: {
     template: string;
     verbose: boolean;
     color: boolean;
     privacyProfile: string;
     matterTag: string;
+    provider?: string;
+    model?: string;
   }) => {
     const printerOpts = { color: opts.color, verbose: opts.verbose };
     printBanner(printerOpts);
 
-    const offline = !process.env['ANTHROPIC_API_KEY'];
+    const providerOverride = validateProvider(opts.provider);
+    const offline = resolveOfflineMode(providerOverride);
     if (offline) {
       console.log('[offline mode — ANTHROPIC_API_KEY not set; using deterministic fixtures]\n');
     }
@@ -102,6 +146,8 @@ program
         offline,
         privacyProfile,
         matterTag: opts.matterTag,
+        ...(providerOverride !== undefined ? { providerOverride } : {}),
+        ...(opts.model !== undefined ? { modelOverride: opts.model } : {}),
       });
 
       // Print each step as it's surfaced from the report
@@ -1379,6 +1425,8 @@ evalCmd
   .option('--budget <usd>', 'Spending cap in USD (default 50)', '50')
   .option('--output <dir>', 'Output directory for reports', join(REPO_ROOT, 'layer', 'evals', 'results'))
   .option('--dry-run', 'Run without LLM calls — validates dataset + adapter, produces stub report', false)
+  .option('--provider <name>', `Route every agent through this provider: ${KNOWN_PROVIDERS.join(' | ')}`)
+  .option('--model <name>', 'Model name to use with --provider (defaults: sonnet/gpt-5.5/llama3.1:8b/claude-sonnet-4-6)')
   .action(async (opts: {
     dataset?: string;
     workflow?: string;
@@ -1386,6 +1434,8 @@ evalCmd
     budget: string;
     output: string;
     dryRun: boolean;
+    provider?: string;
+    model?: string;
   }) => {
     printBanner({ color: true });
 
@@ -1403,7 +1453,8 @@ evalCmd
 
     const sampleSize = parseInt(opts.sampleSize, 10);
     const budgetUsd = parseFloat(opts.budget);
-    const offline = !process.env['ANTHROPIC_API_KEY'];
+    const providerOverride = validateProvider(opts.provider);
+    const offline = resolveOfflineMode(providerOverride);
 
     if (offline && !opts.dryRun) {
       console.log('[offline mode — ANTHROPIC_API_KEY not set; using deterministic fixtures + stub pipeline]\n');
@@ -1415,6 +1466,9 @@ evalCmd
     console.log(`Budget:      $${budgetUsd.toFixed(2)}`);
     console.log(`Output:      ${opts.output}`);
     console.log(`Dry run:     ${opts.dryRun ? 'yes' : 'no'}`);
+    if (providerOverride) {
+      console.log(`Provider:    ${providerOverride}${opts.model ? `/${opts.model}` : ' (default model)'}`);
+    }
     console.log('');
 
     try {
@@ -1426,6 +1480,8 @@ evalCmd
         outputDir: opts.output,
         dryRun: opts.dryRun,
         offline,
+        ...(providerOverride !== undefined ? { providerOverride } : {}),
+        ...(opts.model !== undefined ? { modelOverride: opts.model } : {}),
       });
 
       console.log(`Results (${report.actualSamples} samples):`);

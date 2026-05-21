@@ -66,6 +66,14 @@ export interface RunEvalOptions {
   outputDir?: string;
   dryRun?: boolean;
   offline?: boolean;
+  /**
+   * Optional run-time provider override. Forwarded to `runPipeline` so every
+   * agent in the workflow routes through `<providerOverride>/<modelOverride
+   * || default>` for every sample.
+   */
+  providerOverride?: string;
+  /** Optional model name paired with `providerOverride`. */
+  modelOverride?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -279,7 +287,23 @@ export async function runEval(opts: RunEvalOptions): Promise<EvalReport> {
     outputDir = join(REPO_ROOT, 'layer', 'evals', 'results'),
     dryRun = false,
     offline = false,
+    providerOverride,
+    modelOverride,
   } = opts;
+
+  /**
+   * When the eval is routing through claude-cli, thread the user-supplied
+   * --budget through to every `claude -p` invocation as `--max-budget-usd`.
+   * This is a provider-level safety net in addition to our own
+   * BUDGET_ABORT_THRESHOLD check below.
+   *
+   * For other providers (anthropic / codex-cli / ollama), the value is left
+   * unset — pricing for those is tracked via our own cost ledger.
+   */
+  const claudeCliMaxBudgetUsd =
+    providerOverride === 'claude-cli' && Number.isFinite(budgetUsd) && budgetUsd > 0
+      ? budgetUsd
+      : undefined;
 
   const BUDGET_ABORT_THRESHOLD = budgetUsd * 0.95;
 
@@ -331,6 +355,9 @@ export async function runEval(opts: RunEvalOptions): Promise<EvalReport> {
           verbose: false,
           offline,
           privacyProfile: 'off',
+          ...(providerOverride !== undefined ? { providerOverride } : {}),
+          ...(modelOverride !== undefined ? { modelOverride } : {}),
+          ...(claudeCliMaxBudgetUsd !== undefined ? { maxBudgetUsd: claudeCliMaxBudgetUsd } : {}),
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
