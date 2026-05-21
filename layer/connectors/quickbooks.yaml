@@ -1,0 +1,33 @@
+id: quickbooks
+name: QuickBooks
+category: business
+tier: open-access
+description: >
+  Intuit QuickBooks Online via node-quickbooks SDK. Free Intuit Developer
+  sandbox available at https://developer.intuit.com. Set QB_USE_SANDBOX=true
+  (default) for dev/test; QB_USE_SANDBOX=false for production.
+env_vars:
+  - name: QB_CONSUMER_KEY
+    required: true
+    description: OAuth 1.0a consumer key from Intuit Developer portal
+  - name: QB_CONSUMER_SECRET
+    required: true
+    description: OAuth 1.0a consumer secret from Intuit Developer portal
+  - name: QB_TOKEN
+    required: true
+    description: OAuth 1.0a access token
+  - name: QB_TOKEN_SECRET
+    required: true
+    description: OAuth 1.0a access token secret
+  - name: QB_REALM_ID
+    required: true
+    description: QuickBooks Online company ID (realm ID)
+  - name: QB_USE_SANDBOX
+    required: false
+    description: "Set to 'false' for production. Default: true (sandbox)."
+capabilities:
+  - customers.list
+  - invoices.create
+  - invoices.list
+  - accounts.list
+docs: https://developer.intuit.com/app/developer/qbo/docs/develop

@@ -9,6 +9,9 @@ fallback_model: anthropic/claude-sonnet-4-6
 tests: [scope-adherence]
 guardrails: []
 skills: [calendar-coordination-playbook]
+connectors: []
+# No live connector yet. Google Workspace (Calendar) and Microsoft 365 (Outlook/Teams)
+# are documented in docs/connectors-inventory.md and deferred to Sprint 6B+.
 description: Specialist that proposes up to 3 meeting time slots given goal, attendees, and scheduling constraints.
 ---
 

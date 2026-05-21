@@ -9,6 +9,37 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Sprint 6B — Live adapters for remaining named connectors + v1 inventory
+
+- **Legal enterprise connectors** (paid tier, HTTP-only adapters):
+  - `cli/connectors/imanage.ts` — iManage Work API v2. Bearer-token auth (OAuth documented in `imanage.README.md`). Capabilities: `documents.list`, `documents.get`, `documents.put`, `folders.list`. Stand-in: `local-fs-doc-store`.
+  - `cli/connectors/netdocuments.ts` — NetDocuments REST API v2. OAuth bearer token. Capabilities: `documents.list`, `documents.get`, `documents.put`, `workspaces.list`. Stand-in: `local-fs-doc-store`.
+  - `cli/connectors/westlaw.ts` — Thomson Reuters Westlaw Edge API. UNCONFIRMED: base URL `https://api.westlaw.com/v1/` and request shapes are placeholders; enterprise TR contract required. Capabilities: `cases.search`, `cases.get`, `citations.kbcheck`. Stand-in: `courtlistener`.
+  - `cli/connectors/lexis.ts` — LexisNexis API. UNCONFIRMED: base URL `https://api.lexis.com/v1/` and request shapes are placeholders; enterprise LN contract required. Capabilities: `cases.search`, `cases.get`, `citations.shepardize`. Stand-in: `courtlistener`.
+- **Business open-access connectors** (official SDKs):
+  - `cli/connectors/quickbooks.ts` — QuickBooks Online via `node-quickbooks` SDK. OAuth 1.0a. Free Intuit Developer sandbox. Capabilities: `customers.list`, `invoices.create`, `invoices.list`, `accounts.list`.
+  - `cli/connectors/hubspot.ts` — HubSpot CRM via `@hubspot/api-client` SDK. Private app access token. Capabilities: `contacts.list`, `contacts.create`, `companies.list`, `deals.create`.
+  - `cli/connectors/notion.ts` — Notion workspace via `@notionhq/client` SDK. Internal integration token. Capabilities: `pages.create`, `pages.update`, `databases.query`, `search`.
+  - `cli/connectors/linear.ts` — Linear issue tracker via `@linear/sdk`. Personal API key. Capabilities: `issues.list`, `issues.create`, `teams.list`, `projects.list`.
+- **Per-connector READMEs** for non-obvious setups:
+  - `cli/connectors/imanage.README.md` — Bearer token + OAuth 2.0 client credentials flow walkthrough.
+  - `cli/connectors/westlaw.README.md` — UNCONFIRMED reconciliation checklist for TR enterprise contract holders.
+  - `cli/connectors/lexis.README.md` — UNCONFIRMED reconciliation checklist for LN enterprise contract holders.
+- **`layer/connectors/<id>.yaml`** — Declarative descriptors for all 8 new connectors.
+- **`cli/connectors/index.ts`** — Updated to import all 8 new connector modules (14 total registered).
+- **`package.json`** — Added `@hubspot/api-client ^11`, `@linear/sdk ^29`, `@notionhq/client ^2`, `node-quickbooks ^2` (dependencies); `@types/node-quickbooks ^2` (devDependencies).
+- **`.env.example`** — New grouped sections for all 8 connectors; all marked NOT REQUIRED for offline demo.
+- **Agent wiring** (connector declarations only; runtime dispatch is Sprint 7):
+  - `pitch-polisher` — Added `connectors: [hubspot, notion]`.
+  - `intake-form-drafter` — Added `connectors: [hubspot, notion]`.
+  - `billing-prep` — Extended from `[stripe]` to `[stripe, quickbooks]`.
+  - `calendar-coordinator` — Added `connectors: []` with comment noting Google Workspace / M365 are deferred to Sprint 6B+ (see `docs/connectors-inventory.md`).
+- **`docs/connectors-inventory.md`** — v1 connector inventory: 14 live connectors (3 stand-ins + 11 live) listed in full, plus 14 deferred v1 targets documented (Clio, MyCase, Rocket Matter, Filevine, Smokeball, Tabs3, Litera, Kira, Relativity, Slack, Zoom, Google Workspace, Microsoft 365, Salesforce, Zapier) with name, category, API surface, status, and stand-in equivalents.
+- **`docs/sprint-6-demo.md`** — Sprint 6B walkthrough added: updated architecture diagram, 5 new demo commands, UNCONFIRMED connector guidance, and connector inventory reference.
+- **`docs/DEMO-SCRIPT.md`** — Sprint 6 section updated to reflect 14-connector total.
+
+---
+
 ### Sprint 6A — Connector framework + open-access stand-ins + 3 reference live connectors
 
 - **`cli/connectors/types.ts`** — `ConnectorMetadata`, `ConnectorClient`, `ConnectorFactory`, `HealthcheckResult` interfaces. Every connector implements `ConnectorClient`.

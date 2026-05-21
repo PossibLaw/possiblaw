@@ -1,0 +1,26 @@
+id: westlaw
+name: Westlaw
+category: legal
+tier: paid
+description: >
+  Thomson Reuters Westlaw Edge API for case search and KeyCite citation
+  verification. Enterprise contract with Thomson Reuters required.
+  UNCONFIRMED: base URL and API shape are placeholders — verify with TR.
+  See cli/connectors/westlaw.README.md for reconciliation checklist.
+env_vars:
+  - name: WESTLAW_API_KEY
+    required: true
+    description: API key from Thomson Reuters developer portal (enterprise contract required)
+  - name: WESTLAW_USER_ID
+    required: true
+    description: Westlaw user ID associated with the API credential
+capabilities:
+  - cases.search
+  - cases.get
+  - citations.kbcheck
+stand_in: courtlistener
+notes: >
+  UNCONFIRMED: base URL https://api.westlaw.com/v1/ is a placeholder.
+  Auth headers, request shapes, and endpoint paths must be reconciled with
+  the TR API spec obtained under enterprise contract.
+docs: https://developer.thomsonreuters.com

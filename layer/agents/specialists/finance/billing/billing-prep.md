@@ -9,7 +9,7 @@ fallback_model: anthropic/claude-sonnet-4-6
 tests: [scope-adherence]
 guardrails: [signed-document]
 skills: [billing-playbook]
-connectors: [stripe]
+connectors: [stripe, quickbooks]
 description: Specialist that drafts invoices for legal matters — line items, hours, rates, total, due date, and payment block.
 ---
 

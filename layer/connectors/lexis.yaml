@@ -1,0 +1,26 @@
+id: lexis
+name: Lexis
+category: legal
+tier: paid
+description: >
+  LexisNexis API for case search and Shepard's citation verification.
+  Enterprise contract with LexisNexis required; endpoint varies by product.
+  UNCONFIRMED: base URL and API shape are placeholders — verify with LexisNexis.
+  See cli/connectors/lexis.README.md for reconciliation checklist.
+env_vars:
+  - name: LEXIS_API_KEY
+    required: true
+    description: API key from LexisNexis developer portal (enterprise contract required)
+  - name: LEXIS_USER_ID
+    required: true
+    description: LexisNexis user ID associated with the API credential
+capabilities:
+  - cases.search
+  - cases.get
+  - citations.shepardize
+stand_in: courtlistener
+notes: >
+  UNCONFIRMED: base URL https://api.lexis.com/v1/ is a placeholder.
+  Auth headers, request shapes, and endpoint paths must be reconciled with
+  the LexisNexis API spec obtained under enterprise contract.
+docs: https://developer.lexisnexis.com

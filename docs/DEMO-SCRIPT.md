@@ -252,14 +252,14 @@ env -u ANTHROPIC_API_KEY node dist/cli/index.js run quick-invoice-review \
 
 ---
 
-## Sprint 6A: Connectors
+## Sprint 6A+6B: Connectors (14 total)
 
 See [docs/sprint-6-demo.md](./sprint-6-demo.md) for the full connector walkthrough.
 
 Quick commands:
 
 ```bash
-# 1. List all 6 registered connectors with configured status
+# 1. List all 14 registered connectors with configured status
 node dist/cli/index.js connectors list
 
 # 2. Healthcheck the stand-in connectors (always ok, no creds)
@@ -269,8 +269,14 @@ node dist/cli/index.js connectors check courtlistener     # real HTTP to courtli
 
 # 3. Healthcheck a live connector — not configured without creds
 node dist/cli/index.js connectors check stripe            # ok: false (no STRIPE_API_KEY)
+node dist/cli/index.js connectors check hubspot           # ok: false (no HUBSPOT_ACCESS_TOKEN)
+node dist/cli/index.js connectors check imanage           # ok: false (no IMANAGE_TOKEN etc.)
 
 # 4. Inspect capabilities
-node dist/cli/index.js connectors capabilities stripe
-node dist/cli/index.js connectors capabilities local-fs-doc-store
+node dist/cli/index.js connectors capabilities hubspot
+node dist/cli/index.js connectors capabilities notion
+node dist/cli/index.js connectors capabilities imanage
+
+# 5. View connector inventory (live + deferred v1 targets)
+# See docs/connectors-inventory.md for Clio, Slack, Google Workspace, M365, etc.
 ```

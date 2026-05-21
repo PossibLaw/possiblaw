@@ -9,6 +9,7 @@ fallback_model: anthropic/claude-sonnet-4-6
 tests: [scope-adherence, groundedness]
 guardrails: []
 skills: [pitch-polish-playbook]
+connectors: [hubspot, notion]
 description: Specialist that polishes pitch deck sections or pitch emails, improving clarity, value statement, evidence, and call to action.
 ---
 

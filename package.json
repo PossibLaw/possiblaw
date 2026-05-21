@@ -18,10 +18,14 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30",
+    "@hubspot/api-client": "^11",
+    "@linear/sdk": "^29",
+    "@notionhq/client": "^2",
     "commander": "^12",
     "docusign-esign": "^6",
     "gray-matter": "^4",
     "js-yaml": "^4",
+    "node-quickbooks": "^2",
     "stripe": "^17"
   },
   "devDependencies": {

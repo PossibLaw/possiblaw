@@ -1,0 +1,25 @@
+id: imanage
+name: iManage
+category: legal
+tier: paid
+description: >
+  iManage Work document management system. Enterprise DMS for law firms.
+  Requires iManage Work API v2 access and an active iManage subscription.
+  Bearer-token auth implemented; OAuth 2.0 documented in imanage.README.md.
+env_vars:
+  - name: IMANAGE_HOST
+    required: true
+    description: iManage Work host URL (e.g. https://yourfirm.cloudimanage.com)
+  - name: IMANAGE_LIBRARY
+    required: true
+    description: iManage library name (e.g. ACTIVE)
+  - name: IMANAGE_TOKEN
+    required: true
+    description: Bearer token (or OAuth access token). See cli/connectors/imanage.README.md.
+capabilities:
+  - documents.list
+  - documents.get
+  - documents.put
+  - folders.list
+stand_in: local-fs-doc-store
+docs: https://developers.imanage.com

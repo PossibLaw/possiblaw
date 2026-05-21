@@ -1,0 +1,25 @@
+id: netdocuments
+name: NetDocuments
+category: legal
+tier: paid
+description: >
+  NetDocuments cloud DMS for law firms. REST API v2. Requires a NetDocuments
+  account with API access and OAuth 2.0 credentials. Region-specific host
+  variants may apply.
+env_vars:
+  - name: NETDOCS_HOST
+    required: true
+    description: NetDocuments API host (default https://api.netdocuments.com; region variants exist)
+  - name: NETDOCS_REPOSITORY_ID
+    required: true
+    description: NetDocuments repository/cabinet ID for document operations
+  - name: NETDOCS_OAUTH_TOKEN
+    required: true
+    description: OAuth 2.0 access token via NetDocuments authorization code flow
+capabilities:
+  - documents.list
+  - documents.get
+  - documents.put
+  - workspaces.list
+stand_in: local-fs-doc-store
+docs: https://support.netdocuments.com/hc/en-us/categories/200189975-API

@@ -9,6 +9,7 @@ fallback_model: anthropic/claude-sonnet-4-6
 tests: [scope-adherence]
 guardrails: []
 skills: [intake-form-playbook]
+connectors: [hubspot, notion]
 description: Specialist that designs web-form questionnaires (field labels, types, required flags) for new client intake.
 ---
 

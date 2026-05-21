@@ -1,0 +1,20 @@
+id: hubspot
+name: HubSpot
+category: business
+tier: open-access
+description: >
+  HubSpot CRM via official @hubspot/api-client SDK. Free developer account
+  available at https://developers.hubspot.com. Uses private app access tokens.
+  No OAuth callback server required for private app tokens.
+env_vars:
+  - name: HUBSPOT_ACCESS_TOKEN
+    required: true
+    description: >
+      Private app access token from HubSpot portal.
+      Create at: Settings → Integrations → Private Apps → Create a private app.
+capabilities:
+  - contacts.list
+  - contacts.create
+  - companies.list
+  - deals.create
+docs: https://developers.hubspot.com/docs/api/overview

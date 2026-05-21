@@ -1,0 +1,18 @@
+id: linear
+name: Linear
+category: business
+tier: open-access
+description: >
+  Linear issue tracker via official @linear/sdk. Free dev account available
+  at https://linear.app. Generate an API key at Settings → API → Personal
+  API keys. Supports issues, teams, and projects.
+env_vars:
+  - name: LINEAR_API_KEY
+    required: true
+    description: Personal API key from Linear Settings → API → Personal API keys.
+capabilities:
+  - issues.list
+  - issues.create
+  - teams.list
+  - projects.list
+docs: https://developers.linear.app/docs/sdk/getting-started

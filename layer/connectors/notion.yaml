@@ -1,0 +1,21 @@
+id: notion
+name: Notion
+category: business
+tier: open-access
+description: >
+  Notion workspace via official @notionhq/client SDK. Free for personal/dev
+  use. Create an integration at https://www.notion.so/my-integrations and
+  grant it access to the pages it needs to read/write.
+env_vars:
+  - name: NOTION_API_KEY
+    required: true
+    description: >
+      Notion internal integration token.
+      Create at https://www.notion.so/my-integrations, then share the
+      relevant pages with your integration.
+capabilities:
+  - pages.create
+  - pages.update
+  - databases.query
+  - search
+docs: https://developers.notion.com/reference/intro

@@ -125,19 +125,145 @@ These are declarations only in Sprint 6A. Runtime tool-use integration is Sprint
 
 ---
 
-## Sprint 6B Roadmap
+---
 
-Sprint 6B will add live adapters for:
+## Sprint 6B — All 14 connectors operational
 
-| Connector | Category | Pattern |
-|---|---|---|
-| iManage | legal | HTTP-only (OAuth) |
-| NetDocuments | legal | HTTP-only (OAuth) |
-| Westlaw | legal | HTTP-only (key) |
-| Lexis | legal | HTTP-only (key) |
-| QuickBooks | business | OAuth (PKCE) |
-| HubSpot | business | OAuth |
-| Notion | business | official SDK |
-| Linear | business | GraphQL |
+Sprint 6B adds 8 live adapters: 4 legal enterprise and 4 business open-access.
 
-Plus: runtime connector dispatch from agent tool-use loop.
+### Updated architecture
+
+```
+cli/connectors/
+  ...  (6A files unchanged)
+  imanage.ts        — live: HTTP Bearer. iManage Work API v2.
+  netdocuments.ts   — live: HTTP OAuth Bearer. NetDocuments REST API v2.
+  westlaw.ts        — live: HTTP key. UNCONFIRMED endpoint — see westlaw.README.md.
+  lexis.ts          — live: HTTP key. UNCONFIRMED endpoint — see lexis.README.md.
+  quickbooks.ts     — live: node-quickbooks SDK. Intuit QBO.
+  hubspot.ts        — live: @hubspot/api-client SDK.
+  notion.ts         — live: @notionhq/client SDK.
+  linear.ts         — live: @linear/sdk.
+  imanage.README.md — OAuth setup + Bearer token flow docs.
+  westlaw.README.md — UNCONFIRMED reconciliation checklist.
+  lexis.README.md   — UNCONFIRMED reconciliation checklist.
+
+layer/connectors/
+  imanage.yaml / netdocuments.yaml / westlaw.yaml / lexis.yaml
+  quickbooks.yaml / hubspot.yaml / notion.yaml / linear.yaml
+
+docs/
+  connectors-inventory.md — Full v1 connector inventory (14 live + 14 deferred).
+```
+
+---
+
+## Demo 6B-1 — List all 14 connectors
+
+```bash
+node dist/cli/index.js connectors list
+```
+
+Expected output (stand-ins always `yes`; live connectors `no` without creds):
+
+```
+ID                       CATEGORY     TIER           CONFIGURED
+----------------------------------------------------------------------
+local-fs-doc-store       stand-in     open-access    yes
+no-op-signature          stand-in     open-access    yes
+courtlistener            stand-in     open-access    yes
+stripe                   business     open-access    no
+midpage                  legal        paid           no
+docusign                 legal        paid           no
+imanage                  legal        paid           no
+netdocuments             legal        paid           no
+westlaw                  legal        paid           no
+lexis                    legal        paid           no
+quickbooks               business     open-access    no
+hubspot                  business     open-access    no
+notion                   business     open-access    no
+linear                   business     open-access    no
+```
+
+---
+
+## Demo 6B-2 — Healthcheck new connectors (not configured)
+
+```bash
+node dist/cli/index.js connectors check imanage
+node dist/cli/index.js connectors check westlaw
+node dist/cli/index.js connectors check hubspot
+node dist/cli/index.js connectors check notion
+```
+
+Each returns `ok: false` with a clear "Missing env vars: <X>" message.
+
+---
+
+## Demo 6B-3 — HubSpot (open-access, dev account)
+
+```bash
+export HUBSPOT_ACCESS_TOKEN=<your-private-app-token>
+node dist/cli/index.js connectors check hubspot
+```
+
+Expected:
+```
+Running healthcheck for connector: hubspot
+  ok:     true
+  detail: HubSpot reachable — contacts paged (has_more: false)
+```
+
+---
+
+## Demo 6B-4 — Notion (open-access, integration token)
+
+```bash
+export NOTION_API_KEY=<your-integration-token>
+node dist/cli/index.js connectors check notion
+```
+
+Expected:
+```
+Running healthcheck for connector: notion
+  ok:     true
+  detail: Notion reachable — bot user: <integration-name>
+```
+
+---
+
+## Demo 6B-5 — Agent connector declarations
+
+Agents that declare connectors in their frontmatter as of Sprint 6B:
+
+| Agent | Connectors |
+|---|---|
+| `nda-drafter` | `[local-fs-doc-store]` |
+| `billing-prep` | `[stripe, quickbooks]` |
+| `pitch-polisher` | `[hubspot, notion]` |
+| `intake-form-drafter` | `[hubspot, notion]` |
+| `calendar-coordinator` | `[]` (Google Workspace / M365 deferred — see connectors-inventory.md) |
+
+---
+
+## UNCONFIRMED connectors
+
+`westlaw` and `lexis` use placeholder base URLs and request shapes. They will
+return 404 or connection errors until reconciled with the TR/LN API spec.
+The `westlaw.README.md` and `lexis.README.md` files list the full reconciliation
+checklist.
+
+When credentials arrive:
+1. Update `BASE_URL` in the respective `.ts` file.
+2. Verify auth headers match the TR/LN spec.
+3. Remove UNCONFIRMED comments.
+4. Run `pnpm typecheck && pnpm build` and test `connectors check westlaw`.
+
+---
+
+## Connector inventory
+
+`docs/connectors-inventory.md` documents all 14 live connectors plus 14 deferred
+targets from the v1 PossibLaw plan: Clio, MyCase, Filevine, Smokeball, Rocket
+Matter, Tabs3, Litera, Kira, Relativity (legal); Slack, Zoom, Google Workspace,
+Microsoft 365, Salesforce, Zapier (business).
