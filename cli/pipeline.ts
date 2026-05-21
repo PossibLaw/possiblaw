@@ -41,7 +41,12 @@ function parseRoutingOutput(output: string): { routeTo: string | null; rationale
 /**
  * Determine whether the privacy filter should apply to this agent call.
  * Returns true if `profile === 'always'`, or if `profile === 'cloud-only'` and the
- * agent model is a cloud/Anthropic model (model id starts with 'anthropic/' or 'claude').
+ * agent model is a cloud model. Cloud models include:
+ *   - anthropic/* (direct API)
+ *   - bare claude-* (back-compat for anthropic with no prefix)
+ *   - claude-cli/* (subscription routes through Anthropic's cloud)
+ *   - codex-cli/* (subscription routes through OpenAI's cloud)
+ * ollama/* is *not* cloud (runs locally).
  */
 function shouldApplyPrivacyFilter(
   profile: 'always' | 'cloud-only' | 'off',
@@ -50,8 +55,12 @@ function shouldApplyPrivacyFilter(
   if (profile === 'off') return false;
   if (profile === 'always') return true;
   // cloud-only: apply when the model is a cloud model
-  const normalized = agentModel.toLowerCase().replace(/^anthropic\//, '');
-  return normalized.startsWith('claude') || agentModel.startsWith('anthropic/');
+  if (agentModel.startsWith('ollama/')) return false;
+  if (agentModel.startsWith('claude-cli/')) return true;
+  if (agentModel.startsWith('codex-cli/')) return true;
+  if (agentModel.startsWith('anthropic/')) return true;
+  const normalized = agentModel.toLowerCase();
+  return normalized.startsWith('claude');
 }
 
 // ---------------------------------------------------------------------------
@@ -750,6 +759,9 @@ function computeCost(steps: RunStepResult[], agentCalls: AgentCallRecord[]): Cos
 
   const PRICING_NOTE = 'Pricing snapshot 2026-05-20. Update cli/pricing.ts to refresh.';
   const allOffline = agentCalls.every((c) => c.model.includes('(offline)'));
+  const hasSubscription = agentCalls.some(
+    (c) => c.model.startsWith('claude-cli/') || c.model.startsWith('codex-cli/')
+  );
 
   for (const step of steps) {
     const rec = step.agentCallRecord;
@@ -776,6 +788,9 @@ function computeCost(steps: RunStepResult[], agentCalls: AgentCallRecord[]): Cos
   const notes: string[] = [PRICING_NOTE];
   if (allOffline) {
     notes.push('(offline — model costs not incurred)');
+  }
+  if (hasSubscription) {
+    notes.push('Rows marked "subscription" are billed via your claude/codex CLI subscription, not per-call.');
   }
 
   return { total, by_phase: { routing, specialist, tests, guardrails }, by_call, notes };

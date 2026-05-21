@@ -193,7 +193,7 @@ teamCmd
   .command('set-model')
   .description('Override the model for an agent (writes to .possiblaw/overrides.yaml)')
   .argument('<agent>', 'Agent name (must exist in layer/agents/)')
-  .argument('<model>', 'Model string: anthropic/<name> or ollama/<name>')
+  .argument('<model>', 'Model string: anthropic/<name> | ollama/<name> | claude-cli/<name> | codex-cli/<name>')
   .action((agentName: string, model: string) => {
     try {
       // Validate agent exists
@@ -206,10 +206,10 @@ teamCmd
       }
 
       // Validate model format
-      const validPattern = /^(anthropic\/(claude-[a-z0-9.-]+)|ollama\/.+)$/;
+      const validPattern = /^(anthropic\/(claude-[a-z0-9.-]+)|ollama\/.+|claude-cli\/.+|codex-cli\/.+)$/;
       if (!validPattern.test(model)) {
         console.error(
-          `Error: Model '${model}' must be one of:\n  anthropic/claude-<name>\n  ollama/<anything>`
+          `Error: Model '${model}' must be one of:\n  anthropic/claude-<name>\n  ollama/<anything>\n  claude-cli/<anything>  (subscription auth)\n  codex-cli/<anything>   (subscription auth)`
         );
         process.exit(1);
       }

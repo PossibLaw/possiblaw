@@ -27,7 +27,8 @@
     "possiblaw": "node dist/cli/index.js",
     "lint": "echo 'no lint configured yet — placeholder'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo 'no tests configured yet — placeholder'"
+    "test": "echo 'no tests configured yet — placeholder'",
+    "test:llm-providers": "tsx cli/__tests__/llm-providers.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30",

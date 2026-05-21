@@ -3,7 +3,7 @@
  * Uses simple ANSI escapes only — no external dependencies.
  */
 import type { RunReport, RunStepResult, AuditEvent } from './types.js';
-import { formatCost } from './pricing.js';
+import { formatCost, formatCallCost } from './pricing.js';
 import type { CostBreakdown } from './pricing.js';
 
 // ---------------------------------------------------------------------------
@@ -149,6 +149,9 @@ export function printReport(report: RunReport, opts: PrinterOpts): void {
 
 export function printCostReport(cost: CostBreakdown, opts: PrinterOpts): void {
   const offline = cost.notes.some((n) => n.includes('offline'));
+  const hasSubscriptionCalls = cost.by_call.some(
+    (c) => c.model.startsWith('claude-cli/') || c.model.startsWith('codex-cli/')
+  );
   console.log('');
   console.log(c(DIM, '─'.repeat(45), opts.color));
   console.log(c(BOLD, 'Cost report (pricing snapshot 2026-05-20)', opts.color));
@@ -164,6 +167,18 @@ export function printCostReport(cost: CostBreakdown, opts: PrinterOpts): void {
     console.log(`  Guardrails: ${formatCost(bp.guardrails)}  (rule-based, free)`);
     console.log(c(DIM, '  ' + '─'.repeat(35), opts.color));
     console.log(`  Total:      ${c(BOLD, formatCost(cost.total), opts.color)}`);
+  }
+
+  // Per-call breakdown — surface subscription rows distinctly. We only render
+  // this when there is at least one subscription-auth call, so the existing
+  // offline/anthropic-only output is unchanged.
+  if (hasSubscriptionCalls && !offline) {
+    console.log(c(DIM, '─'.repeat(45), opts.color));
+    console.log(c(BOLD, '  Per-call:', opts.color));
+    for (const call of cost.by_call) {
+      const label = formatCallCost(call.model, call.cost);
+      console.log(`    ${call.agent.padEnd(20)} ${call.model.padEnd(20)}  ${label}`);
+    }
   }
 
   console.log(c(DIM, '─'.repeat(45), opts.color));

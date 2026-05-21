@@ -59,6 +59,16 @@ function isOllama(model: string): boolean {
   return cleaned.startsWith('ollama/') || model.startsWith('ollama/');
 }
 
+/**
+ * Returns true if the model string belongs to a subscription-auth provider
+ * (claude-cli/* or codex-cli/*). For these providers the operator already
+ * pays via subscription, so the per-call cost is $0.
+ */
+export function isSubscriptionProvider(model: string): boolean {
+  const cleaned = model.replace(/\s*\(offline\)\s*$/, '').trim();
+  return cleaned.startsWith('claude-cli/') || cleaned.startsWith('codex-cli/');
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -73,6 +83,8 @@ export function costForCall(
   outputTokens: number
 ): number {
   if (isOffline(model) || isOllama(model)) return 0;
+  // Subscription providers: operator pays the flat subscription fee, not per-call.
+  if (isSubscriptionProvider(model)) return 0;
 
   const normalized = normalizeModel(model);
   const price = PRICING_TABLE[normalized];
@@ -80,6 +92,17 @@ export function costForCall(
 
   return (inputTokens / 1_000_000) * price.inputPerMillion +
          (outputTokens / 1_000_000) * price.outputPerMillion;
+}
+
+/**
+ * Format the cost cell for a single agent call. For subscription providers,
+ * returns the literal string `subscription` so the cost report makes clear
+ * the call did not incur a per-call charge. For all other providers, returns
+ * a dollar-formatted string with 4 decimal places.
+ */
+export function formatCallCost(model: string, cost: number): string {
+  if (isSubscriptionProvider(model)) return 'subscription';
+  return formatCost(cost);
 }
 
 const PRICING_NOTE = 'Pricing snapshot 2026-05-20. Update cli/pricing.ts to refresh.';
