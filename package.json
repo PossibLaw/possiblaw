@@ -1,0 +1,31 @@
+{
+  "name": "possiblaw",
+  "version": "0.0.1",
+  "description": "Proof-of-concept layer on paperclip for operating a legal business with AI",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "possiblaw": "bin/possiblaw"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp -r cli/fixtures dist/cli/fixtures",
+    "dev": "tsx cli/index.ts",
+    "possiblaw": "node dist/cli/index.js",
+    "lint": "echo 'no lint configured yet — placeholder'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'no tests configured yet — placeholder'"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30",
+    "commander": "^12",
+    "gray-matter": "^4",
+    "js-yaml": "^4"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4",
+    "@types/node": "^20",
+    "tsx": "^4",
+    "typescript": "^5.4"
+  }
+}

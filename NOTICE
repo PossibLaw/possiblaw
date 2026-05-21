@@ -1,0 +1,11 @@
+PossibLaw
+Copyright 2026 PossibLaw contributors
+
+This product includes software developed as part of paperclip
+(https://github.com/paperclipai/paperclip), used as a git submodule.
+paperclip is licensed under the MIT License. The full text of the
+paperclip license appears in paperclip/LICENSE within this repository.
+
+PossibLaw also draws design-pattern inspiration (not code) from:
+- AnttiHero/lavern — workflow-template patterns, escalation-as-success framing
+- mike — skill-extraction patterns (no code copies; AGPL-3.0 sources)

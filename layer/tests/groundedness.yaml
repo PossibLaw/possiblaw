@@ -1,0 +1,11 @@
+name: groundedness
+kind: test
+type: stub
+description: |
+  Stub groundedness check. Returns pass deterministically.
+  Real implementation lands in Sprint 2 per §9.
+threshold: 0.9
+stub_result:
+  pass: true
+  score: 0.95
+  rationale: Sprint 1a stub — returns pass.

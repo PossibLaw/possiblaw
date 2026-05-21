@@ -1,0 +1,14 @@
+name: solo-lawyer
+description: A solo lawyer's day-one roster
+roster:
+  routers:
+    - chief-counsel
+  leads:
+    - commercial-lead
+  specialists:
+    - nda-drafter
+workflows:
+  - quick-counsel
+disclaimer: |
+  PossibLaw does not practice law. The operator is the responsible
+  professional. Treat all output as a starting point.
