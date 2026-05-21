@@ -1,0 +1,12 @@
+name: clause-extract
+description: "Direct clause-extraction — calls the clause-extractor specialist without a routing layer. Designed for CUAD-style evals where the prompt itself names the clause."
+router: clause-extractor
+pipeline:
+  - step: specialist
+    agent: clause-extractor
+  - step: test
+    suite: []
+  - step: guardrail
+    suite: []
+on_test_failure: escalate_to_human
+on_guardrail_hit: escalate_to_human
