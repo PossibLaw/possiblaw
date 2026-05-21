@@ -1,0 +1,13 @@
+{
+  "name": "ACORD",
+  "full_name": "ACORD Insurance Forms (public samples)",
+  "version": "1.0",
+  "license": "ACORD Public Sample License — research use permitted. ACORD forms are copyrighted by ACORD Corporation. Use is restricted to research and evaluation purposes only. Do not redistribute or use commercially without a license from ACORD (https://www.acord.org).",
+  "license_url": "https://www.acord.org/standards-architecture/acord-data-standards",
+  "source_url": "https://www.acord.org/standards-architecture/acord-forms",
+  "citation": "ACORD Corporation. ACORD Insurance Forms. https://www.acord.org/standards-architecture/acord-forms",
+  "task": "structured field extraction",
+  "description": "Insurance certificate and application forms. This eval uses hand-curated synthetic samples that mirror public ACORD form structure for research/evaluation purposes only.",
+  "note": "Synthetic samples only — no real ACORD-licensed form content is bundled. Each field label and structure reflects the publicly documented ACORD form schema.",
+  "fetched_at": null
+}

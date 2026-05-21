@@ -9,6 +9,29 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Sprint 9 — Eval suite (CUAD, MAUD, ACORD, UNFAIR-ToS, LEDGAR)
+
+- **`layer/evals/datasets/cuad/fetch.ts`** — HF `theatticusproject/cuad-qa` fetch script. Idempotent. `--limit N` flag. Writes `cache/samples.jsonl` + updates `METADATA.json` timestamp. Exports `loadSamples()` / `isCached()`. Falls back to bundled `fixtures.jsonl`.
+- **`layer/evals/datasets/maud/fetch.ts`** — HF `theatticusproject/maud` fetch script. Same interface.
+- **`layer/evals/datasets/acord/fetch.ts`** — Synthetic ACORD-schema samples (research use; no real ACORD form content). 3 hand-curated samples for ACORD 25/27 field extraction. Falls back to in-memory defaults when cache absent.
+- **`layer/evals/datasets/unfair-tos/fetch.ts`** — HF `lex_glue/unfair_tos` fetch script. CC BY 4.0.
+- **`layer/evals/datasets/ledgar/fetch.ts`** — HF `lex_glue/ledgar` fetch script. CC BY 4.0.
+- **`layer/evals/datasets/<name>/METADATA.json`** — License, citation, source URL, paper URL recorded for all 5 datasets.
+- **`layer/evals/datasets/cuad/fixtures.jsonl`** — 3 hand-curated CUAD samples (Governing Law, Termination For Convenience, Agreement Term) for offline / CI use.
+- **`cli/eval-scorers.ts`** — Per-dataset scoring functions: `scoreCuad` (word-level F1 over spans), `scoreMaud` (substring exact-match), `scoreUnfairTos` (binary keyword classifier), `scoreLedgar` (substring topic match), `scoreAcord` (per-field presence match). `buildConfusionMatrix()` helper.
+- **`cli/eval-adapters.ts`** — Per-dataset matter-prompt adapters: `adaptCuad`, `adaptMaud`, `adaptAcord`, `adaptUnfairTos`, `adaptLedgar`, plus `adaptSample()` dispatcher. `KnownDataset` union type.
+- **`cli/eval.ts`** — Main eval harness: `runEval(opts)` loads samples, runs workflow per sample (or stub in dry-run), scores, aggregates (mean/median/std-dev), builds confusion matrix for classification tasks, writes Markdown + JSON reports. Budget abort at 95% utilization (exit code 2). Offline path uses source-tree fixtures with no dynamic import.
+- **`cli/index.ts`** — `eval` command fully activated (was placeholder):
+  - `eval list-datasets` — 5-row table with cache status and license.
+  - `eval fetch <dataset> [--limit N]` — runs fetch script.
+  - `eval --dataset --workflow [--sample-size --budget --output --dry-run]` — main run command.
+- **`tsconfig.json`** — `include` extended to `layer/evals/datasets/**/*.ts`.
+- **`package.json`** — Build script copies `cuad/fixtures.jsonl` to `dist/`; ensures `layer/evals/results/` exists.
+- **`.gitignore`** — Dataset cache dirs and `layer/evals/results/` added (with `.gitkeep`).
+- **`README.md`** — "Evals" section with placeholder table, dry-run and offline demo commands.
+- **`docs/evals.md`** — Full reference: each dataset's license + citation, each adapter's prompt template, each scorer's tolerance, budget mechanism, output format, offline mode.
+- **`docs/sprint-9-demo.md`** — Step-by-step walkthrough: list-datasets, dry-run, offline fixture eval, HF fetch, real run, deep-review, exit codes.
+
 ### Sprint 8 — Workflow library (Deep Review, Stress Test, Roundtable + per-surface variants + CLI workflow picker)
 
 - **`cli/types.ts`** — Extended `PipelineStep` union with three new step kinds:

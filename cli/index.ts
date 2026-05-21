@@ -8,6 +8,8 @@ import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { loadWorkflow, loadTemplate, loadAgent, listAgentNames, listCustomAgentNames, listWorkflowNames, REPO_ROOT } from './loader.js';
+import { runEval } from './eval.js';
+import type { KnownDataset as EvalDataset } from './eval-adapters.js';
 import { runPipeline } from './pipeline.js';
 import {
   printBanner,
@@ -1297,14 +1299,151 @@ connectorsCmd
   });
 
 // ---------------------------------------------------------------------------
-// possiblaw eval  (placeholder)
+// possiblaw eval — Sprint 9 eval suite
 // ---------------------------------------------------------------------------
-program
-  .command('eval')
-  .description('Run evals (placeholder)')
+const KNOWN_DATASETS: EvalDataset[] = ['cuad', 'maud', 'acord', 'unfair-tos', 'ledgar'];
+
+const evalCmd = program.command('eval').description('Eval suite — benchmark workflows against public legal-NLP datasets');
+
+evalCmd
+  .command('list-datasets')
+  .description('List available datasets and cache status (fetched / not cached)')
   .action(() => {
     printBanner({ color: true });
-    console.log('Coming in Sprint 9 — see plan §9');
+    console.log('');
+    console.log(`${'DATASET'.padEnd(16)} ${'STATUS'.padEnd(12)} SOURCE`);
+    console.log('-'.repeat(70));
+
+    const datasetMeta: Record<EvalDataset, { source: string; license: string }> = {
+      cuad:          { source: 'HF theatticusproject/cuad-qa',        license: 'CC BY 4.0' },
+      maud:          { source: 'HF theatticusproject/maud',           license: 'CC BY 4.0' },
+      acord:         { source: 'Synthetic (ACORD schema)',             license: 'Research only' },
+      'unfair-tos':  { source: 'HF lex_glue/unfair_tos',              license: 'CC BY 4.0' },
+      ledgar:        { source: 'HF lex_glue/ledgar',                  license: 'CC BY 4.0' },
+    };
+
+    for (const ds of KNOWN_DATASETS) {
+      const cacheDir = join(REPO_ROOT, 'layer', 'evals', 'datasets', ds, 'cache', 'samples.jsonl');
+      const fixtureFile = join(REPO_ROOT, 'layer', 'evals', 'datasets', ds, 'fixtures.jsonl');
+      let status: string;
+      if (existsSync(cacheDir)) {
+        status = 'cached';
+      } else if (existsSync(fixtureFile)) {
+        status = 'fixture';
+      } else {
+        status = 'not cached';
+      }
+      const meta = datasetMeta[ds];
+      console.log(`${ds.padEnd(16)} ${status.padEnd(12)} ${meta.source}  [${meta.license}]`);
+    }
+    console.log('');
+    console.log('Run `possiblaw eval fetch <dataset>` to download a dataset.');
+    console.log('');
+  });
+
+evalCmd
+  .command('fetch')
+  .description('Fetch / download a dataset (runs the fetch script for that dataset)')
+  .argument('<dataset>', `Dataset name: ${KNOWN_DATASETS.join(' | ')}`)
+  .option('--limit <n>', 'Max samples to fetch', '200')
+  .action(async (datasetName: string, opts: { limit: string }) => {
+    printBanner({ color: true });
+
+    if (!KNOWN_DATASETS.includes(datasetName as EvalDataset)) {
+      console.error(`Unknown dataset: ${datasetName}. Known: ${KNOWN_DATASETS.join(', ')}`);
+      process.exit(1);
+    }
+
+    const fetchScriptPath = join(
+      REPO_ROOT, 'layer', 'evals', 'datasets', datasetName, 'fetch.js'
+    );
+
+    // Dynamically import and re-invoke with --limit injected into argv
+    process.argv.push('--limit', opts.limit);
+
+    try {
+      await import(fetchScriptPath);
+      process.exit(0);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nFetch error: ${message}`);
+      console.error(`Hint: run \`pnpm build\` first so the fetch script is compiled.`);
+      process.exit(1);
+    }
+  });
+
+evalCmd
+  .option('--dataset <name>', `Dataset to eval: ${KNOWN_DATASETS.join(' | ')}`)
+  .option('--workflow <name>', 'Workflow name (e.g. quick-counsel)')
+  .option('--sample-size <n>', 'Number of samples to run', '20')
+  .option('--budget <usd>', 'Spending cap in USD (default 50)', '50')
+  .option('--output <dir>', 'Output directory for reports', join(REPO_ROOT, 'layer', 'evals', 'results'))
+  .option('--dry-run', 'Run without LLM calls — validates dataset + adapter, produces stub report', false)
+  .action(async (opts: {
+    dataset?: string;
+    workflow?: string;
+    sampleSize: string;
+    budget: string;
+    output: string;
+    dryRun: boolean;
+  }) => {
+    printBanner({ color: true });
+
+    if (!opts.dataset || !opts.workflow) {
+      console.error('Error: --dataset <name> and --workflow <name> are both required.');
+      console.error(`Datasets: ${KNOWN_DATASETS.join(', ')}`);
+      console.error(`Workflows: run \`possiblaw workflows list\` to see available workflows.`);
+      process.exit(1);
+    }
+
+    if (!KNOWN_DATASETS.includes(opts.dataset as EvalDataset)) {
+      console.error(`Unknown dataset: ${opts.dataset}. Known: ${KNOWN_DATASETS.join(', ')}`);
+      process.exit(1);
+    }
+
+    const sampleSize = parseInt(opts.sampleSize, 10);
+    const budgetUsd = parseFloat(opts.budget);
+    const offline = !process.env['ANTHROPIC_API_KEY'];
+
+    if (offline && !opts.dryRun) {
+      console.log('[offline mode — ANTHROPIC_API_KEY not set; using deterministic fixtures + stub pipeline]\n');
+    }
+
+    console.log(`Dataset:     ${opts.dataset}`);
+    console.log(`Workflow:    ${opts.workflow}`);
+    console.log(`Sample size: ${sampleSize}`);
+    console.log(`Budget:      $${budgetUsd.toFixed(2)}`);
+    console.log(`Output:      ${opts.output}`);
+    console.log(`Dry run:     ${opts.dryRun ? 'yes' : 'no'}`);
+    console.log('');
+
+    try {
+      const report = await runEval({
+        dataset: opts.dataset as EvalDataset,
+        workflow: opts.workflow,
+        sampleSize,
+        budgetUsd,
+        outputDir: opts.output,
+        dryRun: opts.dryRun,
+        offline,
+      });
+
+      console.log(`Results (${report.actualSamples} samples):`);
+      console.log(`  Mean score:  ${report.meanScore.toFixed(4)}`);
+      console.log(`  Median:      ${report.medianScore.toFixed(4)}`);
+      console.log(`  Std dev:     ${report.stdDevScore.toFixed(4)}`);
+      console.log(`  Total cost:  $${report.totalCost.toFixed(4)}`);
+      console.log(`  Budget abort: ${report.budgetAborted ? 'YES' : 'no'}`);
+      console.log('');
+      console.log(`Reports written to: ${opts.output}`);
+
+      const exitCode = report.budgetAborted ? 2 : 0;
+      process.exit(exitCode);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nEval error: ${message}`);
+      process.exit(1);
+    }
   });
 
 // ---------------------------------------------------------------------------

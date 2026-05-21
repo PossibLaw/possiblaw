@@ -1,0 +1,15 @@
+{
+  "name": "LEDGAR",
+  "full_name": "LEDGAR Legal Contract Provisions Dataset",
+  "version": "1.0",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "source_url": "https://huggingface.co/datasets/lex_glue",
+  "paper": "Tuggener, D. et al. (2020). LEDGAR: A Large-Scale Multi-label Corpus for Text Classification of Legal Provisions in Contracts. LREC 2020.",
+  "paper_url": "https://aclanthology.org/2020.lrec-1.155/",
+  "citation": "@inproceedings{tuggener2020ledgar, title={{LEDGAR}: A Large-Scale Multi-label Corpus for Text Classification of Legal Provisions in Contracts}, author={Tuggener, Don and von D{\\\"a}niken, Pius and Peetz, Thomas and Cieliebak, Mark}, booktitle={LREC}, year={2020}}",
+  "task": "topic classification",
+  "description": "Provisions from contracts on SEC EDGAR classified into 100+ topic categories (e.g. Termination, Indemnification, Governing Law).",
+  "hf_dataset_id": "lex_glue (ledgar subset)",
+  "fetched_at": null
+}

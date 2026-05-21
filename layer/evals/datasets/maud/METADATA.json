@@ -1,0 +1,15 @@
+{
+  "name": "MAUD",
+  "full_name": "Merger Agreement Understanding Dataset",
+  "version": "1.0",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "source_url": "https://huggingface.co/datasets/theatticusproject/maud",
+  "paper": "Koreeda, Y. & Manning, C. (2021). MAUD: An Expert-Annotated Legal NLP Dataset for Merger Agreement Understanding. EMNLP 2021.",
+  "paper_url": "https://arxiv.org/abs/2301.00876",
+  "citation": "@dataset{koreeda2021maud, title={MAUD: An Expert-Annotated Legal NLP Dataset for Merger Agreement Understanding}, author={Koreeda, Yuta and Manning, Christopher D.}, year={2021}}",
+  "task": "multiple-choice reading comprehension",
+  "description": "Questions about merger agreement clauses with multiple-choice answers, annotated by M&A lawyers.",
+  "hf_dataset_id": "theatticusproject/maud",
+  "fetched_at": null
+}

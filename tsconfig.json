@@ -13,5 +13,5 @@
     "declarationMap": true,
     "sourceMap": true
   },
-  "include": ["cli/**/*.ts"]
+  "include": ["cli/**/*.ts", "layer/evals/datasets/**/*.ts"]
 }

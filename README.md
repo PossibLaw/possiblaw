@@ -38,7 +38,32 @@ bin/possiblaw run quick-counsel "draft an NDA for ACME for a mutual disclosure w
 
 ## Status
 
-Sprint 0 + Sprint 1a complete. See [CHANGELOG.md](CHANGELOG.md).
+Sprints 0–9 complete. See [CHANGELOG.md](CHANGELOG.md).
+
+---
+
+## Evals
+
+We benchmark PossibLaw workflows against public legal-NLP datasets (CUAD, MAUD, ACORD, UNFAIR-ToS, LEDGAR).
+Latest results: see `layer/evals/results/` after running `possiblaw eval --dataset cuad --workflow deep-review`.
+Numbers reported here are with the date, workflow, and model mix that produced them.
+
+| Dataset | Workflow | Mean score | Sample size | Cost | Date | Model mix |
+|---|---|---|---|---|---|---|
+| (run `pnpm possiblaw eval --dataset cuad --workflow quick-counsel --sample-size 20` to populate) | | | | | | |
+
+To run a dry-run (no API key required):
+```bash
+pnpm build
+node dist/cli/index.js eval --dataset cuad --workflow quick-counsel --sample-size 3 --dry-run
+```
+
+To run the offline fixture eval (no API key, uses 3 bundled CUAD samples):
+```bash
+env -u ANTHROPIC_API_KEY node dist/cli/index.js eval --dataset cuad --workflow quick-counsel --sample-size 3
+```
+
+See [docs/evals.md](docs/evals.md) for dataset licenses, adapter prompts, scorer tolerances, and budget mechanics.
 
 ---
 

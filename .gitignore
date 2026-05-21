@@ -15,3 +15,14 @@ layer/audit/*.jsonl
 
 # Per-operator model overrides (not committed)
 .possiblaw/
+
+# Eval dataset caches — fetched on demand, not redistributed in-tree
+layer/evals/datasets/cuad/cache/samples.jsonl
+layer/evals/datasets/maud/cache/samples.jsonl
+layer/evals/datasets/acord/cache/samples.jsonl
+layer/evals/datasets/unfair-tos/cache/samples.jsonl
+layer/evals/datasets/ledgar/cache/samples.jsonl
+
+# Eval results — runtime artifacts, not source
+layer/evals/results/*.json
+layer/evals/results/*.md

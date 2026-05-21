@@ -1,0 +1,16 @@
+{
+  "name": "UNFAIR-ToS",
+  "full_name": "UNFAIR Terms of Service Dataset",
+  "version": "1.0",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "source_url": "https://huggingface.co/datasets/lex_glue",
+  "alternate_source": "https://github.com/lpz-cla/unfair-tos",
+  "paper": "Lippi, M. et al. (2019). CLAUDETTE: an Automated Detector of Potentially Unfair Clauses in Online Terms of Service. Artificial Intelligence and Law.",
+  "paper_url": "https://arxiv.org/abs/1805.01217",
+  "citation": "@article{lippi2019claudette, title={CLAUDETTE: an Automated Detector of Potentially Unfair Clauses in Online Terms of Service}, author={Lippi, Marco and Pa{\\l}ka, Przemys{\\l}aw and Contissa, Giuseppe and Lagioia, Francesca and Micklitz, Hans-Wolfgang and Sartor, Giovanni and Torroni, Paolo}, journal={Artificial Intelligence and Law}, year={2019}}",
+  "task": "clause classification (fair / unfair)",
+  "description": "Terms of service clauses annotated as fair or unfair across 8 unfairness categories.",
+  "hf_dataset_id": "lex_glue (unfair_tos subset)",
+  "fetched_at": null
+}

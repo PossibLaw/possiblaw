@@ -1,0 +1,16 @@
+{
+  "name": "CUAD",
+  "full_name": "Contract Understanding Atticus Dataset",
+  "version": "1.0",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "source_url": "https://huggingface.co/datasets/theatticusproject/cuad-qa",
+  "paper": "Hendrycks, D. et al. (2021). CUAD: An Expert-Annotated NLP Dataset for Legal Contract Review. NeurIPS 2021.",
+  "paper_url": "https://arxiv.org/abs/2103.06268",
+  "citation": "@dataset{hendrycks2021cuad, title={CUAD: An Expert-Annotated NLP Dataset for Legal Contract Review}, author={Hendrycks, Dan and Burns, Collin and Chen, Anya and Ball, Spencer}, year={2021}, publisher={The Atticus Project}}",
+  "task": "question-answering / span-extraction",
+  "description": "41 categories of legally important clauses in commercial contracts, annotated by legal experts.",
+  "num_labels": 41,
+  "hf_dataset_id": "theatticusproject/cuad-qa",
+  "fetched_at": null
+}
