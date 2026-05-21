@@ -9,8 +9,8 @@ For non-trivial changes, open an issue first and describe what you want to do an
 ## Dev setup
 
 ```bash
-git clone --recurse-submodules <repo-url>
-cd possiblaw-v2
+git clone --recurse-submodules https://github.com/PossibLaw/possiblaw.git
+cd possiblaw
 pnpm install
 pnpm dev    # runs cli/index.ts via tsx (no build step)
 ```

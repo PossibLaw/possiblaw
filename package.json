@@ -1,9 +1,18 @@
 {
   "name": "possiblaw",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Proof-of-concept layer on paperclip for operating a legal business with AI",
   "license": "Apache-2.0",
   "private": true,
+  "keywords": ["legal-tech", "ai-agents", "legal-ai", "proof-of-concept", "paperclip-layer", "mcp"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PossibLaw/possiblaw.git"
+  },
+  "homepage": "https://github.com/PossibLaw/possiblaw#readme",
+  "bugs": {
+    "url": "https://github.com/PossibLaw/possiblaw/issues"
+  },
   "type": "module",
   "bin": {
     "possiblaw": "bin/possiblaw"

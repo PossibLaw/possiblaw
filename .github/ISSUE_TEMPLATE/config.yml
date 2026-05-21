@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Discussions (questions, ideas, feedback)
+    url: https://github.com/PossibLaw/possiblaw/discussions
+    about: For open-ended questions, feedback on extending PossibLaw, or ideas that aren't ready for a feature request issue.
+  - name: Security vulnerability
+    url: https://github.com/PossibLaw/possiblaw/security/advisories/new
+    about: Please report security vulnerabilities via GitHub Security Advisories, not public issues.

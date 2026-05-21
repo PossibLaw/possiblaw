@@ -7,6 +7,30 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.1.0] — 2026-05-21 — Public launch readiness (Sprint 10)
+
+### Sprint 10 — Public launch readiness
+
+- **`README.md`** — Rewritten announcement-quality (≤260 lines): hero section with disclaimer in lead, "Try it in 5 minutes" with expected output, capabilities table, ASCII architecture diagram, What's NOT in this PoC, posture, evals placeholder, full docs index, license, acknowledgements. Shields.io badges added.
+- **`SECURITY.md`** — New. PoC-realistic security posture: supported versions, reporting via GitHub Security Advisory, in-scope and out-of-scope, 7 known threats (Privacy Filter offline fallback, cloud call without filter, key store plain-text, audit log writability, connector credentials in env, UNCONFIRMED connector schemas, key store no expiry).
+- **`.github/ISSUE_TEMPLATE/bug_report.md`** — New. Structured bug report: what happened, expected, repro, env table, audit log path, screenshots.
+- **`.github/ISSUE_TEMPLATE/feature_request.md`** — New. Feature request: what, why, alternatives, willingness to PR.
+- **`.github/ISSUE_TEMPLATE/connector_request.md`** — New. Connector request: service, API docs, auth flow, capabilities, sandbox availability.
+- **`.github/ISSUE_TEMPLATE/config.yml`** — New. Contact links: Discussions + Security Advisory. Disables blank issues.
+- **`docs/getting-started.md`** — New. Stranger-friendly Quickstart ~150 lines: prerequisites, install, first workflow, API key, switch templates, customize, connectors, Privacy Filter, cost reporting, what now.
+- **`docs/extending/add-a-specialist.md`** — New. Step-by-step guide: create agent file, frontmatter reference, add to template, add offline fixture, verify. Ends with `team list | grep <new-specialist>`.
+- **`docs/extending/add-a-workflow.md`** — New. Step-by-step guide: all 7 step kinds, 3 YAML patterns (minimal, parallel, debate), YAML validation, build + verify. Ends with `workflows show <new>`.
+- **`docs/extending/add-a-test.md`** — New. Step-by-step guide: soft vs hard distinction, LLM-judge and rule types, frontmatter reference, calibration, add to workflow, verify.
+- **`docs/extending/add-a-guardrail.md`** — New. Step-by-step guide: hard guardrail vs soft test when-to-use table, rule and LLM-judge types, frontmatter reference, add to workflow, verify.
+- **`docs/extending/add-an-mcp-connector.md`** — New. Step-by-step guide: 3 patterns (SDK, HTTP-only, OAuth), full copy-paste TypeScript for SDK and HTTP patterns, register in index, YAML descriptor, `.env.example`, wire to agent, verify.
+- **`docs/outreach/outside-operator.md`** — New. 200-word email template for outside operator ask: PoC disclaimer, Privacy Filter, cost transparency, audit trail.
+- **`docs/outreach/outside-reviewer.md`** — New. 200-word email template for outside dev reviewer ask: specific extending-docs task, time estimate, acknowledgements.
+- **`docs/announcement.md`** — New. 300-word launch post drafts for Hacker News and LinkedIn.
+- **`docs/getting-started.md`** (Sprint 10 Quickstart) — verified in fresh-clone simulation (Step 9).
+- **`docs/sprint-10-demo.md`** — New. Fresh-clone simulation walkthrough and results.
+- **`package.json`** — Version bumped `0.0.1 → 0.1.0`. Added `keywords`, `repository`, `homepage`, `bugs` fields.
+- **`CONTRIBUTING.md`** — Updated clone URL from placeholder `<repo-url>` to canonical GitHub URL; corrected `cd possiblaw-v2` to `cd possiblaw`.
+
 ## [Unreleased]
 
 ### Sprint 9 — Eval suite (CUAD, MAUD, ACORD, UNFAIR-ToS, LEDGAR)
