@@ -1,14 +1,21 @@
 /**
  * PossibLaw v2 — Workflow pipeline runner.
  */
+import { randomUUID } from 'node:crypto';
 import { loadAgent, loadTest, loadGuardrail, loadSkill } from './loader.js';
 import { runAgent } from './anthropic.js';
+import { runTest, handleTestFailure } from './test-runner.js';
+import { runGuardrail, handleGuardrailHit } from './guardrail-runner.js';
+import { createAuditLog } from './audit.js';
 import type {
   Workflow,
   Agent,
   RunReport,
   RunStepResult,
   AgentCallRecord,
+  RunContext,
+  TestResult,
+  GuardrailResult,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -39,10 +46,22 @@ export async function runPipeline(
   userPrompt: string,
   opts: PipelineOpts
 ): Promise<RunReport> {
+  const matterId = randomUUID();
+  const audit = createAuditLog(matterId);
+
   const stepResults: RunStepResult[] = [];
   const agentCalls: AgentCallRecord[] = [];
+  const testResults: { name: string; result: TestResult }[] = [];
+  const guardrailResults: { name: string; result: GuardrailResult }[] = [];
   let deliverable = '';
   let escalationReason: string | undefined;
+
+  const context: RunContext = {
+    workflow,
+    userPrompt,
+    verbose: opts.verbose ?? false,
+    offline: opts.offline,
+  };
 
   try {
     // -----------------------------------------------------------------------
@@ -50,8 +69,9 @@ export async function runPipeline(
     // -----------------------------------------------------------------------
     let currentAgentName = workflow.router;
     let specialistName: string | null = null;
-    const MAX_HOPS = 3;
+    const MAX_HOPS = 4; // Raised from 3 to support 3-hop chains (cos→chief-counsel→commercial-lead)
     let hops = 0;
+    let parentStep: string | null = null;
 
     while (hops < MAX_HOPS && specialistName === null) {
       hops++;
@@ -77,6 +97,17 @@ export async function runPipeline(
         agentCallRecord: record,
       });
 
+      // Audit: log router call
+      audit.log({
+        step: stepName,
+        agent: agent.name,
+        model: result.model,
+        prompt: userPrompt,
+        output: result.output,
+        parent_step: parentStep,
+      });
+      parentStep = stepName;
+
       if (!routeTo) {
         // No routing directive — treat output as final deliverable if specialist
         if (agent.role === 'specialist') {
@@ -99,7 +130,18 @@ export async function runPipeline(
           guardrailHit: true,
           escalationReason,
         });
-        return buildReport(workflow.name, userPrompt, stepResults, agentCalls, '', 'escalated', escalationReason);
+        return buildReport({
+          workflowName: workflow.name,
+          userPrompt,
+          steps: stepResults,
+          agentCalls,
+          deliverable: '',
+          status: 'escalated',
+          escalationOrError: escalationReason,
+          testResults,
+          guardrailResults,
+          auditLogPath: audit.path,
+        });
       }
 
       // Determine if next agent is a specialist or another router/lead
@@ -112,7 +154,7 @@ export async function runPipeline(
     }
 
     if (specialistName === null) {
-      throw new Error('Router chain exhausted without reaching a specialist after 3 hops.');
+      throw new Error('Router chain exhausted without reaching a specialist after 4 hops.');
     }
 
     // -----------------------------------------------------------------------
@@ -121,24 +163,39 @@ export async function runPipeline(
     const specialist: Agent = loadAgent(specialistName);
     const skills = specialist.skills.map((skillName) => loadSkill(skillName));
 
-    const specialistResult = await runAgent(specialist, userPrompt, {
-      skills,
-      verbose: opts.verbose,
-    });
+    const runSpecialist = async (model?: string) => {
+      const agentOverride: Agent = model
+        ? { ...specialist, model }
+        : specialist;
+      return runAgent(agentOverride, userPrompt, { skills, verbose: opts.verbose });
+    };
 
+    let specialistResult = await runSpecialist();
     deliverable = specialistResult.output;
 
-    const specialistRecord: AgentCallRecord = {
+    let specialistRecord: AgentCallRecord = {
       agent: specialist.name,
       model: specialistResult.model,
       output: specialistResult.output,
       tokens: specialistResult.tokens,
     };
     agentCalls.push(specialistRecord);
+    const specialistStepName = `specialist:${specialist.name}`;
     stepResults.push({
-      stepName: `specialist:${specialist.name}`,
+      stepName: specialistStepName,
       agentCallRecord: specialistRecord,
     });
+
+    // Audit: log specialist call
+    audit.log({
+      step: specialistStepName,
+      agent: specialist.name,
+      model: specialistResult.model,
+      prompt: userPrompt,
+      output: specialistResult.output,
+      parent_step: parentStep,
+    });
+    parentStep = specialistStepName;
 
     // -----------------------------------------------------------------------
     // Phase 3: Tests
@@ -149,26 +206,121 @@ export async function runPipeline(
     if (testSuiteStep) {
       for (const testName of testSuiteStep.suite) {
         const testConfig = loadTest(testName);
-        let passed = true;
 
-        if (testConfig.type === 'stub') {
-          passed = testConfig.stub_result.pass;
-        }
+        const testResult = await runTest({ context, draft: deliverable, config: testConfig });
+        testResults.push({ name: testName, result: testResult });
+
+        // Audit: log test result
+        audit.log({
+          step: `test:${testName}`,
+          parent_step: parentStep,
+          test: { name: testName, result: testResult },
+        });
 
         stepResults.push({
           stepName: `test:${testName}`,
           testName,
-          testPassed: passed,
+          testPassed: testResult.pass,
         });
 
-        if (!passed) {
-          // on_test_failure: retry_with_better_model_then_escalate
-          // Sprint 1a: stub always passes; this path is future-facing
-          escalationReason = `Test '${testName}' failed. ${testConfig.stub_result.rationale}`;
-          return buildReport(
-            workflow.name, userPrompt, stepResults, agentCalls,
-            deliverable, 'escalated', escalationReason
-          );
+        if (!testResult.pass) {
+          const action = await handleTestFailure(testConfig, testResult, context, matterId);
+
+          // Audit: log failure action
+          audit.log({
+            step: `test-failure-action:${testName}`,
+            parent_step: `test:${testName}`,
+            failure_action: action.action,
+            failure_target: action.action === 'retry_with' ? action.model
+              : action.action === 'escalate_to' ? action.target
+              : action.agent,
+          });
+
+          if (action.action === 'retry_with') {
+            // Re-run specialist with better model
+            const retryModel = action.model;
+            const retryResult = await runSpecialist(retryModel);
+            deliverable = retryResult.output;
+
+            specialistRecord = {
+              agent: specialist.name,
+              model: retryResult.model,
+              output: retryResult.output,
+              tokens: retryResult.tokens,
+            };
+            agentCalls.push(specialistRecord);
+            const retryStepName = `specialist:${specialist.name}:retry`;
+            stepResults.push({
+              stepName: retryStepName,
+              agentCallRecord: specialistRecord,
+            });
+
+            audit.log({
+              step: retryStepName,
+              agent: specialist.name,
+              model: retryResult.model,
+              prompt: userPrompt,
+              output: retryResult.output,
+              parent_step: `test-failure-action:${testName}`,
+            });
+
+            // Re-run the same test on the retried output
+            const retryTestResult = await runTest({
+              context,
+              draft: deliverable,
+              config: testConfig,
+            });
+            testResults.push({ name: `${testName}:retry`, result: retryTestResult });
+
+            audit.log({
+              step: `test:${testName}:retry`,
+              parent_step: retryStepName,
+              test: { name: `${testName}:retry`, result: retryTestResult },
+            });
+
+            stepResults.push({
+              stepName: `test:${testName}:retry`,
+              testName: `${testName}:retry`,
+              testPassed: retryTestResult.pass,
+            });
+
+            if (!retryTestResult.pass) {
+              // Retry also failed — escalate
+              escalationReason = `Test '${testName}' failed after retry. ${retryTestResult.rationale}`;
+              audit.log({
+                step: `escalation:${testName}`,
+                parent_step: `test:${testName}:retry`,
+                failure_action: 'escalate_to',
+                failure_target: 'human',
+              });
+              return buildReport({
+                workflowName: workflow.name,
+                userPrompt,
+                steps: stepResults,
+                agentCalls,
+                deliverable,
+                status: 'escalated',
+                escalationOrError: escalationReason,
+                testResults,
+                guardrailResults,
+                auditLogPath: audit.path,
+              });
+            }
+          } else if (action.action === 'escalate_to') {
+            escalationReason = `Test '${testName}' failed. ${testResult.rationale}`;
+            return buildReport({
+              workflowName: workflow.name,
+              userPrompt,
+              steps: stepResults,
+              agentCalls,
+              deliverable,
+              status: 'escalated',
+              escalationOrError: escalationReason,
+              testResults,
+              guardrailResults,
+              auditLogPath: audit.path,
+            });
+          }
         }
       }
     }
@@ -182,28 +334,51 @@ export async function runPipeline(
     if (guardrailStep) {
       for (const guardrailName of guardrailStep.suite) {
         const guardrailConfig = loadGuardrail(guardrailName);
-        let humanRequired = false;
 
-        if (guardrailConfig.type === 'stub') {
-          humanRequired = guardrailConfig.stub_result.human_required;
-        }
+        const guardrailResult = await runGuardrail({
+          context,
+          draft: deliverable,
+          config: guardrailConfig,
+        });
+        guardrailResults.push({ name: guardrailName, result: guardrailResult });
+
+        // Audit: log guardrail result
+        audit.log({
+          step: `guardrail:${guardrailName}`,
+          parent_step: parentStep,
+          guardrail: { name: guardrailName, result: guardrailResult },
+        });
 
         stepResults.push({
           stepName: `guardrail:${guardrailName}`,
           guardrailName,
-          guardrailHit: humanRequired,
-          escalationReason: humanRequired
-            ? guardrailConfig.stub_result.reason_template
-            : undefined,
+          guardrailHit: guardrailResult.human_required,
+          escalationReason: guardrailResult.human_required ? guardrailResult.reason : undefined,
         });
 
-        if (humanRequired) {
-          // on_guardrail_hit: escalate_to_human
-          escalationReason = guardrailConfig.stub_result.reason_template;
-          return buildReport(
-            workflow.name, userPrompt, stepResults, agentCalls,
-            deliverable, 'escalated', escalationReason
-          );
+        if (guardrailResult.human_required) {
+          await handleGuardrailHit(guardrailConfig, guardrailResult, context);
+          escalationReason = guardrailResult.reason;
+
+          audit.log({
+            step: `escalation:guardrail:${guardrailName}`,
+            parent_step: `guardrail:${guardrailName}`,
+            failure_action: 'escalate_to',
+            failure_target: 'human',
+          });
+
+          return buildReport({
+            workflowName: workflow.name,
+            userPrompt,
+            steps: stepResults,
+            agentCalls,
+            deliverable,
+            status: 'escalated',
+            escalationOrError: escalationReason,
+            testResults,
+            guardrailResults,
+            auditLogPath: audit.path,
+          });
         }
       }
     }
@@ -211,14 +386,35 @@ export async function runPipeline(
     // -----------------------------------------------------------------------
     // All clear
     // -----------------------------------------------------------------------
-    return buildReport(workflow.name, userPrompt, stepResults, agentCalls, deliverable, 'delivered');
+    return buildReport({
+      workflowName: workflow.name,
+      userPrompt,
+      steps: stepResults,
+      agentCalls,
+      deliverable,
+      status: 'delivered',
+      testResults,
+      guardrailResults,
+      auditLogPath: audit.path,
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     // Determine which step was active when the error occurred
     const lastStep = stepResults[stepResults.length - 1];
     const stepLabel = lastStep ? lastStep.stepName : 'init';
     const tagged = `Pipeline failed at step ${stepLabel}: ${message}`;
-    return buildReport(workflow.name, userPrompt, stepResults, agentCalls, deliverable, 'error', tagged);
+    return buildReport({
+      workflowName: workflow.name,
+      userPrompt,
+      steps: stepResults,
+      agentCalls,
+      deliverable,
+      status: 'error',
+      escalationOrError: tagged,
+      testResults,
+      guardrailResults,
+      auditLogPath: audit.path,
+    });
   }
 }
 
@@ -226,24 +422,32 @@ export async function runPipeline(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function buildReport(
-  workflowName: string,
-  userPrompt: string,
-  steps: RunStepResult[],
-  agentCalls: AgentCallRecord[],
-  deliverable: string,
-  status: RunReport['status'],
-  escalationOrError?: string
-): RunReport {
+interface BuildReportArgs {
+  workflowName: string;
+  userPrompt: string;
+  steps: RunStepResult[];
+  agentCalls: AgentCallRecord[];
+  deliverable: string;
+  status: RunReport['status'];
+  escalationOrError?: string;
+  testResults: { name: string; result: TestResult }[];
+  guardrailResults: { name: string; result: GuardrailResult }[];
+  auditLogPath: string;
+}
+
+function buildReport(args: BuildReportArgs): RunReport {
   const report: RunReport = {
-    workflow: workflowName,
-    userPrompt,
-    steps,
-    agentCalls,
-    deliverable,
-    status,
+    workflow: args.workflowName,
+    userPrompt: args.userPrompt,
+    steps: args.steps,
+    agentCalls: args.agentCalls,
+    deliverable: args.deliverable,
+    status: args.status,
+    test_results: args.testResults,
+    guardrail_results: args.guardrailResults,
+    audit_log_path: args.auditLogPath,
   };
-  if (status === 'escalated') report.escalationReason = escalationOrError;
-  if (status === 'error') report.error = escalationOrError;
+  if (args.status === 'escalated') report.escalationReason = args.escalationOrError;
+  if (args.status === 'error') report.error = args.escalationOrError;
   return report;
 }

@@ -1,15 +1,24 @@
 name: signed-document
 kind: guardrail
-type: stub
+type: rule
 description: |
-  Signed-document risk gate. ANY action that produces or sends a document
-  for signature requires a licensed lawyer's review. The Sprint 1a stub
-  blocks all such actions unconditionally; refined in Sprint 2 to detect
-  actual signature-bound content.
+  Detects signature blocks in the draft. Anything signature-bound requires a licensed reviewing
+  lawyer's approval before send.
 triggers:
   - action_type: signature_request
   - output_kind: contract_draft
   - output_kind: signed_document
+rule:
+  kind: regex
+  patterns:
+    - "(?im)^signature:\\s*_+"
+    - "(?im)\\bsignature block\\b"
+    - "(?im)^\\s*x_+\\s*$"
+    - "(?im)authorized\\s+signator"
+    - "(?im)\\bnotary\\s+public\\b"
+reason_template: |
+  Signature-block detected in the draft. A licensed reviewing lawyer must
+  approve before any signed document is sent. Match: <pattern>.
 stub_result:
   human_required: true
   reason_template: |

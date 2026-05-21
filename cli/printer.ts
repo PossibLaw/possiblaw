@@ -2,7 +2,7 @@
  * PossibLaw v2 — Pretty console output.
  * Uses simple ANSI escapes only — no external dependencies.
  */
-import type { RunReport, RunStepResult } from './types.js';
+import type { RunReport, RunStepResult, AuditEvent } from './types.js';
 
 // ---------------------------------------------------------------------------
 // ANSI helpers
@@ -97,6 +97,31 @@ export function printReport(report: RunReport, opts: PrinterOpts): void {
 
   console.log('');
   console.log(c(BOLD, '─'.repeat(72), opts.color));
+
+  // Print test + guardrail results summary if available
+  if (report.test_results && report.test_results.length > 0) {
+    console.log('');
+    console.log(c(BOLD, 'Test results:', opts.color));
+    for (const { name, result } of report.test_results) {
+      const icon = result.pass ? c(GREEN, '✔', opts.color) : c(RED, '✘', opts.color);
+      const score = result.score !== undefined ? ` (score: ${result.score.toFixed(2)})` : '';
+      console.log(`  ${icon}  ${name}${score}`);
+      console.log(indent(c(DIM, result.rationale, opts.color), 6));
+    }
+  }
+  if (report.guardrail_results && report.guardrail_results.length > 0) {
+    console.log('');
+    console.log(c(BOLD, 'Guardrail results:', opts.color));
+    for (const { name, result } of report.guardrail_results) {
+      const icon = result.human_required ? c(YELLOW, '⚠', opts.color) : c(GREEN, '✔', opts.color);
+      console.log(`  ${icon}  ${name}`);
+      console.log(indent(c(DIM, result.reason, opts.color), 6));
+    }
+  }
+  if (report.audit_log_path) {
+    console.log('');
+    console.log(c(DIM, `Audit log: ${report.audit_log_path}`, opts.color));
+  }
 }
 
 function printEscalationCard(report: RunReport, opts: PrinterOpts): void {
@@ -136,6 +161,42 @@ function printEscalationCard(report: RunReport, opts: PrinterOpts): void {
     console.log('');
     console.log(report.deliverable.trim());
   }
+}
+
+// ---------------------------------------------------------------------------
+// Audit log printer
+// ---------------------------------------------------------------------------
+
+export function printAuditLog(events: AuditEvent[], matterId: string, opts: PrinterOpts): void {
+  console.log('');
+  console.log(c(BOLD, `Audit log — matter: ${matterId}`, opts.color));
+  console.log(c(DIM, '─'.repeat(72), opts.color));
+  if (events.length === 0) {
+    console.log(c(DIM, '  (no events)', opts.color));
+    return;
+  }
+  for (const evt of events) {
+    const ts = c(DIM, evt.ts, opts.color);
+    const step = c(BOLD, evt.step, opts.color);
+    console.log(`  ${ts}  ${step}`);
+    if (evt.agent) console.log(indent(c(DIM, `agent: ${evt.agent}  model: ${evt.model ?? '—'}`, opts.color), 6));
+    if (evt.test) {
+      const icon = evt.test.result.pass ? c(GREEN, '✔', opts.color) : c(RED, '✘', opts.color);
+      const score = evt.test.result.score !== undefined ? ` score=${evt.test.result.score.toFixed(2)}` : '';
+      console.log(indent(`${icon} test:${evt.test.name}${score} — ${evt.test.result.rationale}`, 6));
+    }
+    if (evt.guardrail) {
+      const icon = evt.guardrail.result.human_required ? c(YELLOW, '⚠', opts.color) : c(GREEN, '✔', opts.color);
+      console.log(indent(`${icon} guardrail:${evt.guardrail.name} — ${evt.guardrail.result.reason}`, 6));
+    }
+    if (evt.failure_action) {
+      const target = evt.failure_target ?? '—';
+      console.log(indent(c(YELLOW, `failure_action: ${evt.failure_action} → ${target}`, opts.color), 6));
+    }
+    if (evt.prompt_hash) console.log(indent(c(DIM, `prompt_hash: ${evt.prompt_hash.slice(0, 16)}...`, opts.color), 6));
+    if (evt.output_hash) console.log(indent(c(DIM, `output_hash: ${evt.output_hash.slice(0, 16)}...`, opts.color), 6));
+  }
+  console.log('');
 }
 
 // ---------------------------------------------------------------------------

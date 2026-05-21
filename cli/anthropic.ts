@@ -24,13 +24,19 @@ function resolveModelId(raw: string): string {
 // ---------------------------------------------------------------------------
 
 const OFFLINE_FIXTURES: Record<string, string> = {
+  'chief-of-staff':
+    'ROUTE_TO: chief-counsel\nRationale: Legal matter — routing to Chief Counsel.',
   'chief-counsel':
     'ROUTE_TO: commercial-lead\nRationale: Operator requests an NDA, which is a commercial matter.',
   'commercial-lead':
     'ROUTE_TO: nda-drafter\nRationale: NDA draft is the nda-drafter\'s core competency.',
 };
 
-function offlineFixture(agentName: string): string {
+function offlineFixture(agentName: string, userPrompt: string): string {
+  // BAD_INPUT_DEMO: return a deliberately invalid draft for any specialist
+  if (userPrompt.includes('BAD_INPUT_DEMO') && agentName === 'nda-drafter') {
+    return '[INVALID DRAFT] xjq8wz lorem ipsum xjq8wz — this draft is intentionally incoherent for demo purposes.';
+  }
   if (agentName in OFFLINE_FIXTURES) {
     return OFFLINE_FIXTURES[agentName];
   }
@@ -79,7 +85,7 @@ export async function runAgent(
 
   // Offline mode: no API key present
   if (!process.env['ANTHROPIC_API_KEY']) {
-    const output = offlineFixture(agent.name);
+    const output = offlineFixture(agent.name, userPrompt);
     if (opts.verbose) {
       console.error(`[verbose] OFFLINE response for ${agent.name}:\n${output}\n`);
     }

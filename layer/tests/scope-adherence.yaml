@@ -1,0 +1,18 @@
+name: scope-adherence
+kind: test
+type: llm-judge
+description: |
+  Checks whether the draft stays within the scope of what was requested.
+  Rule layer counts tokens outside matter vocabulary; LLM layer confirms scope.
+threshold: 0.85
+judge_model: anthropic/claude-haiku-4-5
+judge_prompt: |
+  You are a legal-output reviewer evaluating SCOPE ADHERENCE only.
+  Given a USER REQUEST and a DRAFT, assess: did the draft go beyond what was asked?
+  Scope violations include: adding claims the user didn't request, including irrelevant
+  legal areas, inventing additional parties or transactions not mentioned by the user.
+  Reply STRICTLY in JSON: { "pass": <true|false>, "score": <0-1>, "rationale": "<one paragraph>" }
+stub_result:
+  pass: true
+  score: 0.95
+  rationale: Scope-adherence stub — returns pass.

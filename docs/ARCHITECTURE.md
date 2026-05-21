@@ -93,6 +93,10 @@ Until such a requirement arises, all agents use the string form. Any agent that 
 |---|---|---|---|---|
 | 2026-05-20 | Sprint 1b | Defer Chief of Staff to Sprint 3 | Zero routing value at 1-domain scale; adds ~$0.011/run overhead | ≥ 2 non-legal domain routers live |
 | 2026-05-20 | Sprint 1b | Lock model-field schema as string `provider/name` | Sprint 1a surfaced no per-call parameter requirement; string is simpler | Any agent declares a parameter that can't be expressed in the string |
+| 2026-05-21 | Sprint 2 | LLM-as-judge (Haiku-4.5) as default evaluator | Best cost/capability tradeoff for groundedness; tunable per-test via `judge_model` | Any test type that needs stronger guarantees (e.g. formal verification) |
+| 2026-05-21 | Sprint 2 | MAX_HOPS raised from 3 to 4 | CoS chain requires 3 router hops before specialist; limit was 3 | If chains exceed 4 hops, make workflow-configurable (`max_hops` field) |
+| 2026-05-21 | Sprint 2 | Audit log stores plaintext in Sprint 2 (hash-only deferred to Sprint 3) | No Privacy Filter implemented yet; Sprint 3 removes plaintext for privileged matters | Sprint 3 Privacy Filter implementation |
+| 2026-05-21 | Sprint 2 | Regex inline flags `(?im)` stripped and applied as JS RegExp flags | JavaScript RegExp does not support inline flag syntax in pattern strings | N/A — permanent fix |
 
 ---
 

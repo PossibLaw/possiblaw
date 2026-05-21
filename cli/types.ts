@@ -44,12 +44,24 @@ export interface Template {
   disclaimer: string;
 }
 
+export interface TestRuleConfig {
+  kind: 'regex' | 'token-count' | 'date-window';
+  pattern?: string;
+  patterns?: string[];
+  threshold?: number;
+  window_days?: number;
+  min_count?: number;
+}
+
 export interface TestConfig {
   name: string;
   kind: 'test';
-  type: 'stub' | string;
+  type: 'stub' | 'llm-judge' | 'rule' | string;
   description: string;
   threshold?: number;
+  judge_model?: string;
+  judge_prompt?: string;
+  rule?: TestRuleConfig;
   stub_result: {
     pass: boolean;
     score: number;
@@ -57,16 +69,80 @@ export interface TestConfig {
   };
 }
 
+export interface GuardrailRuleConfig {
+  kind: 'regex' | 'token-count';
+  pattern?: string;
+  patterns?: string[];
+  threshold?: number;
+}
+
 export interface GuardrailConfig {
   name: string;
   kind: 'guardrail';
-  type: 'stub' | string;
+  type: 'stub' | 'llm-judge' | 'rule' | string;
   description: string;
   triggers: Array<{ action_type?: string; output_kind?: string }>;
+  judge_model?: string;
+  judge_prompt?: string;
+  rule?: GuardrailRuleConfig;
+  reason_template?: string;
   stub_result: {
     human_required: boolean;
     reason_template: string;
   };
+}
+
+// ---------------------------------------------------------------------------
+// Test + Guardrail result types
+// ---------------------------------------------------------------------------
+
+export interface TestResult {
+  pass: boolean;
+  score?: number;
+  rationale: string;
+}
+
+export interface GuardrailResult {
+  human_required: boolean;
+  reason: string;
+}
+
+// ---------------------------------------------------------------------------
+// Failure handler types
+// ---------------------------------------------------------------------------
+
+export type TestFailureAction =
+  | { action: 'retry_with'; model: string }
+  | { action: 'escalate_to'; target: 'human' }
+  | { action: 'route_to'; agent: string };
+
+export type GuardrailEscalationAction =
+  | { action: 'escalate_to'; target: 'human' }
+  | { action: 'route_to'; agent: string };
+
+// ---------------------------------------------------------------------------
+// Audit event type
+// ---------------------------------------------------------------------------
+
+export interface AuditEvent {
+  ts: string;
+  matter_id: string;
+  step: string;
+  agent?: string;
+  model?: string;
+  prompt_hash?: string;
+  output_hash?: string;
+  /** Plaintext prompt (Sprint 2 — Sprint 3 removes for privileged matters). */
+  prompt?: string;
+  /** Plaintext output (Sprint 2 — Sprint 3 removes for privileged matters). */
+  output?: string;
+  parent_step?: string | null;
+  test?: { name: string; result: TestResult };
+  guardrail?: { name: string; result: GuardrailResult };
+  failure_action?: 'retry_with' | 'escalate_to' | 'route_to';
+  failure_target?: string;
+  test_results?: TestResult[] | null;
+  guardrail_results?: GuardrailResult[] | null;
 }
 
 export interface Skill {
@@ -112,6 +188,9 @@ export interface RunReport {
   status: RunStatus;
   escalationReason?: string;
   error?: string;
+  test_results: { name: string; result: TestResult }[];
+  guardrail_results: { name: string; result: GuardrailResult }[];
+  audit_log_path: string;
 }
 
 export interface RunContext {

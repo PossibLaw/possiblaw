@@ -13,7 +13,9 @@ import {
   printStep,
   printReport,
   printTeamList,
+  printAuditLog,
 } from './printer.js';
+import { replay } from './audit.js';
 
 // ---------------------------------------------------------------------------
 // Version from package.json
@@ -123,6 +125,29 @@ teamCmd
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// possiblaw audit show <matter-id>
+// ---------------------------------------------------------------------------
+const auditCmd = program.command('audit').description('Audit log commands');
+
+auditCmd
+  .command('show')
+  .description('Pretty-print the audit log for a matter')
+  .argument('<matter-id>', 'Matter ID (UUID from a previous run)')
+  .option('--no-color', 'Disable ANSI colour output')
+  .action((matterId: string, opts: { color: boolean }) => {
+    const printerOpts = { color: opts.color };
+    const filePath = join(REPO_ROOT, 'layer', 'audit', `${matterId}.jsonl`);
+    try {
+      const events = replay(filePath);
+      printAuditLog(events, matterId, printerOpts);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError reading audit log: ${message}`);
       process.exit(1);
     }
   });

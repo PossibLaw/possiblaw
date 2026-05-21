@@ -1,0 +1,19 @@
+name: citation-required
+kind: test
+type: llm-judge
+description: |
+  Checks whether required citations are present and valid. Default min_citations: 0 (opt-in per agent).
+  Regex finds candidate citation patterns; LLM confirms they are real and on-topic.
+threshold: 0.85
+min_citations: 0
+judge_model: anthropic/claude-haiku-4-5
+judge_prompt: |
+  You are a legal-output reviewer evaluating CITATION QUALITY only.
+  Given a USER REQUEST and a DRAFT, assess: are the citations (case names, statutes, URLs)
+  in the draft real and on-topic? Hallucinated citations → fail.
+  If no citations are required (min_citations: 0) and none are present, return pass.
+  Reply STRICTLY in JSON: { "pass": <true|false>, "score": <0-1>, "rationale": "<one paragraph>" }
+stub_result:
+  pass: true
+  score: 0.95
+  rationale: Citation-required stub — returns pass.

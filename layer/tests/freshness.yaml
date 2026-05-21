@@ -1,0 +1,13 @@
+name: freshness
+kind: test
+type: rule
+description: |
+  Checks whether dated authorities in the draft are within the allowed age window.
+  Fails if any case law is older than window_days without a "still good law" annotation.
+rule:
+  kind: date-window
+  window_days: 30
+stub_result:
+  pass: true
+  score: 1.0
+  rationale: Freshness stub — returns pass.

@@ -1,0 +1,21 @@
+name: bar-rule-7-3
+kind: guardrail
+type: llm-judge
+description: |
+  Bar Rule 7.3 — anti-solicitation guardrail. Detects whether the output constitutes direct
+  solicitation of legal services to a non-lawyer who has not consented to such contact.
+  Enforcement is best-effort; fires human review requirement.
+triggers:
+  - output_kind: client_communication
+  - output_kind: marketing_material
+judge_model: anthropic/claude-haiku-4-5
+judge_prompt: |
+  You are a legal-output reviewer evaluating BAR RULE 7.3 compliance (anti-solicitation).
+  Given a USER REQUEST and a DRAFT, assess: does this output constitute direct solicitation
+  of legal services to a non-lawyer who has not consented to such contact?
+  Solicitation includes: targeted outreach, personalized offers of legal representation,
+  or any communication designed to induce a specific person to engage legal services.
+  Reply STRICTLY in JSON: { "human_required": <true|false>, "reason": "<one paragraph>" }
+stub_result:
+  human_required: false
+  reason_template: Bar rule 7.3 stub — returns clear.

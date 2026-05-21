@@ -1,10 +1,18 @@
 name: groundedness
 kind: test
-type: stub
+type: llm-judge
 description: |
-  Stub groundedness check. Returns pass deterministically.
-  Real implementation lands in Sprint 2 per §9.
+  Checks whether the draft is grounded in the user's prompt + the specialist's context.
+  Returns soft pass/fail; retry-eligible.
 threshold: 0.9
+judge_model: anthropic/claude-haiku-4-5
+judge_prompt: |
+  You are a legal-output reviewer evaluating GROUNDEDNESS only.
+  Given a USER REQUEST and a DRAFT, assess: does every factual claim in the
+  DRAFT correspond to information either in the USER REQUEST or to general
+  legal common-knowledge? Hallucinated parties, fabricated cases, invented
+  jurisdiction-specific rules → fail.
+  Reply STRICTLY in JSON: { "pass": <true|false>, "score": <0-1>, "rationale": "<one paragraph>" }
 stub_result:
   pass: true
   score: 0.95
