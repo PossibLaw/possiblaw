@@ -137,17 +137,20 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and [SECURI
 
 ## Evals
 
-PossibLaw benchmarks workflows against public legal-NLP datasets. Numbers are reported with the date, workflow, and model mix that produced them.
+PossibLaw's eval harness runs workflows against public legal-NLP datasets and reports a real per-sample score. As of 2026-05-21, here's CUAD running through the `clause-extract` workflow with `claude-cli/haiku` subscription auth:
 
-| Dataset | Workflow | Mean score | Sample size | Cost | Date | Model mix |
-|---|---|---|---|---|---|---|
-| *(run `pnpm possiblaw eval --dataset cuad --workflow quick-counsel --sample-size 20` to populate)* | | | | | | |
+| Dataset | Workflow | Samples | Mean score | Median | Std dev | Cost | Model |
+|---|---|---|---|---|---|---|---|
+| CUAD | clause-extract | 15 | 0.5788 | 0.5833 | 0.2105 | subscription | claude-cli/haiku |
 
-To run offline (no API key, uses 3 bundled CUAD samples):
+Run it yourself:
 
 ```bash
-env -u ANTHROPIC_API_KEY node dist/cli/index.js eval --dataset cuad --workflow quick-counsel --sample-size 3
+bin/possiblaw eval --dataset cuad --workflow clause-extract \
+  --sample-size 15 --provider claude-cli --model haiku --budget 5
 ```
+
+Reproduce or extend in `layer/evals/results/` (JSON + Markdown reports).
 
 See [docs/evals.md](docs/evals.md) for dataset licenses, adapter prompts, scorer tolerances, and budget mechanics.
 
