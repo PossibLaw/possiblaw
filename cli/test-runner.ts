@@ -2,12 +2,50 @@
  * PossibLaw v2 — Test runner.
  * Dispatches on TestConfig.type: stub | llm-judge | rule.
  */
+import { runAgent } from './llm.js';
 import type {
+  Agent,
   TestConfig,
   TestResult,
   TestFailureAction,
   RunContext,
 } from './types.js';
+
+// ---------------------------------------------------------------------------
+// Per-provider defaults for LLM-judge model and test-failure retry model.
+// Kept in sync with cli/pipeline.ts:DEFAULT_MODEL_PER_PROVIDER and
+// cli/llm.ts:parseProvider. If a provider is added there, mirror it here.
+// ---------------------------------------------------------------------------
+
+/**
+ * Default judge model per provider when `--provider` is set but `--model` is
+ * not. Picks a cheap/fast model for judging:
+ *   anthropic   → claude-haiku-4-5 (cheap Anthropic model)
+ *   claude-cli  → haiku            (subscription, cheap Anthropic via CLI)
+ *   codex-cli   → gpt-5.5          (OpenAI subscription; no cheaper tier exposed)
+ *   ollama      → llama3.1:8b      (local)
+ */
+const DEFAULT_JUDGE_MODEL_PER_PROVIDER: Record<string, string> = {
+  'anthropic': 'claude-haiku-4-5',
+  'claude-cli': 'haiku',
+  'codex-cli': 'gpt-5.5',
+  'ollama': 'llama3.1:8b',
+};
+
+/**
+ * Default retry model per provider — picked for stronger reasoning than the
+ * judge tier when the same provider is in use.
+ *   anthropic   → claude-opus-4-7 (existing Sprint 2 behavior preserved)
+ *   claude-cli  → opus            (subscription, stronger Anthropic via CLI)
+ *   codex-cli   → gpt-5.5         (no smarter tier exposed; same as judge)
+ *   ollama      → llama3.1:8b     (no smarter tier exposed locally; same as judge)
+ */
+const DEFAULT_RETRY_MODEL_PER_PROVIDER: Record<string, string> = {
+  'anthropic': 'claude-opus-4-7',
+  'claude-cli': 'opus',
+  'codex-cli': 'gpt-5.5',
+  'ollama': 'llama3.1:8b',
+};
 
 // ---------------------------------------------------------------------------
 // Input type
@@ -78,7 +116,7 @@ export async function runTest(input: TestRunnerInput): Promise<TestResult> {
 async function runLlmJudgeTest(input: TestRunnerInput): Promise<TestResult> {
   const { config, draft, context } = input;
 
-  const judgeModel = config.judge_model ?? 'claude-haiku-4-5';
+  const judgeModel = resolveJudgeModel(config, context);
   const rawPrompt = config.judge_prompt ?? defaultGroundednessPrompt();
 
   const userMessage = buildJudgeUserMessage(context.userPrompt, draft);
@@ -92,28 +130,66 @@ async function runLlmJudgeTest(input: TestRunnerInput): Promise<TestResult> {
     };
   }
 
-  // Live: call Anthropic
+  // Live: route through the provider system via `runAgent`. We construct a
+  // synthetic specialist Agent whose `body` is the judge system prompt and
+  // whose `model` carries the resolved `<provider>/<model>` id. This way the
+  // judge respects the `--provider` flag end-to-end instead of bypassing the
+  // provider registry with a direct Anthropic SDK call.
+  const syntheticJudge: Agent = {
+    name: `llm-judge:${config.name}`,
+    role: 'specialist',
+    domain: 'legal',
+    reports_to: null,
+    manages: [],
+    model: judgeModel,
+    fallback_model: judgeModel,
+    tests: [],
+    guardrails: [],
+    skills: [],
+    connectors: [],
+    description: `Synthetic LLM-judge agent for test '${config.name}'.`,
+    body: rawPrompt,
+  };
+
   try {
-    const { default: Anthropic } = await import('@anthropic-ai/sdk');
-    const client = new Anthropic();
-    const res = await client.messages.create({
-      model: judgeModel.replace(/^anthropic\//, ''),
-      max_tokens: 512,
-      system: rawPrompt,
-      messages: [{ role: 'user', content: userMessage }],
+    const result = await runAgent(syntheticJudge, userMessage, {
+      verbose: context.verbose,
+      ...(context.maxBudgetUsd !== undefined ? { maxBudgetUsd: context.maxBudgetUsd } : {}),
     });
-
-    const raw = res.content
-      .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
-
-    return parseJudgeResponse(raw, config);
+    return parseJudgeResponse(result.output, config);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     // Fail safe: if judge errors, return fail with reason
     return { pass: false, rationale: `Judge call failed: ${message}` };
   }
+}
+
+/**
+ * Resolve the `<provider>/<model>` id for the LLM-judge call.
+ *
+ * Precedence:
+ *   1. `providerOverride` set, `modelOverride` set → `<provider>/<modelOverride>`.
+ *   2. `providerOverride` set, no `modelOverride` → `<provider>/<provider-default-judge>`.
+ *   3. No override → use `config.judge_model` (legacy field; bare names are
+ *      treated as `anthropic/<name>` by parseProvider).
+ *   4. Nothing configured → `anthropic/claude-haiku-4-5` (legacy default).
+ */
+function resolveJudgeModel(config: TestConfig, context: RunContext): string {
+  const providerOverride = context.providerOverride;
+  if (providerOverride) {
+    const modelName =
+      context.modelOverride ?? DEFAULT_JUDGE_MODEL_PER_PROVIDER[providerOverride];
+    if (!modelName) {
+      // Unknown provider — fall through to legacy behavior rather than throw,
+      // so misconfiguration surfaces as a judge failure not a crash.
+      return config.judge_model ?? 'claude-haiku-4-5';
+    }
+    return `${providerOverride}/${modelName}`;
+  }
+  // No override: preserve historical behavior. Legacy `judge_model` values are
+  // bare Anthropic model names (e.g. 'claude-haiku-4-5') that parseProvider
+  // treats as `anthropic/<name>`.
+  return config.judge_model ?? 'claude-haiku-4-5';
 }
 
 function buildJudgeUserMessage(userPrompt: string, draft: string): string {
@@ -242,7 +318,7 @@ export async function handleTestFailure(
     const count = retryCount.get(key) ?? 0;
     if (count === 0) {
       retryCount.set(key, 1);
-      return { action: 'retry_with', model: 'anthropic/claude-opus-4-7' };
+      return { action: 'retry_with', model: resolveRetryModel(context) };
     }
     // Already retried once — escalate
     retryCount.set(key, count + 1);
@@ -251,4 +327,23 @@ export async function handleTestFailure(
 
   // Default: escalate
   return { action: 'escalate_to', target: 'human' };
+}
+
+/**
+ * Resolve the retry model id for `retry_with_better_model_then_escalate`.
+ *
+ * Precedence:
+ *   1. `providerOverride` set → `<provider>/<provider-retry-default>`.
+ *   2. No override → `anthropic/claude-opus-4-7` (preserves Sprint 2 behavior).
+ */
+function resolveRetryModel(context: RunContext): string {
+  const providerOverride = context.providerOverride;
+  if (providerOverride) {
+    const modelName = DEFAULT_RETRY_MODEL_PER_PROVIDER[providerOverride];
+    if (modelName) {
+      return `${providerOverride}/${modelName}`;
+    }
+    // Unknown provider — fall back to legacy default.
+  }
+  return 'anthropic/claude-opus-4-7';
 }

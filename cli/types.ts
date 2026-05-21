@@ -249,4 +249,26 @@ export interface RunContext {
   offline: boolean;
   privacyProfile?: 'always' | 'cloud-only' | 'off';
   matterTag?: string;
+  /**
+   * Optional run-time provider override propagated from `PipelineOpts`.
+   * When set, downstream LLM calls (including LLM-judge tests and
+   * test-failure retries) build their model id as `<providerOverride>/<model>`
+   * instead of using the static fallback (`anthropic/*`).
+   *
+   * Valid values mirror `parseProvider` in cli/llm.ts:
+   *   'anthropic' | 'claude-cli' | 'codex-cli' | 'ollama'.
+   */
+  providerOverride?: string;
+  /**
+   * Optional model name paired with `providerOverride`. When set, the
+   * LLM-judge uses `<providerOverride>/<modelOverride>`. When unset, the
+   * test-runner picks a sensible provider-specific judge default.
+   */
+  modelOverride?: string;
+  /**
+   * Optional per-call budget cap (USD) threaded from the pipeline. When the
+   * LLM-judge runs against a claude-cli/* model it is forwarded to
+   * `claude -p --max-budget-usd`. Other providers ignore it.
+   */
+  maxBudgetUsd?: number;
 }

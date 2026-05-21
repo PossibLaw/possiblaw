@@ -187,6 +187,12 @@ export async function runPipeline(
     offline: opts.offline,
     privacyProfile,
     matterTag,
+    // Propagate the run-time provider override into the test/guardrail runners
+    // so LLM-judge calls and test-failure retries respect `--provider` instead
+    // of hard-coding anthropic/*.
+    ...(providerOverride !== undefined ? { providerOverride } : {}),
+    ...(modelOverride !== undefined ? { modelOverride } : {}),
+    ...(maxBudgetUsd !== undefined ? { maxBudgetUsd } : {}),
   };
 
   try {
