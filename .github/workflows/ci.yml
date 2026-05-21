@@ -16,16 +16,16 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
-      - name: Enable corepack (pnpm)
+      - name: Enable corepack (pnpm pinned via packageManager)
         run: corepack enable
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile=false
+        run: pnpm install --no-frozen-lockfile
 
       - name: Typecheck
         run: pnpm typecheck
