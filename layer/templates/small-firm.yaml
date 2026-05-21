@@ -1,0 +1,25 @@
+name: small-firm
+description: A small multi-attorney firm running legal + marketing + finance + admin on PossibLaw.
+roster:
+  routers:
+    - chief-of-staff
+    - chief-counsel
+  leads:
+    - commercial-lead
+    - marketing-lead
+    - finance-lead
+    - admin-lead
+  specialists:
+    - nda-drafter
+    - intake-form-drafter
+    - pitch-polisher
+    - billing-prep
+    - expense-categorizer
+    - calendar-coordinator
+workflows:
+  - quick-counsel
+  - quick-invoice-review
+  - quick-intake-reply
+disclaimer: |
+  PossibLaw does not practice law. The operator is the responsible
+  professional. Treat all output as a starting point.

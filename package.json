@@ -9,7 +9,7 @@
     "possiblaw": "bin/possiblaw"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp -r cli/fixtures dist/cli/fixtures",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/cli/fixtures && cp cli/fixtures/* dist/cli/fixtures/",
     "dev": "tsx cli/index.ts",
     "possiblaw": "node dist/cli/index.js",
     "lint": "echo 'no lint configured yet — placeholder'",

@@ -1,0 +1,37 @@
+[
+  {
+    "description": "Client dinner at Nobu — ACME matter discussion",
+    "amount": 245.00,
+    "category": "Business Meals & Entertainment",
+    "deductible": true,
+    "rationale": "Client business meal with documented business purpose (ACME matter); 50% deductible under IRC §274. Operator should retain receipt and note attendees."
+  },
+  {
+    "description": "Westlaw monthly subscription — legal research",
+    "amount": 399.00,
+    "category": "Technology & Software (SaaS)",
+    "deductible": true,
+    "rationale": "Legal research subscription is an ordinary and necessary business expense for a law firm; fully deductible under IRC §162."
+  },
+  {
+    "description": "Round-trip airfare JFK–LAX for client deposition",
+    "amount": 612.50,
+    "category": "Travel — Air & Rail",
+    "deductible": true,
+    "rationale": "Business travel for client matter (deposition); fully deductible as an ordinary and necessary business expense. Operator should retain boarding passes and document the business purpose."
+  },
+  {
+    "description": "Bar association annual dues — NY State Bar",
+    "amount": 375.00,
+    "category": "Professional Fees",
+    "deductible": true,
+    "rationale": "State bar dues required to maintain law license are fully deductible as professional fees under IRC §162. Directly related to the attorney's trade or business."
+  },
+  {
+    "description": "Amazon purchase — office chair and personal items",
+    "amount": 489.99,
+    "category": "Office Supplies",
+    "deductible": false,
+    "rationale": "Description indicates mixed personal and business items. The office chair may be deductible if used exclusively in a qualifying home office, but personal items are not. Operator should split the receipt and verify home office eligibility before claiming any deduction."
+  }
+]

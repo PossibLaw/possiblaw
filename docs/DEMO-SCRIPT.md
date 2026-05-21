@@ -122,6 +122,51 @@ Team — template: solo-lawyer
 
 ---
 
+---
+
+## Demo 4 — Multi-surface day (small-firm template)
+
+This demo proves "legal business does more than law." Sprint 3 adds Marketing, Finance, and Admin surfaces, all reachable via the same workflow runner.
+
+### Step 1 — Inspect the full team roster
+
+```bash
+bin/possiblaw team list --template small-firm
+```
+
+Expected: 12 agents listed — 2 routers + 4 leads + 6 specialists. Non-legal agents are color-coded by domain (magenta = marketing, blue = finance, yellow = admin).
+
+### Step 2 — Marketing surface: new client intake form
+
+```bash
+bin/possiblaw run quick-intake-reply "new prospect wants representation for a vendor dispute"
+```
+
+**What you should see:**
+
+1. Chief of Staff classifies the matter as marketing → routes to `marketing-lead`.
+2. Marketing Lead routes to `intake-form-drafter`.
+3. intake-form-drafter produces a ~30-field intake questionnaire (sections: Contact, Matter Details, Prior Representation, Conflict Seed, Scheduling, Privacy & Consent).
+4. `scope-adherence` test passes.
+5. No guardrail — delivered with exit code 0.
+
+### Step 3 — Finance surface: invoice review with guardrail
+
+```bash
+bin/possiblaw run quick-invoice-review "draft May invoice for ACME matter — 12.5 hours partner time, 8 hours associate"
+```
+
+**What you should see:**
+
+1. Chief of Staff classifies as finance → routes to `finance-lead`.
+2. Finance Lead routes to `billing-prep`.
+3. billing-prep produces a complete draft invoice (line items for partner at $450/hr, associate at $275/hr, total $7,375.00, payment block, and `Signature: ___` authorization line).
+4. `scope-adherence` test passes.
+5. **`signed-document` guardrail HITS** — the invoice contains a signature/authorization block.
+6. Escalation card prints: a reviewing partner must approve before the invoice is sent to the client.
+
+---
+
 ## What this demo proves
 
 | Capability | Where it shows up |

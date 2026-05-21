@@ -15,6 +15,19 @@ const RED = '\x1b[31m';
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
 const CYAN = '\x1b[36m';
+const MAGENTA = '\x1b[35m';
+const BLUE = '\x1b[34m';
+
+/** Returns a domain-specific color for non-legal domains. */
+function domainColor(domain: string, text: string, color: boolean): string {
+  if (!color) return text;
+  switch (domain) {
+    case 'marketing': return `${MAGENTA}${text}${RESET}`;
+    case 'finance': return `${BLUE}${text}${RESET}`;
+    case 'admin': return `${YELLOW}${text}${RESET}`;
+    default: return `${CYAN}${text}${RESET}`;
+  }
+}
 
 export interface PrinterOpts {
   color: boolean;
@@ -204,7 +217,7 @@ export function printAuditLog(events: AuditEvent[], matterId: string, opts: Prin
 // ---------------------------------------------------------------------------
 
 export function printTeamList(
-  agents: Array<{ name: string; role: string; description: string }>,
+  agents: Array<{ name: string; role: string; description: string; domain?: string }>,
   templateName: string,
   opts: PrinterOpts
 ): void {
@@ -212,8 +225,12 @@ export function printTeamList(
   console.log(c(BOLD, `Team — template: ${templateName}`, opts.color));
   console.log(c(DIM, '─'.repeat(60), opts.color));
   for (const agent of agents) {
-    const roleLabel = c(CYAN, `[${agent.role}]`, opts.color);
-    console.log(`  ${roleLabel}  ${c(BOLD, agent.name, opts.color)}`);
+    const domain = agent.domain ?? 'legal';
+    const roleLabel = domainColor(domain, `[${agent.role}]`, opts.color);
+    const domainTag = domain !== 'legal' && domain !== 'ops'
+      ? domainColor(domain, ` <${domain}>`, opts.color)
+      : '';
+    console.log(`  ${roleLabel}  ${c(BOLD, agent.name, opts.color)}${domainTag}`);
     console.log(c(DIM, indent(agent.description, 10), opts.color));
   }
   console.log('');

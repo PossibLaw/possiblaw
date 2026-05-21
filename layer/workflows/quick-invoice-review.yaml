@@ -1,0 +1,16 @@
+name: quick-invoice-review
+description: Draft or review a client invoice for a legal matter — routes through Chief of Staff to Finance Lead to billing-prep specialist.
+router: chief-of-staff
+pipeline:
+  - step: route
+    agent: chief-of-staff
+  - step: route
+    agent: <determined-by-previous-step>
+  - step: specialist
+    agent: <determined-by-router-chain>
+  - step: test
+    suite: [scope-adherence]
+  - step: guardrail
+    suite: [signed-document]
+on_test_failure: retry_with_better_model_then_escalate
+on_guardrail_hit: escalate_to_human

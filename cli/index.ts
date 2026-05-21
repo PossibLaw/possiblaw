@@ -118,7 +118,7 @@ teamCmd
 
       const agents = allNames.map((name) => {
         const a = loadAgent(name);
-        return { name: a.name, role: a.role, description: a.description };
+        return { name: a.name, role: a.role, description: a.description, domain: a.domain };
       });
 
       printTeamList(agents, opts.template, printerOpts);
