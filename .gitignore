@@ -8,3 +8,7 @@ coverage/
 .vite/
 .turbo/
 pnpm-store/
+
+# Audit logs are per-matter runtime artifacts, not source
+layer/audit/*.jsonl
+!layer/audit/.gitkeep
