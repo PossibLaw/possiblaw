@@ -8,6 +8,8 @@ import { runTest, handleTestFailure } from './test-runner.js';
 import { runGuardrail, handleGuardrailHit } from './guardrail-runner.js';
 import { createAuditLog } from './audit.js';
 import { encode, decode, PrivacyFilterError } from './privacy-filter.js';
+import { costForCall } from './pricing.js';
+import type { CostBreakdown, CostByCall } from './pricing.js';
 import type {
   Workflow,
   Agent,
@@ -507,7 +509,48 @@ interface BuildReportArgs {
   auditLogPath: string;
 }
 
+function computeCost(steps: RunStepResult[], agentCalls: AgentCallRecord[]): CostBreakdown {
+  const by_call: CostByCall[] = [];
+  let routing = 0;
+  let specialist = 0;
+  const tests = 0;
+  const guardrails = 0;
+
+  const PRICING_NOTE = 'Pricing snapshot 2026-05-20. Update cli/pricing.ts to refresh.';
+  const allOffline = agentCalls.every((c) => c.model.includes('(offline)'));
+
+  for (const step of steps) {
+    const rec = step.agentCallRecord;
+    if (!rec) continue;
+
+    const inTokens = rec.tokens?.in ?? 0;
+    const outTokens = rec.tokens?.out ?? 0;
+    const cost = costForCall(rec.model, inTokens, outTokens);
+    const entry: CostByCall = { agent: rec.agent, model: rec.model, input: inTokens, output: outTokens, cost };
+
+    // Classify by stepName prefix
+    if (step.stepName.startsWith('route:')) {
+      routing += cost;
+    } else {
+      // specialist: (including :retry), and any other agent-backed steps
+      specialist += cost;
+    }
+    by_call.push(entry);
+  }
+
+  // Tests and guardrails are rule-based stubs in current sprint — cost is $0
+
+  const total = routing + specialist + tests + guardrails;
+  const notes: string[] = [PRICING_NOTE];
+  if (allOffline) {
+    notes.push('(offline — model costs not incurred)');
+  }
+
+  return { total, by_phase: { routing, specialist, tests, guardrails }, by_call, notes };
+}
+
 function buildReport(args: BuildReportArgs): RunReport {
+  const cost = computeCost(args.steps, args.agentCalls);
   const report: RunReport = {
     workflow: args.workflowName,
     userPrompt: args.userPrompt,
@@ -518,6 +561,7 @@ function buildReport(args: BuildReportArgs): RunReport {
     test_results: args.testResults,
     guardrail_results: args.guardrailResults,
     audit_log_path: args.auditLogPath,
+    cost,
   };
   if (args.status === 'escalated') report.escalationReason = args.escalationOrError;
   if (args.status === 'error') report.error = args.escalationOrError;

@@ -201,6 +201,7 @@ export interface RunReport {
   test_results: { name: string; result: TestResult }[];
   guardrail_results: { name: string; result: GuardrailResult }[];
   audit_log_path: string;
+  cost?: import('./pricing.js').CostBreakdown;
 }
 
 export interface RunContext {

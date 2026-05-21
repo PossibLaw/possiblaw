@@ -216,3 +216,36 @@ env -u ANTHROPIC_API_KEY node dist/cli/index.js run quick-counsel \
 # Inspect key store
 node dist/cli/index.js privacy show <matter-id>
 ```
+
+---
+
+## Sprint 5: Cost transparency
+
+See [docs/sprint-5-demo.md](./sprint-5-demo.md) for the full walkthrough.
+
+Quick commands:
+
+```bash
+# 1. Show typical cost for quick-counsel workflow
+node dist/cli/index.js workflows show quick-counsel
+
+# 2. Run offline — cost report shows $0
+env -u ANTHROPIC_API_KEY node dist/cli/index.js run quick-counsel "draft NDA for ACME"
+
+# 3. Override nda-drafter to haiku
+node dist/cli/index.js team set-model nda-drafter anthropic/claude-haiku-4-5
+
+# 4. Re-run — workflows show reflects lower cost
+node dist/cli/index.js workflows show quick-counsel
+
+# 5. Swap expense-categorizer to local Llama
+node dist/cli/index.js team set-model expense-categorizer ollama/llama3.1:8b
+
+# 6. Check effective models
+node dist/cli/index.js team show-model expense-categorizer
+node dist/cli/index.js team show-model nda-drafter
+
+# 7. Invoice review — cost report shows local-model at $0
+env -u ANTHROPIC_API_KEY node dist/cli/index.js run quick-invoice-review \
+  "draft May invoice for ACME — 12.5 partner hours, 8 associate hours"
+```

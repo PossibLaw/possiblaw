@@ -56,10 +56,10 @@ export async function isOllamaAvailable(): Promise<boolean> {
 export async function chat(
   systemPrompt: string,
   userMessage: string,
-  opts?: { temperature?: number; format?: 'json' }
+  opts?: { temperature?: number; format?: 'json'; model?: string }
 ): Promise<string> {
   const body: OllamaChatRequest = {
-    model: OLLAMA_MODEL,
+    model: opts?.model ?? OLLAMA_MODEL,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userMessage },

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
 import yaml from 'js-yaml';
 import type { Agent, Workflow, Template, TestConfig, GuardrailConfig, Skill } from './types.js';
+import { getEffectiveModel } from './overrides.js';
 
 // ---------------------------------------------------------------------------
 // Repo root discovery
@@ -76,13 +77,20 @@ export function loadAgent(name: string): Agent {
     const parsed = matter(readFileSync(filePath, 'utf8'));
     const fm = parsed.data as Record<string, unknown>;
     if (fm['name'] === name) {
+      const baseModel = String(fm['model']);
+      const effectiveModel = getEffectiveModel(name, baseModel);
+      if (effectiveModel !== baseModel) {
+        console.error(
+          `[override] agent.model overridden: ${baseModel} → ${effectiveModel} (agent: ${name})`
+        );
+      }
       return {
         name: String(fm['name']),
         role: fm['role'] as Agent['role'],
         domain: fm['domain'] as Agent['domain'],
         reports_to: fm['reports_to'] != null ? String(fm['reports_to']) : null,
         manages: Array.isArray(fm['manages']) ? (fm['manages'] as string[]) : [],
-        model: String(fm['model']),
+        model: effectiveModel,
         fallback_model: String(fm['fallback_model']),
         tests: Array.isArray(fm['tests']) ? (fm['tests'] as string[]) : [],
         guardrails: Array.isArray(fm['guardrails']) ? (fm['guardrails'] as string[]) : [],
@@ -146,6 +154,23 @@ export function loadGuardrail(name: string): GuardrailConfig {
   throw new Error(
     `Guardrail '${name}' not found in layer/guardrails/. Looked at: ${candidates.join(', ')}`
   );
+}
+
+/**
+ * Return all agent names found in layer/agents/ (scans frontmatter).
+ */
+export function listAgentNames(): string[] {
+  const agentDir = join(REPO_ROOT, 'layer', 'agents');
+  const candidates = findFiles(agentDir, (p) => p.endsWith('.md'));
+  const names: string[] = [];
+  for (const filePath of candidates) {
+    const parsed = matter(readFileSync(filePath, 'utf8'));
+    const fm = parsed.data as Record<string, unknown>;
+    if (typeof fm['name'] === 'string') {
+      names.push(fm['name']);
+    }
+  }
+  return names;
 }
 
 export function loadSkill(name: string): Skill {

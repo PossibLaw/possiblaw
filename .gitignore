@@ -12,3 +12,6 @@ pnpm-store/
 # Audit logs are per-matter runtime artifacts, not source
 layer/audit/*.jsonl
 !layer/audit/.gitkeep
+
+# Per-operator model overrides (not committed)
+.possiblaw/

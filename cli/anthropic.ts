@@ -1,11 +1,17 @@
 /**
- * PossibLaw v2 — Thin Anthropic SDK wrapper.
- * Falls back to deterministic offline fixtures when ANTHROPIC_API_KEY is unset.
+ * PossibLaw v2 — LLM call router.
+ * Supports three providers:
+ *   anthropic/<model>  — Anthropic API (requires ANTHROPIC_API_KEY)
+ *   ollama/<model>     — Local Ollama daemon (falls back to offline if unreachable)
+ *   (no prefix)        — Treated as anthropic/<model> for backwards compat
+ * Falls back to deterministic offline fixtures when ANTHROPIC_API_KEY is unset
+ * or when Ollama is unreachable.
  */
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Agent, Skill } from './types.js';
+import { chat as ollamaChat, isOllamaAvailable } from './ollama.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -14,9 +20,14 @@ const __dirname = dirname(__filename);
 // Model ID mapping
 // ---------------------------------------------------------------------------
 
-function resolveModelId(raw: string): string {
-  // Strip leading "anthropic/" prefix if present
-  return raw.replace(/^anthropic\//, '');
+type ProviderKind = 'anthropic' | 'ollama';
+
+function parseProvider(raw: string): { provider: ProviderKind; modelId: string } {
+  if (raw.startsWith('ollama/')) {
+    return { provider: 'ollama', modelId: raw.slice('ollama/'.length) };
+  }
+  // anthropic/ prefix or bare name
+  return { provider: 'anthropic', modelId: raw.replace(/^anthropic\//, '') };
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +123,7 @@ export async function runAgent(
   userPrompt: string,
   opts: RunAgentOpts = {}
 ): Promise<AgentRunResult> {
-  const model = resolveModelId(agent.model);
+  const { provider, modelId } = parseProvider(agent.model);
 
   // Build system prompt
   let systemPrompt = agent.body.trim();
@@ -128,13 +139,48 @@ export async function runAgent(
     console.error(`[verbose] user prompt: ${userPrompt}\n`);
   }
 
+  // ---------------------------------------------------------------------------
+  // Ollama provider
+  // ---------------------------------------------------------------------------
+  if (provider === 'ollama') {
+    // Check if Ollama is reachable
+    const available = await isOllamaAvailable();
+    if (!available) {
+      if (opts.verbose) {
+        console.error(`[verbose] Ollama unreachable — falling back to offline fixture for ${agent.name}`);
+      }
+      const output = offlineFixture(agent.name, userPrompt);
+      return { output, model: `ollama/${modelId} (offline)`, tokens: null };
+    }
+
+    try {
+      const output = await ollamaChat(systemPrompt, userPrompt, { model: modelId });
+      if (opts.verbose) {
+        console.error(`[verbose] Ollama response for ${agent.name}:\n${output}\n`);
+      }
+      // Ollama does not expose token counts in our current client
+      return { output, model: `ollama/${modelId}`, tokens: null };
+    } catch {
+      // Fallback to offline fixture on Ollama error
+      if (opts.verbose) {
+        console.error(`[verbose] Ollama error — falling back to offline fixture for ${agent.name}`);
+      }
+      const output = offlineFixture(agent.name, userPrompt);
+      return { output, model: `ollama/${modelId} (offline)`, tokens: null };
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Anthropic provider (default)
+  // ---------------------------------------------------------------------------
+
   // Offline mode: no API key present
   if (!process.env['ANTHROPIC_API_KEY']) {
     const output = offlineFixture(agent.name, userPrompt);
     if (opts.verbose) {
       console.error(`[verbose] OFFLINE response for ${agent.name}:\n${output}\n`);
     }
-    return { output, model: `${model} (offline)`, tokens: null };
+    return { output, model: `${modelId} (offline)`, tokens: null };
   }
 
   // Live mode
@@ -142,7 +188,7 @@ export async function runAgent(
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
     const client = new Anthropic();
     const res = await client.messages.create({
-      model,
+      model: modelId,
       max_tokens: 4096,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
@@ -159,7 +205,7 @@ export async function runAgent(
 
     return {
       output,
-      model,
+      model: modelId,
       tokens: { in: res.usage.input_tokens, out: res.usage.output_tokens },
     };
   } catch (err: unknown) {

@@ -3,6 +3,8 @@
  * Uses simple ANSI escapes only — no external dependencies.
  */
 import type { RunReport, RunStepResult, AuditEvent } from './types.js';
+import { formatCost } from './pricing.js';
+import type { CostBreakdown } from './pricing.js';
 
 // ---------------------------------------------------------------------------
 // ANSI helpers
@@ -134,6 +136,41 @@ export function printReport(report: RunReport, opts: PrinterOpts): void {
   if (report.audit_log_path) {
     console.log('');
     console.log(c(DIM, `Audit log: ${report.audit_log_path}`, opts.color));
+  }
+
+  if (report.cost) {
+    printCostReport(report.cost, opts);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cost report
+// ---------------------------------------------------------------------------
+
+export function printCostReport(cost: CostBreakdown, opts: PrinterOpts): void {
+  const offline = cost.notes.some((n) => n.includes('offline'));
+  console.log('');
+  console.log(c(DIM, '─'.repeat(45), opts.color));
+  console.log(c(BOLD, 'Cost report (pricing snapshot 2026-05-20)', opts.color));
+  console.log(c(DIM, '─'.repeat(45), opts.color));
+
+  if (offline) {
+    console.log(c(DIM, '  (offline — model costs not incurred)', opts.color));
+  } else {
+    const bp = cost.by_phase;
+    console.log(`  Routing:    ${formatCost(bp.routing)}`);
+    console.log(`  Specialist: ${formatCost(bp.specialist)}`);
+    console.log(`  Tests:      ${formatCost(bp.tests)}`);
+    console.log(`  Guardrails: ${formatCost(bp.guardrails)}  (rule-based, free)`);
+    console.log(c(DIM, '  ' + '─'.repeat(35), opts.color));
+    console.log(`  Total:      ${c(BOLD, formatCost(cost.total), opts.color)}`);
+  }
+
+  console.log(c(DIM, '─'.repeat(45), opts.color));
+  for (const note of cost.notes) {
+    if (!note.includes('offline')) {
+      console.log(c(DIM, `  Note: ${note}`, opts.color));
+    }
   }
 }
 

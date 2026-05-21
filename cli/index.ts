@@ -2,11 +2,11 @@
 /**
  * PossibLaw v2 — CLI entry point.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, appendFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
-import { loadWorkflow, loadTemplate, loadAgent, REPO_ROOT } from './loader.js';
+import { loadWorkflow, loadTemplate, loadAgent, listAgentNames, REPO_ROOT } from './loader.js';
 import { runPipeline } from './pipeline.js';
 import {
   printBanner,
@@ -14,9 +14,12 @@ import {
   printReport,
   printTeamList,
   printAuditLog,
+  printCostReport,
 } from './printer.js';
 import { replay } from './audit.js';
 import { loadKeyStore } from './privacy-filter.js';
+import { writeOverride, getEffectiveModel, loadOverrides } from './overrides.js';
+import { estimateWorkflowCost, formatCost } from './pricing.js';
 
 // ---------------------------------------------------------------------------
 // Version from package.json
@@ -108,7 +111,7 @@ program
   });
 
 // ---------------------------------------------------------------------------
-// possiblaw team list
+// possiblaw team list / set-model / show-model
 // ---------------------------------------------------------------------------
 const teamCmd = program.command('team').description('Team management commands');
 
@@ -135,6 +138,198 @@ teamCmd
       });
 
       printTeamList(agents, opts.template, printerOpts);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+teamCmd
+  .command('set-model')
+  .description('Override the model for an agent (writes to .possiblaw/overrides.yaml)')
+  .argument('<agent>', 'Agent name (must exist in layer/agents/)')
+  .argument('<model>', 'Model string: anthropic/<name> or ollama/<name>')
+  .action((agentName: string, model: string) => {
+    try {
+      // Validate agent exists
+      const knownAgents = listAgentNames();
+      if (!knownAgents.includes(agentName)) {
+        console.error(
+          `Error: Agent '${agentName}' not found in layer/agents/.\nKnown agents: ${knownAgents.join(', ')}`
+        );
+        process.exit(1);
+      }
+
+      // Validate model format
+      const validPattern = /^(anthropic\/(claude-[a-z0-9.-]+)|ollama\/.+)$/;
+      if (!validPattern.test(model)) {
+        console.error(
+          `Error: Model '${model}' must be one of:\n  anthropic/claude-<name>\n  ollama/<anything>`
+        );
+        process.exit(1);
+      }
+
+      writeOverride(agentName, model);
+
+      // Ensure .possiblaw/ is in .gitignore
+      const gitignorePath = join(REPO_ROOT, '.gitignore');
+      if (existsSync(gitignorePath)) {
+        const current = readFileSync(gitignorePath, 'utf8');
+        if (!current.includes('.possiblaw/')) {
+          appendFileSync(gitignorePath, '\n# Per-operator overrides (gitignored)\n.possiblaw/\n', 'utf8');
+        }
+      }
+
+      const agent = loadAgent(agentName);
+      console.log(`\nModel override saved.`);
+      console.log(`  Agent:   ${agentName}`);
+      console.log(`  Model:   ${agent.model}`);
+      console.log(`  Written: ${join(REPO_ROOT, '.possiblaw', 'overrides.yaml')}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+teamCmd
+  .command('show-model')
+  .description('Show the effective model for an agent (base + any override)')
+  .argument('<agent>', 'Agent name')
+  .action((agentName: string) => {
+    try {
+      const knownAgents = listAgentNames();
+      if (!knownAgents.includes(agentName)) {
+        console.error(
+          `Error: Agent '${agentName}' not found.\nKnown agents: ${knownAgents.join(', ')}`
+        );
+        process.exit(1);
+      }
+
+      // Load without override to get base
+      const overrides = loadOverrides();
+      const agentData = loadAgent(agentName);
+      const effectiveModel = agentData.model;
+      const hasOverride = agentName in overrides;
+
+      console.log(`\nAgent: ${agentName}`);
+      console.log(`Effective model: ${effectiveModel}`);
+      if (hasOverride) {
+        console.log(`(override active)`);
+      } else {
+        console.log(`(no override — using agent default)`);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\nError: ${message}`);
+      process.exit(1);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// possiblaw workflows show <name>
+// ---------------------------------------------------------------------------
+const workflowsCmd = program.command('workflows').description('Workflow commands');
+
+workflowsCmd
+  .command('show')
+  .description('Show pipeline shape and estimated cost for a workflow')
+  .argument('<name>', 'Workflow name')
+  .option('--no-color', 'Disable ANSI colour output')
+  .action((workflowName: string, opts: { color: boolean }) => {
+    try {
+      const workflow = loadWorkflow(workflowName);
+
+      console.log('');
+      console.log(`Workflow: ${workflow.name}`);
+      console.log(`Description: ${workflow.description}`);
+      console.log(`Router: ${workflow.router}`);
+      console.log('');
+      console.log('Pipeline steps:');
+      for (const step of workflow.pipeline) {
+        if (step.step === 'route') {
+          console.log(`  route      → ${step.agent}`);
+        } else if (step.step === 'specialist') {
+          console.log(`  specialist → ${step.agent}`);
+        } else if (step.step === 'test') {
+          console.log(`  test       → [${step.suite.join(', ')}]`);
+        } else if (step.step === 'guardrail') {
+          console.log(`  guardrail  → [${step.suite.join(', ')}]`);
+        }
+      }
+
+      // Resolve the router chain for cost estimation
+      // We enumerate what agents are typically involved:
+      //   - Start at workflow.router and follow the chain until we hit specialists
+      //   - Use typical token assumptions
+      const routerCalls: Array<{ agent: string; model: string }> = [];
+      const specialistCalls: Array<{ agent: string; model: string }> = [];
+      const testCalls: Array<{ agent: string; model: string }> = [];
+      const guardrailCalls: Array<{ agent: string; model: string }> = [];
+
+      // Walk pipeline: route steps use router model, specialist step uses specialist model
+      // We must load agents to get their effective models
+      const visited = new Set<string>();
+      let currentName = workflow.router;
+      let hops = 0;
+      while (hops < 5) {
+        hops++;
+        if (visited.has(currentName)) break;
+        visited.add(currentName);
+        try {
+          const a = loadAgent(currentName);
+          if (a.role === 'specialist') {
+            specialistCalls.push({ agent: a.name, model: a.model });
+            break;
+          } else {
+            routerCalls.push({ agent: a.name, model: a.model });
+            // Try to follow the first managed agent
+            if (a.manages.length > 0) {
+              currentName = a.manages[0];
+            } else {
+              break;
+            }
+          }
+        } catch {
+          break;
+        }
+      }
+
+      // Test suite entries (use a stub model)
+      const testStep = workflow.pipeline.find(
+        (p): p is { step: 'test'; suite: string[] } => p.step === 'test'
+      );
+      if (testStep) {
+        for (const t of testStep.suite) {
+          testCalls.push({ agent: `test:${t}`, model: 'stub' });
+        }
+      }
+
+      const guardrailStep = workflow.pipeline.find(
+        (p): p is { step: 'guardrail'; suite: string[] } => p.step === 'guardrail'
+      );
+      if (guardrailStep) {
+        for (const g of guardrailStep.suite) {
+          guardrailCalls.push({ agent: `guardrail:${g}`, model: 'rule-based' });
+        }
+      }
+
+      const cost = estimateWorkflowCost(routerCalls, specialistCalls, testCalls, guardrailCalls);
+
+      console.log('');
+      console.log('Resolved agents (effective models after overrides):');
+      for (const r of routerCalls) {
+        console.log(`  [router]     ${r.agent}  →  ${r.model}`);
+      }
+      for (const s of specialistCalls) {
+        console.log(`  [specialist] ${s.agent}  →  ${s.model}`);
+      }
+
+      console.log('');
+      console.log('Estimated typical cost per run:');
+      printCostReport(cost, { color: opts.color });
+      console.log('');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`\nError: ${message}`);

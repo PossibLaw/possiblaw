@@ -9,6 +9,27 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Sprint 5 — Per-agent model overrides + cost transparency
+
+- **`cli/overrides.ts`** — Per-operator model overrides. Reads `.possiblaw/overrides.yaml` (repo-local, gitignored); falls back to `~/.possiblaw/overrides.yaml`. `loadOverrides()`, `getEffectiveModel()`, `writeOverride()`.
+- **`cli/loader.ts`** — `loadAgent()` now calls `getEffectiveModel()` and logs any override applied to stderr. New `listAgentNames()` helper for CLI validation.
+- **`cli/pricing.ts`** — Token pricing module. Snapshot: 2026-05-20. `costForCall()`, `estimateWorkflowCost()`, `formatCost()`. Prices: Opus 4.7 $15/$75, Sonnet 4.6 $3/$15, Haiku 4.5 $0.80/$4.00 per 1M tokens. `ollama/*` and offline runs are $0.
+- **`cli/anthropic.ts`** — Now routes to `cli/ollama.ts` for `ollama/<model>` provider. Falls back to offline fixtures if Ollama is unreachable. Existing `anthropic/` and bare model names are unchanged.
+- **`cli/ollama.ts`** — `chat()` now accepts optional `model` parameter to override `OLLAMA_MODEL` env default.
+- **`cli/pipeline.ts`** — `buildReport()` calls `computeCost()` to compute `CostBreakdown` from step records. Phases: routing / specialist / tests / guardrails.
+- **`cli/printer.ts`** — `printReport()` calls `printCostReport()` after each run. Offline runs show `(offline — model costs not incurred)`.
+- **`cli/types.ts`** — `RunReport` extended with optional `cost: CostBreakdown`.
+- **`cli/index.ts`** — New commands:
+  - `possiblaw workflows show <name>` — pipeline shape + resolved agents + estimated typical cost.
+  - `possiblaw team set-model <agent> <provider/model>` — writes override; validates agent + model format.
+  - `possiblaw team show-model <agent>` — prints effective model after overrides.
+- **`layer/agents/specialists/finance/billing/expense-categorizer.md`** — `model` changed to `ollama/llama3.1:8b`; `fallback_model` set to `anthropic/claude-haiku-4-5`.
+- **`.gitignore`** — `.possiblaw/` added.
+- **`docs/DEMO-SCRIPT.md`** — "Cost transparency" section added.
+- **`docs/sprint-5-demo.md`** — Detailed Sprint 5 demo walkthrough.
+
+---
+
 ### Sprint 4 — Privacy Filter (encoder-decoder via local LLM with reversible entity substitution)
 
 - **`cli/ollama.ts`** — Thin Ollama HTTP client using built-in `fetch`. `isOllamaAvailable()` pings `/api/version`; `chat()` streams `/api/chat` NDJSON and assembles full response. Configurable via `OLLAMA_HOST` and `OLLAMA_MODEL` env vars (default: `http://localhost:11434`, `llama3.1:8b`). Clear error messages distinguish "not installed" from "not running".

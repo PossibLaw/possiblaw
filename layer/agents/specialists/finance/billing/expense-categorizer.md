@@ -4,8 +4,8 @@ role: specialist
 domain: finance
 reports_to: finance-lead
 manages: []
-model: anthropic/claude-haiku-4-5
-fallback_model: anthropic/claude-sonnet-4-6
+model: ollama/llama3.1:8b
+fallback_model: anthropic/claude-haiku-4-5
 tests: []
 guardrails: []
 skills: [expense-categorization-playbook]
