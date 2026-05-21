@@ -7,6 +7,34 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.2.0] — 2026-05-21 — Sprint 11: Subscription-auth providers
+
+### Added
+
+- `claude-cli/*` and `codex-cli/*` providers — route LLM calls through local Claude Code / Codex CLI subscriptions instead of API keys.
+- `--provider <name>` flag on `possiblaw run` and `possiblaw eval` — uniform provider override per run (`anthropic | claude-cli | codex-cli | ollama`).
+- `--model <name>` flag — override the per-provider default model for a single run (defaults: `claude-sonnet-4-6` / `sonnet` / `gpt-5.5` / `llama3.1:8b`).
+- `--max-budget-usd` automatically forwarded to `claude -p` when running evals with `--provider claude-cli --budget <n>`.
+- `docs/auth.md` — provider comparison and choice guide.
+- `docs/sprint-11-demo.md` — same NDA prompt run four ways.
+
+### Changed
+
+- Subscription provider rows in the cost report show the literal string `subscription` instead of `$0.0000`, so subscription billing is visually distinct from truly free local/offline runs.
+- Privacy Filter cloud-mode now covers `claude-cli/*` and `codex-cli/*` in addition to `anthropic/*`. `ollama/*` remains local-only and is not masked.
+- LLM-judge tests route through the provider registry so soft tests respect `--provider` (no longer hard-coded to the Anthropic SDK).
+
+### Fixed
+
+- `team set-model` model-string regex extended to accept `claude-cli/*` and `codex-cli/*` provider prefixes.
+
+### Internal
+
+- `cli/anthropic.ts` reduced to a thin shim that re-exports from the new `cli/llm.ts` provider registry. `cli/llm.ts` is now the single dispatch point for all four providers.
+- Commit map: `1f63fa7` (llm.ts providers) → `0118bf3` (--provider / --model flags) → `abdfbae` (LLM-judge tests routed through provider registry).
+
+---
+
 ## [Unreleased]
 
 ### Governance — PossibLaw Agent Starter Pack adoption (2026-05-21)

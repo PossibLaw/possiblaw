@@ -55,6 +55,19 @@ Reason: A licensed reviewing lawyer must approve before any signed document is s
 
 For the full walkthrough, see [docs/getting-started.md](docs/getting-started.md).
 
+### Choose your provider
+
+PossibLaw supports four LLM providers. The default uses each agent's declared model; override per-run with `--provider`:
+
+```bash
+bin/possiblaw run quick-counsel "draft NDA" --provider claude-cli       # subscription via Claude Code
+bin/possiblaw run quick-counsel "draft NDA" --provider codex-cli        # subscription via Codex
+bin/possiblaw run quick-counsel "draft NDA" --provider anthropic        # ANTHROPIC_API_KEY
+bin/possiblaw run quick-counsel "draft NDA" --provider ollama           # local llama3.1:8b
+```
+
+See [docs/auth.md](docs/auth.md) for the full guide.
+
 ---
 
 ## What's in here
@@ -145,6 +158,7 @@ See [docs/evals.md](docs/evals.md) for dataset licenses, adapter prompts, scorer
 | Guide | What it covers |
 |---|---|
 | [docs/getting-started.md](docs/getting-started.md) | Stranger-friendly Quickstart — clone to first workflow in 5 minutes |
+| [docs/auth.md](docs/auth.md) | Provider comparison — `anthropic` / `claude-cli` / `codex-cli` / `ollama` |
 | [docs/customize-your-team.md](docs/customize-your-team.md) | Non-engineer guide to adding/removing/renaming agents |
 | [docs/workflows.md](docs/workflows.md) | Workflow schema reference — all 7 step kinds, meta-agents, 9 workflows |
 | [docs/connectors-inventory.md](docs/connectors-inventory.md) | All 14 connectors + 14 deferred v1 targets |

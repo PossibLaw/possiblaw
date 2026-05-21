@@ -106,6 +106,15 @@ In live mode, you will see real LLM responses at each step and token usage repor
 - `commercial-lead` → `claude-sonnet-4-6`
 - `nda-drafter` → `claude-sonnet-4-6`
 
+**Want to use a different provider?** PossibLaw supports four: `anthropic`, `claude-cli` (Claude Code subscription), `codex-cli` (OpenAI Codex subscription), and `ollama` (local). Override per run with the `--provider` flag:
+
+```bash
+bin/possiblaw run quick-counsel "draft NDA for ACME" --provider claude-cli
+bin/possiblaw run quick-counsel "draft NDA for ACME" --provider ollama --model llama3.1:8b
+```
+
+See [docs/auth.md](auth.md) for the full provider comparison, auth requirements, and cost reporting details.
+
 ---
 
 ## 5. Switch templates

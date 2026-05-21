@@ -87,6 +87,50 @@ Until such a requirement arises, all agents use the string form. Any agent that 
 
 ---
 
+## Decision: Subscription-auth providers — claude-cli + codex-cli (Sprint 11)
+
+### Context
+
+PossibLaw is "public-but-not-productized." The operator does not want to set up new `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` billing for the PoC. Both `claude` (Claude Code) and `codex` (OpenAI Codex) are already installed locally on the operator's machine and hold OAuth/subscription auth.
+
+Through Sprint 10, every LLM call routed through either:
+- the Anthropic SDK (`anthropic/*`) — requires `ANTHROPIC_API_KEY` and produces per-call dollar costs, or
+- the local Ollama daemon (`ollama/*`) — free and local.
+
+The gap: no path to use an existing subscription, and no uniform way to switch providers per run without editing per-agent `.model` fields.
+
+### Decision
+
+**Add `claude-cli/*` and `codex-cli/*` as first-class providers** in `cli/llm.ts`. They shell out to the local `claude -p` and `codex exec` CLIs and return their stdout. Subscription billing is reported as the literal string `subscription` in the cost report (not `$0.00`, which would conflate subscription billing with truly free local runs).
+
+**Add a `--provider <name>` flag** to `possiblaw run` and `possiblaw eval` that overrides the per-agent `.model` field uniformly for the whole run. Add a paired `--model <name>` for picking a specific model within that provider.
+
+### Alternatives considered
+
+- **Use only direct SDK calls (`anthropic/*`, future `openai/*`).** Rejected — requires the operator to set up new billing accounts and manage API keys for two providers.
+- **Use `claude --bare`.** Rejected — `--bare` disables subscription auth, defeating the entire purpose.
+- **Embed `claude` CLI as a library.** Rejected — it is not a published API and is subject to change without notice.
+
+### Consequences
+
+- PossibLaw now has **4 providers**: `anthropic`, `ollama`, `claude-cli`, `codex-cli`.
+- Subscription rows in cost reports show the literal string `subscription` and cannot be converted to dollar amounts.
+- `ANTHROPIC_API_KEY` MUST be unset in the `claude-cli` child env to prevent silent fallback to API-key billing. This is enforced inside `cli/llm.ts` `callClaudeCli` rather than relying on operators to remember.
+- Per-agent override (`team set-model`) and `--provider` flag work together; the run-time flag wins over the config-time per-agent declaration.
+- Privacy Filter cloud-mode is extended to cover `claude-cli/*` and `codex-cli/*` since both route through cloud LLMs; `ollama/*` remains local-only.
+- `--max-budget-usd` is forwarded to `claude -p` when `eval --budget <n>` runs against `--provider claude-cli`. Codex CLI does not currently support an equivalent flag.
+
+### Status
+
+Implemented in commits `1f63fa7` (llm.ts providers), `0118bf3` (--provider and --model flags), and `abdfbae` (LLM-judge tests route through the provider registry).
+
+### Revisit Criteria
+
+- If a published SDK or stable API for either CLI becomes available, consider switching from shell-out to direct calls.
+- If a third subscription-auth CLI is wanted (e.g. Google Gemini CLI), generalize the shell-out helper rather than duplicating it.
+
+---
+
 ## Decision Log
 
 | Date | Sprint | Decision | Rationale | Revisit Criteria |
@@ -97,6 +141,7 @@ Until such a requirement arises, all agents use the string form. Any agent that 
 | 2026-05-21 | Sprint 2 | MAX_HOPS raised from 3 to 4 | CoS chain requires 3 router hops before specialist; limit was 3 | If chains exceed 4 hops, make workflow-configurable (`max_hops` field) |
 | 2026-05-21 | Sprint 2 | Audit log stores plaintext in Sprint 2 (hash-only deferred to Sprint 3) | No Privacy Filter implemented yet; Sprint 3 removes plaintext for privileged matters | Sprint 3 Privacy Filter implementation |
 | 2026-05-21 | Sprint 2 | Regex inline flags `(?im)` stripped and applied as JS RegExp flags | JavaScript RegExp does not support inline flag syntax in pattern strings | N/A — permanent fix |
+| 2026-05-21 | Sprint 11 | Add subscription-auth providers `claude-cli/*` + `codex-cli/*` | Operator already pays for Claude Code + Codex; avoids new API-key billing | Published SDKs replace shell-out, or a third subscription CLI is wanted |
 
 ---
 
