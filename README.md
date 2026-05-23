@@ -17,15 +17,26 @@ PossibLaw shows how legal-business agents, skills, projects, and starter matters
 
 Sprints 0-11 produced a standalone CLI runtime. That proved the content, but it duplicated Paperclip features that should stay in Paperclip: orchestration, UI, auth, audit trail, approvals, budgets, adapters, and task state.
 
-The active path is now the Paperclip-native package under `companies/legal-operations/`. Start there for new work:
+The active path is now the Paperclip-native package under `companies/legal-operations/`. The branded one-command launcher is the only entrypoint operators need:
 
 ```bash
-cd paperclip
-pnpm paperclipai company import ../companies/legal-operations --target new --dry-run
-pnpm paperclipai company import ../companies/legal-operations --target new --yes
+git clone https://github.com/PossibLaw/possiblaw && cd possiblaw
+git submodule update --init --recursive
+pnpm -C paperclip install
+./bin/possiblaw
+# answer three prompts (org name, mission, variant)
+# → browser opens to your Paperclip dashboard, 11 agents already loaded
 ```
 
-The package now defaults to Paperclip's `codex_local` adapter because the clean UI smoke test used Codex CLI subscription auth. See [docs/operator-walkthrough.md](docs/operator-walkthrough.md) for the repeatable fresh-instance demo and [docs/paperclip-package.md](docs/paperclip-package.md) for the package layout.
+The launcher picks the model-provider variant at import time. Three are shipped:
+
+| Variant | Provider | When |
+|---|---|---|
+| `codex`  | Codex CLI subscription      | Default; works out of the box once `codex login` is done |
+| `claude` | Claude CLI subscription     | If you prefer Anthropic models for legal work |
+| `ollama` | Local Llama via OpenCode    | Fully local — confidential matters, no cloud round-trips |
+
+Add `--variant <slug>` to skip the interactive prompt, or `--list-variants` to see them. Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); package layout: [docs/paperclip-package.md](docs/paperclip-package.md); sharp edges: [docs/known-limitations.md](docs/known-limitations.md).
 
 ## Historical CLI Demo
 

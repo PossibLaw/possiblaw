@@ -327,6 +327,7 @@ sidebar:
   projects:
     - nda-matters
     - commercial-reviews
+    - eval-results
 projects:
   nda-matters:
     leadAgentSlug: chief-of-staff
@@ -342,6 +343,17 @@ projects:
     metadata:
       possiblaw:
         workflow: contract-review-vertical-slice
+  eval-results:
+    leadAgentSlug: chief-of-staff
+    status: planned
+    color: "#10B981"
+    metadata:
+      possiblaw:
+        workflow: eval-results
+        note: >
+          Placeholder for the planned eval pipeline. Lead agent is chief-of-staff
+          until the dedicated eval-judge agent ships. See companies/legal-operations/evals/
+          for the convention.
 tasks:
   draft-mutual-nda-demo:
     status: backlog

@@ -1,0 +1,100 @@
+# PossibLaw variant matrix
+#
+# Maps `metadata.possiblaw.modelLane` (set per agent in .paperclip.yaml) to
+# adapter + model overrides at company-import time. Pivoting on lane lets the
+# 11-agent package (and the planned 100-200-agent expansion) inherit the right
+# config automatically without per-agent variant boilerplate.
+#
+# Consumed by `bin/_possiblaw_variants.py` and applied by `bin/possiblaw` as
+# `adapterOverrides` on POST /api/companies/import.
+#
+# Lanes used in this package: primary, routing, drafting, review, extractive.
+# Add new lanes (or new variants) by extending this file; agents inherit the
+# new lane the moment they declare it.
+
+schema: possiblaw/variants/v1
+
+variants:
+  codex:
+    label: "Codex CLI (subscription)"
+    requires_cli: codex
+    default:
+      adapterType: codex_local
+      adapterConfig:
+        model: gpt-5.3-codex
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    lanes:
+      primary:
+        modelReasoningEffort: high
+      routing:
+        modelReasoningEffort: medium
+      drafting:
+        modelReasoningEffort: high
+        timeoutSec: 900
+      review:
+        modelReasoningEffort: high
+        timeoutSec: 900
+      extractive:
+        modelReasoningEffort: medium
+    per_agent: {}
+
+  claude:
+    label: "Claude CLI (subscription)"
+    requires_cli: claude
+    default:
+      adapterType: claude_local
+      adapterConfig:
+        model: claude-opus-4-7
+        timeoutSec: 600
+    lanes:
+      primary:
+        model: claude-opus-4-7
+      routing:
+        model: claude-sonnet-4-6
+      drafting:
+        model: claude-opus-4-7
+        timeoutSec: 900
+      review:
+        model: claude-opus-4-7
+        timeoutSec: 900
+      extractive:
+        model: claude-haiku-4-5
+    per_agent: {}
+
+  ollama:
+    label: "Ollama (fully local — via OpenCode)"
+    requires_cli: opencode
+    requires_ollama: true
+    requires_opencode_provider: ollama
+    default:
+      adapterType: opencode_local
+      adapterConfig:
+        model: ollama/llama3.1:8b
+        timeoutSec: 900
+        dangerouslySkipPermissions: true
+    lanes:
+      primary:
+        model: ollama/llama3.1:70b
+      routing:
+        model: ollama/llama3.1:8b
+      drafting:
+        model: ollama/llama3.1:70b
+        timeoutSec: 1200
+      review:
+        model: ollama/llama3.1:70b
+        timeoutSec: 1200
+      extractive:
+        model: ollama/llama3.1:8b
+    notes: >
+      Uses Paperclip's opencode_local adapter to reach Ollama. The operator must
+      have Ollama running locally AND a one-time OpenCode global config declaring
+      the 'ollama' provider in ~/.config/opencode/opencode.json. The launcher's
+      preflight verifies both and offers to write the OpenCode config on first run.
+    per_agent: {}
+
+  # hybrid: DEFERRED.
+  # Paperclip's `assigneeAdapterOverrides` can only merge config within the same
+  # adapter type — it cannot swap adapter types per issue today. A true hybrid
+  # variant would need that primitive (or an `ollama_local` adapter plugin).

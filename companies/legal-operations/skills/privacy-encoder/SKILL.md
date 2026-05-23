@@ -20,12 +20,37 @@ This skill is agent-side: it is a runtime instruction set the agent walks throug
 
 ## When To Invoke
 
-Run the encoder before any cloud-capable adapter call (`anthropic/*`, `codex_local` with cloud Codex backing, or any other adapter whose tier is not strictly local) when EITHER of the following is true:
+### 0. Ollama health check (FIRST step when matter is confidential or privileged)
+
+If the matter's `metadata.possiblaw.privacyTier` is `confidential` or `privileged`, the encoder requires a local Ollama daemon — regardless of which overall variant the operator picked at launch. Confidential matters always route the substitution step through the local model. Before running detection rules:
+
+```bash
+# Daemon reachable?
+curl -sf --max-time 3 http://localhost:11434/api/version >/dev/null || {
+    echo "BLOCKED: privacy-encoder-required — Ollama daemon not reachable at http://localhost:11434"
+    echo "Install: https://ollama.com — then run 'ollama serve' in a separate terminal."
+    exit 0
+}
+
+# Required model pulled?
+MODEL="${POSSIBLAW_PRIVACY_MODEL:-llama3.1:8b}"
+curl -sf --max-time 3 "http://localhost:11434/api/tags" | grep -q "\"$MODEL\"" || {
+    echo "BLOCKED: privacy-encoder-required — model '$MODEL' not pulled"
+    echo "Run: ollama pull $MODEL"
+    exit 0
+}
+```
+
+Both checks must pass. If either fails, post a comment beginning with `BLOCKED: privacy-encoder-required` and stop. The operator's `bin/possiblaw` launcher also surfaces a non-blocking startup warning when the package contains matters with `privacyTier: confidential|privileged` and Ollama is not running, so this in-task check is the second line of defense.
+
+### 1. Trigger conditions
+
+Run the encoder before any cloud-capable adapter call (`anthropic/*`, `codex_local` with cloud Codex backing, `claude_local`, `opencode_local` when its target model is cloud-hosted, or any other adapter whose tier is not strictly local) when EITHER of the following is true:
 
 - The matter's `metadata.possiblaw.privacyTier` is `confidential` or `privileged`.
 - The operator has explicitly tagged the current task with `privacy-encoder: required` in the task metadata.
 
-If the adapter is strictly local (`ollama/*` on the operator's own machine) AND no operator override is present, the encoder is skipped.
+If the adapter is strictly local (`opencode_local` pointed at an `ollama/*` model on the operator's own machine, or any future `ollama_local` adapter) AND no operator override is present, the encoder is skipped.
 
 Run the decoder after the cloud call returns, before the agent emits the output to the operator, before any persistence step (`output-local-docx`, `output-local-markdown`, `output-storage-config`), and before any downstream notification (`notify-slack`, `notify-teams`).
 

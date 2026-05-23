@@ -1,2 +1,936 @@
-#!/usr/bin/env node
-import('../dist/cli/index.js').catch(err => { console.error(err); process.exit(1); });
+#!/usr/bin/env bash
+#
+# possiblaw — branded one-command launcher for the PossibLaw Paperclip-native
+# Agent Companies package.
+#
+# Replaces bin/possiblaw-launch with two changes:
+#   1. Variant selection (codex / claude / ollama) via variants.yaml
+#   2. Direct HTTP POST to /api/companies/import instead of the paperclipai CLI,
+#      so we can use the full adapterOverrides schema (model + reasoning effort
+#      + timeout per agent, keyed by metadata.possiblaw.modelLane).
+#
+# Run as:
+#     ./bin/possiblaw [--variant codex|claude|ollama] [--mission "…"] \
+#                     [--org-name "…"] [--data-dir PATH] [--port N] \
+#                     [--package PATH] [--reset] [--yes] [--dry-run] \
+#                     [--list-variants] [--non-interactive] [--no-browser]
+#
+# Compatibility: macOS zsh / bash 3.2+. Requires pnpm, curl, python3,
+# and the paperclip submodule. No jq required.
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+DEFAULT_DATA_DIR="$HOME/.possiblaw/paperclip-data"
+DEFAULT_PORT="3100"
+DEFAULT_PACKAGE="$REPO_ROOT/companies/legal-operations"
+DEFAULT_VARIANTS_FILE="$DEFAULT_PACKAGE/variants.yaml"
+DEFAULT_PAPERCLIP_YAML="$DEFAULT_PACKAGE/.paperclip.yaml"
+PACKAGE_DEFAULT_ORG_NAME="PossibLaw Legal Operations"
+HEALTH_TIMEOUT_SECS=60
+HEALTH_POLL_INTERVAL_SECS=1
+IMPORT_HEARTBEAT_SECS=10
+IMPORT_PARTIAL_CHECK_AFTER_SECS=90
+IMPORT_MAX_TIME_SECS=600
+
+VARIANTS_PY="$SCRIPT_DIR/_possiblaw_variants.py"
+INLINE_PY="$SCRIPT_DIR/_possiblaw_inline_source.py"
+
+LAUNCH_START_EPOCH="$(date +%s)"
+
+# ---------------------------------------------------------------------------
+# Logging helpers
+# ---------------------------------------------------------------------------
+
+log()   { printf '[possiblaw] %s\n' "$*"; }
+warn()  { printf '[possiblaw][warn] %s\n' "$*" >&2; }
+err()   { printf '[possiblaw][error] %s\n' "$*" >&2; }
+elapsed() { printf '%ss' "$(( $(date +%s) - LAUNCH_START_EPOCH ))"; }
+milestone() { log "[$(elapsed)] $*"; }
+
+usage() {
+    cat <<USAGE
+$SCRIPT_NAME — one-command launcher for PossibLaw on Paperclip
+
+USAGE:
+  $SCRIPT_NAME [options]
+
+OPTIONS:
+  --variant <slug>      Variant to apply at import: codex | claude | ollama.
+                        If omitted, the launcher prompts.
+  --mission <text>      Mission statement for the company (one line).
+                        If omitted, the launcher prompts.
+  --org-name <name>     Company name. Default: "$PACKAGE_DEFAULT_ORG_NAME".
+  --data-dir <path>     Paperclip data directory.  Default: $DEFAULT_DATA_DIR
+  --port <port>         Paperclip HTTP port.       Default: $DEFAULT_PORT
+  --package <path>      Path to package source.    Default: $DEFAULT_PACKAGE
+  --variants-file <path> variants.yaml path.       Default: <package>/variants.yaml
+  --reset               Wipe the data directory before starting.
+  --yes                 Skip confirmation prompts.
+  --non-interactive     Never prompt. Requires --variant, --mission, --yes
+                        (and a stable --org-name).
+  --dry-run             POST to /api/companies/import/preview instead of /import.
+  --list-variants       Print available variants from variants.yaml and exit.
+  --no-browser          Don't auto-open the dashboard URL.
+  -h, --help            Show this help and exit.
+
+EXAMPLES:
+  # Interactive — recommended for first run:
+  ./bin/$SCRIPT_NAME
+
+  # Non-interactive codex run:
+  ./bin/$SCRIPT_NAME --variant codex \\
+                     --org-name "Acme Legal" \\
+                     --mission "Litigation-first commercial-disputes boutique" \\
+                     --reset --yes --non-interactive
+
+  # Preview without writing anything:
+  ./bin/$SCRIPT_NAME --variant codex --dry-run --non-interactive --yes
+USAGE
+}
+
+confirm() {
+    local prompt="$1"
+    local reply
+    printf '%s [y/N]: ' "$prompt"
+    if ! read -r reply; then return 1; fi
+    case "$reply" in
+        y|Y|yes|YES|Yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+require_cmd() {
+    local cmd="$1"
+    local hint="$2"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        err "Required command not found: $cmd"
+        err "Install hint: $hint"
+        return 1
+    fi
+    log "ok: $cmd found at $(command -v "$cmd")"
+    return 0
+}
+
+# Read a JSON value off stdin via python3, dot-path notation.
+json_get_str() {
+    local path="$1"
+    python3 - "$path" <<'PY' 2>/dev/null || true
+import json, sys
+path = sys.argv[1].split('.')
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+cur = data
+for part in path:
+    if isinstance(cur, list):
+        try: idx = int(part)
+        except ValueError: sys.exit(0)
+        if idx < 0 or idx >= len(cur): sys.exit(0)
+        cur = cur[idx]
+    elif isinstance(cur, dict):
+        if part not in cur: sys.exit(0)
+        cur = cur[part]
+    else: sys.exit(0)
+if cur is None: sys.exit(0)
+if isinstance(cur, (dict, list)): print(json.dumps(cur))
+else: print(cur)
+PY
+}
+
+# Pick most-recent company from GET /api/companies and print "<id>\t<shortCode>\t<name>".
+json_pick_latest_company() {
+    python3 - <<'PY' 2>/dev/null || true
+import json, sys
+try: data = json.load(sys.stdin)
+except Exception: sys.exit(0)
+items = None
+if isinstance(data, list): items = data
+elif isinstance(data, dict):
+    for k in ("companies", "data", "items", "results"):
+        if k in data and isinstance(data[k], list):
+            items = data[k]; break
+if not items: sys.exit(0)
+def created_key(it):
+    if not isinstance(it, dict): return ""
+    for k in ("createdAt", "created_at", "created", "insertedAt"):
+        v = it.get(k)
+        if v: return str(v)
+    return ""
+items_sorted = sorted(items, key=created_key)
+latest = items_sorted[-1] if items_sorted else None
+if not isinstance(latest, dict): sys.exit(0)
+cid = latest.get("id") or latest.get("companyId") or ""
+short = (latest.get("shortCode") or latest.get("short_code")
+         or latest.get("slug") or latest.get("handle") or "")
+name = latest.get("name") or ""
+print(f"{cid}\t{short}\t{name}")
+PY
+}
+
+json_escape_str() {
+    python3 - "$1" <<'PY'
+import json, sys
+print(json.dumps(sys.argv[1]))
+PY
+}
+
+# Convert a YAML file to JSON via paperclip's bundled js-yaml.
+yaml_to_json() {
+    local yaml_path="$1"
+    pnpm -C "$REPO_ROOT/paperclip" exec node -e "
+        const yaml = require('js-yaml');
+        const fs = require('fs');
+        process.stdout.write(JSON.stringify(yaml.load(fs.readFileSync(process.argv[1], 'utf8'))));
+    " "$yaml_path"
+}
+
+# ---------------------------------------------------------------------------
+# Flag parsing
+# ---------------------------------------------------------------------------
+
+VARIANT=""
+MISSION=""
+ORG_NAME="$PACKAGE_DEFAULT_ORG_NAME"
+DATA_DIR="$DEFAULT_DATA_DIR"
+PORT="$DEFAULT_PORT"
+PACKAGE="$DEFAULT_PACKAGE"
+VARIANTS_FILE="$DEFAULT_VARIANTS_FILE"
+PAPERCLIP_YAML=""
+RESET="false"
+ASSUME_YES="false"
+NON_INTERACTIVE="false"
+DRY_RUN="false"
+LIST_VARIANTS_ONLY="false"
+NO_BROWSER="false"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --variant) [ "$#" -ge 2 ] || { err "--variant requires a value"; exit 2; }; VARIANT="$2"; shift 2 ;;
+        --mission) [ "$#" -ge 2 ] || { err "--mission requires a value"; exit 2; }; MISSION="$2"; shift 2 ;;
+        --org-name) [ "$#" -ge 2 ] || { err "--org-name requires a value"; exit 2; }; ORG_NAME="$2"; shift 2 ;;
+        --data-dir) [ "$#" -ge 2 ] || { err "--data-dir requires a value"; exit 2; }; DATA_DIR="$2"; shift 2 ;;
+        --port) [ "$#" -ge 2 ] || { err "--port requires a value"; exit 2; }; PORT="$2"; shift 2 ;;
+        --package) [ "$#" -ge 2 ] || { err "--package requires a value"; exit 2; }; PACKAGE="$2"; shift 2 ;;
+        --variants-file) [ "$#" -ge 2 ] || { err "--variants-file requires a value"; exit 2; }; VARIANTS_FILE="$2"; shift 2 ;;
+        --reset) RESET="true"; shift ;;
+        --yes) ASSUME_YES="true"; shift ;;
+        --non-interactive) NON_INTERACTIVE="true"; shift ;;
+        --dry-run) DRY_RUN="true"; shift ;;
+        --list-variants) LIST_VARIANTS_ONLY="true"; shift ;;
+        --no-browser) NO_BROWSER="true"; shift ;;
+        -h|--help) usage; exit 0 ;;
+        --) shift; break ;;
+        *) err "Unknown argument: $1"; usage >&2; exit 2 ;;
+    esac
+done
+
+# Normalize relative paths against CWD (so the script can be invoked from anywhere).
+for var in DATA_DIR PACKAGE VARIANTS_FILE; do
+    val="${!var}"
+    case "$val" in
+        /*) : ;;
+        *) printf -v "$var" '%s' "$(pwd)/$val" ;;
+    esac
+done
+
+# If --package was overridden but --variants-file wasn't, recompute its default.
+if [ "$VARIANTS_FILE" = "$DEFAULT_VARIANTS_FILE" ] && [ "$PACKAGE" != "$DEFAULT_PACKAGE" ]; then
+    VARIANTS_FILE="$PACKAGE/variants.yaml"
+fi
+PAPERCLIP_YAML="$PACKAGE/.paperclip.yaml"
+
+# ---------------------------------------------------------------------------
+# --list-variants short-circuit
+# ---------------------------------------------------------------------------
+
+if [ "$LIST_VARIANTS_ONLY" = "true" ]; then
+    if [ ! -f "$VARIANTS_FILE" ]; then
+        err "variants file not found: $VARIANTS_FILE"
+        exit 1
+    fi
+    if ! command -v pnpm >/dev/null 2>&1; then
+        err "pnpm is required to read variants.yaml"
+        exit 1
+    fi
+    LV_TMP="$(mktemp -t possiblaw-listvariants.XXXXXX.json)"
+    yaml_to_json "$VARIANTS_FILE" > "$LV_TMP"
+    python3 - "$LV_TMP" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+variants = doc.get("variants") or {}
+for slug, v in variants.items():
+    label = v.get("label") or slug
+    reqs = []
+    if v.get("requires_cli"): reqs.append(f"cli: {v['requires_cli']}")
+    if v.get("requires_ollama"): reqs.append("ollama")
+    if v.get("requires_opencode_provider"):
+        reqs.append(f"opencode-provider: {v['requires_opencode_provider']}")
+    suffix = f"  [{', '.join(reqs)}]" if reqs else ""
+    print(f"  {slug:8s}  {label}{suffix}")
+PY
+    rm -f "$LV_TMP"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Header
+# ---------------------------------------------------------------------------
+
+log "PossibLaw launcher starting"
+log "repo root:     $REPO_ROOT"
+log "data dir:      $DATA_DIR"
+log "port:          $PORT"
+log "package:       $PACKAGE"
+log "variants file: $VARIANTS_FILE"
+log "dry run:       $DRY_RUN"
+log ""
+log "Pre-flight checks:"
+
+PREFLIGHT_FAILED="false"
+
+require_cmd pnpm "https://pnpm.io/installation (e.g. 'npm install -g pnpm@9.15.4')" || PREFLIGHT_FAILED="true"
+require_cmd curl "install curl via your package manager" || PREFLIGHT_FAILED="true"
+require_cmd python3 "install Python 3 via your package manager or Homebrew" || PREFLIGHT_FAILED="true"
+
+PAPERCLIP_DIR="$REPO_ROOT/paperclip"
+if [ ! -d "$PAPERCLIP_DIR" ]; then
+    err "Paperclip submodule not found at: $PAPERCLIP_DIR"
+    err "Run: git submodule update --init --recursive"
+    PREFLIGHT_FAILED="true"
+else
+    log "ok: paperclip submodule found at $PAPERCLIP_DIR"
+fi
+
+for p in "$PACKAGE" "$VARIANTS_FILE" "$PAPERCLIP_YAML" "$VARIANTS_PY" "$INLINE_PY"; do
+    if [ ! -e "$p" ]; then
+        err "missing required file: $p"
+        PREFLIGHT_FAILED="true"
+    fi
+done
+
+DATA_DIR_PARENT="$(dirname "$DATA_DIR")"
+if [ ! -d "$DATA_DIR_PARENT" ]; then
+    log "data dir parent does not exist; will create: $DATA_DIR_PARENT"
+    mkdir -p "$DATA_DIR_PARENT" || { err "Could not create $DATA_DIR_PARENT"; PREFLIGHT_FAILED="true"; }
+fi
+if [ -d "$DATA_DIR_PARENT" ] && [ ! -w "$DATA_DIR_PARENT" ]; then
+    err "Data dir parent is not writable: $DATA_DIR_PARENT"
+    PREFLIGHT_FAILED="true"
+fi
+
+if [ "$PREFLIGHT_FAILED" = "true" ]; then
+    err "Pre-flight failed."
+    exit 1
+fi
+
+milestone "pre-flight complete"
+
+# ---------------------------------------------------------------------------
+# Variant selection
+# ---------------------------------------------------------------------------
+
+# Load variants doc as JSON once.
+VARIANTS_JSON_FILE="$(mktemp -t possiblaw-variants.XXXXXX.json)"
+yaml_to_json "$VARIANTS_FILE" > "$VARIANTS_JSON_FILE"
+
+list_variant_slugs() {
+    python3 - "$VARIANTS_JSON_FILE" <<'PY'
+import json, sys
+with open(sys.argv[1]) as fh:
+    doc = json.load(fh)
+for slug in (doc.get("variants") or {}).keys():
+    print(slug)
+PY
+}
+
+variant_label() {
+    python3 - "$VARIANTS_JSON_FILE" "$1" <<'PY'
+import json, sys
+with open(sys.argv[1]) as fh:
+    doc = json.load(fh)
+v = (doc.get("variants") or {}).get(sys.argv[2]) or {}
+print(v.get("label") or sys.argv[2])
+PY
+}
+
+variant_field() {
+    # variant_field <variant-slug> <field-name>
+    python3 - "$VARIANTS_JSON_FILE" "$1" "$2" <<'PY'
+import json, sys
+with open(sys.argv[1]) as fh:
+    doc = json.load(fh)
+v = (doc.get("variants") or {}).get(sys.argv[2]) or {}
+val = v.get(sys.argv[3])
+if val is None: sys.exit(0)
+if isinstance(val, bool): print("true" if val else "false")
+else: print(val)
+PY
+}
+
+if [ -z "$VARIANT" ]; then
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+        err "--non-interactive requires --variant"
+        exit 2
+    fi
+    echo
+    echo "Choose a model provider variant:"
+    SLUGS=()
+    while IFS= read -r slug; do SLUGS+=("$slug"); done < <(list_variant_slugs)
+    if [ "${#SLUGS[@]}" -eq 0 ]; then
+        err "No variants defined in $VARIANTS_FILE"
+        exit 1
+    fi
+    idx=1
+    for slug in "${SLUGS[@]}"; do
+        label="$(variant_label "$slug")"
+        printf '  [%d] %s — %s\n' "$idx" "$slug" "$label"
+        idx=$((idx + 1))
+    done
+    printf 'Variant [1-%d]: ' "${#SLUGS[@]}"
+    if ! read -r choice; then err "no input"; exit 1; fi
+    case "$choice" in ''|*[!0-9]*) err "invalid choice"; exit 2 ;; esac
+    if [ "$choice" -lt 1 ] || [ "$choice" -gt "${#SLUGS[@]}" ]; then
+        err "out of range"; exit 2
+    fi
+    VARIANT="${SLUGS[$((choice - 1))]}"
+fi
+
+# Validate the variant exists.
+if ! list_variant_slugs | grep -qx "$VARIANT"; then
+    err "Unknown variant: $VARIANT"
+    err "Available: $(list_variant_slugs | tr '\n' ' ')"
+    exit 2
+fi
+milestone "variant: $VARIANT ($(variant_label "$VARIANT"))"
+
+# Per-variant CLI preflight.
+REQUIRES_CLI="$(variant_field "$VARIANT" requires_cli)"
+if [ -n "$REQUIRES_CLI" ]; then
+    require_cmd "$REQUIRES_CLI" "the '$VARIANT' variant requires the '$REQUIRES_CLI' CLI" || exit 1
+fi
+
+# Ollama-specific preflight: ollama daemon + OpenCode global config.
+REQUIRES_OLLAMA="$(variant_field "$VARIANT" requires_ollama)"
+REQUIRES_OPENCODE_PROVIDER="$(variant_field "$VARIANT" requires_opencode_provider)"
+if [ "$REQUIRES_OLLAMA" = "true" ]; then
+    OLLAMA_VERSION_HTTP="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 3 http://localhost:11434/api/version || true)"
+    if [ "$OLLAMA_VERSION_HTTP" != "200" ]; then
+        err "Ollama daemon not reachable at http://localhost:11434/api/version (HTTP $OLLAMA_VERSION_HTTP)."
+        err "Install: https://ollama.com — then 'ollama serve' and 'ollama pull llama3.1:8b'."
+        exit 1
+    fi
+    log "ok: Ollama daemon reachable"
+fi
+if [ -n "$REQUIRES_OPENCODE_PROVIDER" ]; then
+    OPENCODE_CONFIG="$HOME/.config/opencode/opencode.json"
+    if [ ! -f "$OPENCODE_CONFIG" ]; then
+        err "OpenCode global config missing: $OPENCODE_CONFIG"
+        err "The '$VARIANT' variant needs the '$REQUIRES_OPENCODE_PROVIDER' provider declared there."
+        if [ "$NON_INTERACTIVE" = "true" ] || [ "$ASSUME_YES" = "true" ]; then
+            err "Re-run interactively to let the launcher write a starter config, or create it manually."
+        else
+            if confirm "Write a minimal $OPENCODE_CONFIG with provider.$REQUIRES_OPENCODE_PROVIDER?"; then
+                mkdir -p "$(dirname "$OPENCODE_CONFIG")"
+                cat > "$OPENCODE_CONFIG" <<JSON
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "$REQUIRES_OPENCODE_PROVIDER": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama (local)",
+      "options": { "baseURL": "http://localhost:11434/v1" },
+      "models": {
+        "llama3.1:8b":  { "name": "Llama 3.1 8B" },
+        "llama3.1:70b": { "name": "Llama 3.1 70B" }
+      }
+    }
+  }
+}
+JSON
+                log "wrote $OPENCODE_CONFIG"
+            else
+                exit 1
+            fi
+        fi
+    else
+        HAS_PROVIDER="$(python3 - "$OPENCODE_CONFIG" "$REQUIRES_OPENCODE_PROVIDER" <<'PY' 2>/dev/null || echo no
+import json, sys
+try:
+    doc = json.load(open(sys.argv[1]))
+except Exception:
+    print("no"); sys.exit(0)
+prov = (doc.get("provider") or {})
+print("yes" if sys.argv[2] in prov else "no")
+PY
+)"
+        if [ "$HAS_PROVIDER" != "yes" ]; then
+            err "$OPENCODE_CONFIG exists but does not declare provider.$REQUIRES_OPENCODE_PROVIDER"
+            err "Add it manually (see https://opencode.ai/docs/providers)."
+            exit 1
+        fi
+        log "ok: OpenCode global config declares provider.$REQUIRES_OPENCODE_PROVIDER"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Privacy-lane preflight scan (non-blocking warning)
+# ---------------------------------------------------------------------------
+#
+# If the package ships any matter declaring metadata.possiblaw.privacyTier =
+# confidential|privileged, the privacy-encoder skill will require Ollama at
+# runtime (see skills/privacy-encoder/SKILL.md §0). Warn now so the operator
+# can start Ollama before a confidential matter blocks. Non-blocking — the
+# operator may not run any confidential matter this session.
+#
+CONFIDENTIAL_HITS=0
+if [ -d "$PACKAGE/projects" ]; then
+    CONFIDENTIAL_HITS="$(
+        { grep -rlE 'privacyTier:[[:space:]]*(confidential|privileged)' "$PACKAGE/projects" 2>/dev/null || true; } \
+            | wc -l | tr -d ' '
+    )"
+fi
+if [ "$CONFIDENTIAL_HITS" -gt 0 ] && [ "$REQUIRES_OLLAMA" != "true" ]; then
+    OLLAMA_PRESENT_HTTP="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 http://localhost:11434/api/version 2>/dev/null || echo 000)"
+    if [ "$OLLAMA_PRESENT_HTTP" != "200" ]; then
+        warn "package contains $CONFIDENTIAL_HITS matter(s) with privacyTier confidential/privileged"
+        warn "Ollama not reachable at http://localhost:11434 — confidential matters will BLOCK at runtime"
+        warn "to fix: install Ollama (https://ollama.com), then 'ollama serve' + 'ollama pull llama3.1:8b'"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Mission prompt
+# ---------------------------------------------------------------------------
+
+if [ -z "$MISSION" ]; then
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+        err "--non-interactive requires --mission"
+        exit 2
+    fi
+    echo
+    echo "Mission (one line — what is this company for?):"
+    printf '> '
+    if ! IFS= read -r MISSION; then err "no input"; exit 1; fi
+fi
+MISSION="$(printf '%s' "$MISSION" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+if [ -z "$MISSION" ]; then
+    err "Mission cannot be empty"
+    exit 2
+fi
+milestone "mission captured (${#MISSION} chars)"
+
+# ---------------------------------------------------------------------------
+# Reset (optional)
+# ---------------------------------------------------------------------------
+
+if [ "$RESET" = "true" ] && [ -e "$DATA_DIR" ]; then
+    if [ "$ASSUME_YES" != "true" ]; then
+        if ! confirm "About to delete existing data dir: $DATA_DIR. Continue?"; then
+            err "Reset cancelled."
+            exit 1
+        fi
+    fi
+    log "removing existing data dir: $DATA_DIR"
+    rm -rf "$DATA_DIR"
+fi
+mkdir -p "$DATA_DIR"
+
+LAUNCHER_LOG="$DATA_DIR/possiblaw.log"
+LAUNCHER_PID_FILE="$DATA_DIR/possiblaw.pid"
+: > "$LAUNCHER_LOG"
+
+# ---------------------------------------------------------------------------
+# Signal trap — stop background Paperclip on Ctrl-C until detach
+# ---------------------------------------------------------------------------
+
+PAPERCLIP_PID=""
+
+kill_paperclip_tree() {
+    # Kill the subshell wrapper, all its descendants, and any process holding port $PORT.
+    local subshell="$1"
+    if [ -n "$subshell" ] && kill -0 "$subshell" 2>/dev/null; then
+        # Cascade descendants first (pgrep -P only goes one level; recurse).
+        local stack=("$subshell")
+        local all=()
+        while [ "${#stack[@]}" -gt 0 ]; do
+            local current="${stack[0]}"
+            stack=("${stack[@]:1}")
+            all+=("$current")
+            local children
+            children="$(pgrep -P "$current" 2>/dev/null || true)"
+            if [ -n "$children" ]; then
+                # shellcheck disable=SC2206
+                stack+=( $children )
+            fi
+        done
+        # Kill from leaves up so children don't get re-parented.
+        for ((i=${#all[@]}-1; i>=0; i--)); do
+            kill "${all[$i]}" 2>/dev/null || true
+        done
+        sleep 2
+        for ((i=${#all[@]}-1; i>=0; i--)); do
+            kill -9 "${all[$i]}" 2>/dev/null || true
+        done
+    fi
+    # Belt and suspenders: anything still on the port goes too.
+    local port_pids
+    port_pids="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null || true)"
+    if [ -n "$port_pids" ]; then
+        # shellcheck disable=SC2086
+        kill $port_pids 2>/dev/null || true
+        sleep 1
+        # shellcheck disable=SC2086
+        kill -9 $port_pids 2>/dev/null || true
+    fi
+}
+
+cleanup_on_signal() {
+    local signal="$1"
+    warn "received $signal; stopping Paperclip"
+    kill_paperclip_tree "$PAPERCLIP_PID"
+    [ -f "$LAUNCHER_PID_FILE" ] && rm -f "$LAUNCHER_PID_FILE"
+    exit 130
+}
+trap 'cleanup_on_signal SIGINT' INT
+trap 'cleanup_on_signal SIGTERM' TERM
+
+# ---------------------------------------------------------------------------
+# Onboard + run (background)
+# In paperclipai 0.132+, `onboard --yes` implies `--run` and stays foreground.
+# We launch it in the background and treat the subshell as our server handle.
+# ---------------------------------------------------------------------------
+
+milestone "running: paperclipai onboard --yes (background; runs the server inline)"
+log "(log: $LAUNCHER_LOG)"
+(
+    cd "$PAPERCLIP_DIR"
+    exec pnpm paperclipai onboard --data-dir "$DATA_DIR" --bind loopback --yes
+) >>"$LAUNCHER_LOG" 2>&1 </dev/null &
+PAPERCLIP_PID=$!
+echo "$PAPERCLIP_PID" > "$LAUNCHER_PID_FILE"
+log "paperclip subshell pid: $PAPERCLIP_PID (descendants own the server)"
+
+API_BASE="http://127.0.0.1:$PORT"
+HEALTH_URL="$API_BASE/api/health"
+log "waiting for $HEALTH_URL (timeout ${HEALTH_TIMEOUT_SECS}s)"
+
+WAITED=0
+HEALTHY="false"
+while [ "$WAITED" -lt "$HEALTH_TIMEOUT_SECS" ]; do
+    if ! kill -0 "$PAPERCLIP_PID" 2>/dev/null; then
+        err "paperclip server exited before becoming healthy"
+        tail -n 80 "$LAUNCHER_LOG" >&2 || true
+        rm -f "$LAUNCHER_PID_FILE"
+        exit 1
+    fi
+    HTTP_CODE="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 3 "$HEALTH_URL" || true)"
+    if [ "$HTTP_CODE" = "200" ]; then HEALTHY="true"; break; fi
+    sleep "$HEALTH_POLL_INTERVAL_SECS"
+    WAITED=$(( WAITED + HEALTH_POLL_INTERVAL_SECS ))
+done
+if [ "$HEALTHY" != "true" ]; then
+    err "paperclip did not become healthy within ${HEALTH_TIMEOUT_SECS}s"
+    tail -n 80 "$LAUNCHER_LOG" >&2 || true
+    kill_paperclip_tree "$PAPERCLIP_PID"
+    rm -f "$LAUNCHER_PID_FILE"
+    exit 1
+fi
+milestone "paperclip healthy at $HEALTH_URL"
+
+# Replace the subshell PID in $LAUNCHER_PID_FILE with the actual server PID
+# (the process listening on $PORT) so `kill $(cat ...pid)` does the right thing.
+SERVER_PID="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
+if [ -n "$SERVER_PID" ]; then
+    echo "$SERVER_PID" > "$LAUNCHER_PID_FILE"
+    log "paperclip server pid: $SERVER_PID (listening on $PORT)"
+fi
+
+# ---------------------------------------------------------------------------
+# Detect pre-existing company on the server (non-reset re-runs)
+# ---------------------------------------------------------------------------
+
+EXISTING_COUNT="$(
+    curl --silent --max-time 5 "$API_BASE/api/companies" 2>/dev/null \
+        | python3 -c "
+import json, sys
+try: d=json.load(sys.stdin)
+except: print(0); sys.exit(0)
+items = d if isinstance(d, list) else (d.get('companies') or d.get('data') or d.get('items') or [])
+print(len(items) if isinstance(items, list) else 0)
+" 2>/dev/null \
+        || echo 0
+)"
+if [ "$EXISTING_COUNT" -gt 0 ] && [ "$RESET" != "true" ]; then
+    warn "Data dir already contains $EXISTING_COUNT company(ies). This run will add another."
+    if [ "$ASSUME_YES" != "true" ] && [ "$NON_INTERACTIVE" != "true" ]; then
+        if ! confirm "Continue importing alongside the existing company?"; then
+            err "Cancelled. Re-run with --reset to wipe the data dir first."
+            kill_paperclip_tree "$PAPERCLIP_PID"
+            rm -f "$LAUNCHER_PID_FILE"
+            exit 1
+        fi
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Build the import POST body
+# ---------------------------------------------------------------------------
+
+milestone "building import body (variant=$VARIANT, $(find "$PACKAGE" -type f | wc -l | tr -d ' ') files)"
+
+PAPERCLIP_JSON_FILE="$(mktemp -t possiblaw-paperclip.XXXXXX.json)"
+yaml_to_json "$PAPERCLIP_YAML" > "$PAPERCLIP_JSON_FILE"
+
+OVERRIDES_FILE="$(mktemp -t possiblaw-overrides.XXXXXX.json)"
+if ! python3 "$VARIANTS_PY" \
+        --variants-json "$VARIANTS_JSON_FILE" \
+        --paperclip-json "$PAPERCLIP_JSON_FILE" \
+        --variant "$VARIANT" \
+        > "$OVERRIDES_FILE"; then
+    err "adapter override generation failed"
+    kill_paperclip_tree "$PAPERCLIP_PID"
+    rm -f "$LAUNCHER_PID_FILE"
+    exit 1
+fi
+
+INLINE_FILE="$(mktemp -t possiblaw-inline.XXXXXX.json)"
+if ! python3 "$INLINE_PY" --package-root "$PACKAGE" > "$INLINE_FILE"; then
+    err "inline source bundling failed"
+    kill_paperclip_tree "$PAPERCLIP_PID"
+    rm -f "$LAUNCHER_PID_FILE"
+    exit 1
+fi
+
+BODY_FILE="$(mktemp -t possiblaw-import-body.XXXXXX.json)"
+python3 - "$INLINE_FILE" "$OVERRIDES_FILE" "$ORG_NAME" > "$BODY_FILE" <<'PY'
+import json, sys
+inline = json.load(open(sys.argv[1]))
+overrides = json.load(open(sys.argv[2]))
+org_name = sys.argv[3]
+body = {
+    "source": inline["source"],
+    "target": {"mode": "new_company", "newCompanyName": org_name},
+    "include": {"company": True, "agents": True, "projects": True, "issues": True, "skills": True},
+    "collisionStrategy": "rename",
+    "adapterOverrides": overrides,
+}
+json.dump(body, sys.stdout)
+PY
+
+BODY_SIZE="$(wc -c < "$BODY_FILE" | tr -d ' ')"
+log "import body: $BODY_SIZE bytes ($(python3 -c "import json; d=json.load(open('$BODY_FILE')); print(len(d['adapterOverrides']))") agents)"
+
+# ---------------------------------------------------------------------------
+# POST /api/companies/import  (or /import/preview when --dry-run)
+# ---------------------------------------------------------------------------
+
+if [ "$DRY_RUN" = "true" ]; then
+    IMPORT_URL="$API_BASE/api/companies/import/preview"
+    milestone "POST $IMPORT_URL (dry-run)"
+else
+    IMPORT_URL="$API_BASE/api/companies/import"
+    milestone "POST $IMPORT_URL"
+fi
+
+# Heartbeat: print elapsed seconds every 10s while the POST runs.
+IMPORT_RESPONSE_FILE="$DATA_DIR/possiblaw-import.response"
+IMPORT_ERR_FILE="$DATA_DIR/possiblaw-import.err"
+IMPORT_STATUS_FILE="$DATA_DIR/possiblaw-import.status"
+: > "$IMPORT_RESPONSE_FILE"; : > "$IMPORT_ERR_FILE"; : > "$IMPORT_STATUS_FILE"
+
+(
+    curl --silent --show-error \
+         --max-time "$IMPORT_MAX_TIME_SECS" \
+         --header "Content-Type: application/json" \
+         --header "Connection: keep-alive" \
+         --request POST \
+         --data-binary "@$BODY_FILE" \
+         --output "$IMPORT_RESPONSE_FILE" \
+         --write-out '%{http_code}' \
+         "$IMPORT_URL" \
+         > "$IMPORT_STATUS_FILE" 2> "$IMPORT_ERR_FILE"
+    echo $? > "$DATA_DIR/possiblaw-import.curl_exit"
+) &
+CURL_PID=$!
+
+POST_START_EPOCH="$(date +%s)"
+PARTIAL_CHECKED="false"
+while kill -0 "$CURL_PID" 2>/dev/null; do
+    sleep "$IMPORT_HEARTBEAT_SECS"
+    ELAPSED_POST=$(( $(date +%s) - POST_START_EPOCH ))
+    log "  ... import in progress (${ELAPSED_POST}s elapsed)"
+    if [ "$PARTIAL_CHECKED" = "false" ] && [ "$ELAPSED_POST" -ge "$IMPORT_PARTIAL_CHECK_AFTER_SECS" ]; then
+        PARTIAL_CHECKED="true"
+        CUR_COUNT="$(
+            curl --silent --max-time 5 "$API_BASE/api/companies" 2>/dev/null \
+                | python3 -c "
+import json, sys
+try: d=json.load(sys.stdin)
+except: print(0); sys.exit(0)
+items = d if isinstance(d, list) else (d.get('companies') or d.get('data') or d.get('items') or [])
+print(len(items) if isinstance(items, list) else 0)
+" 2>/dev/null || echo 0
+        )"
+        log "  ... ${IMPORT_PARTIAL_CHECK_AFTER_SECS}s elapsed; $CUR_COUNT company(ies) currently in DB"
+    fi
+done
+wait "$CURL_PID" || true
+
+HTTP_CODE="$(cat "$IMPORT_STATUS_FILE" 2>/dev/null || echo 000)"
+CURL_EXIT="$(cat "$DATA_DIR/possiblaw-import.curl_exit" 2>/dev/null || echo 99)"
+
+if [ "$CURL_EXIT" != "0" ] || [ "$HTTP_CODE" != "200" ]; then
+    err "import POST failed (curl exit $CURL_EXIT, HTTP $HTTP_CODE)"
+    if [ -s "$IMPORT_ERR_FILE" ]; then
+        err "stderr:"; sed 's/^/  /' "$IMPORT_ERR_FILE" >&2
+    fi
+    if [ -s "$IMPORT_RESPONSE_FILE" ]; then
+        err "response (first 1KB):"; head -c 1024 "$IMPORT_RESPONSE_FILE" >&2; echo >&2
+    fi
+    kill_paperclip_tree "$PAPERCLIP_PID"
+    rm -f "$LAUNCHER_PID_FILE"
+    exit 1
+fi
+milestone "import POST returned HTTP 200"
+
+# ---------------------------------------------------------------------------
+# Parse import response
+# ---------------------------------------------------------------------------
+
+if [ "$DRY_RUN" = "true" ]; then
+    # /import/preview returns plan + manifest + warnings + errors.
+    PREVIEW_SUMMARY="$(python3 - "$IMPORT_RESPONSE_FILE" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+warnings = doc.get("warnings") or []
+errors = doc.get("errors") or []
+plan = (doc.get("plan") or {})
+agents = plan.get("agentPlans") or []
+projects = plan.get("projectPlans") or []
+issues = plan.get("issuePlans") or []
+manifest = doc.get("manifest") or {}
+skills = manifest.get("skills") or []
+print(f"agents={len(agents)} skills={len(skills)} projects={len(projects)} issues={len(issues)} warnings={len(warnings)} errors={len(errors)}")
+for w in warnings: print(f"  warn: {w}")
+for e in errors: print(f"  err:  {e}")
+PY
+)"
+    log "preview: $PREVIEW_SUMMARY"
+    milestone "dry-run complete; server still running (stop: kill \$(cat $LAUNCHER_PID_FILE))"
+    # Keep server up so the operator can browse / re-run with no --dry-run.
+    trap - INT TERM
+    exit 0
+fi
+
+COMPANY_ID="$(json_get_str company.id < "$IMPORT_RESPONSE_FILE")"
+AGENT_COUNT="$(python3 -c "import json; d=json.load(open('$IMPORT_RESPONSE_FILE')); print(len(d.get('agents') or []))")"
+WARNING_COUNT="$(python3 -c "import json; d=json.load(open('$IMPORT_RESPONSE_FILE')); print(len(d.get('warnings') or []))")"
+log "company id: $COMPANY_ID"
+log "agents imported: $AGENT_COUNT"
+log "warnings: $WARNING_COUNT"
+if [ "$WARNING_COUNT" -gt 0 ]; then
+    python3 -c "
+import json
+d=json.load(open('$IMPORT_RESPONSE_FILE'))
+for w in (d.get('warnings') or []): print('  warn:', w)
+"
+fi
+
+# Pull the company record so we get shortCode + final name.
+COMPANIES_JSON="$(curl --silent --max-time 5 "$API_BASE/api/companies" || true)"
+COMPANY_SHORT_CODE=""
+COMPANY_NAME="$ORG_NAME"
+if [ -n "$COMPANIES_JSON" ] && [ -n "$COMPANY_ID" ]; then
+    LINE="$(printf '%s' "$COMPANIES_JSON" | python3 -c "
+import json, sys
+target_id = sys.argv[1]
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+items = d if isinstance(d, list) else (d.get('companies') or d.get('data') or d.get('items') or [])
+for it in (items or []):
+    if isinstance(it, dict) and (it.get('id') == target_id or it.get('companyId') == target_id):
+        short = (it.get('shortCode') or it.get('short_code') or it.get('slug') or it.get('handle') or '')
+        name = it.get('name') or ''
+        print(f'{short}\t{name}'); break
+" "$COMPANY_ID" 2>/dev/null || true)"
+    if [ -n "$LINE" ]; then
+        COMPANY_SHORT_CODE="$(printf '%s' "$LINE" | awk -F'\t' '{print $1}')"
+        if [ -n "$(printf '%s' "$LINE" | awk -F'\t' '{print $2}')" ]; then
+            COMPANY_NAME="$(printf '%s' "$LINE" | awk -F'\t' '{print $2}')"
+        fi
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# PATCH mission as description
+# ---------------------------------------------------------------------------
+
+if [ -n "$COMPANY_ID" ] && [ -n "$MISSION" ]; then
+    milestone "patching company description (mission)"
+    PATCH_BODY="$(python3 -c "import json,sys; print(json.dumps({'description': sys.argv[1]}))" "$MISSION")"
+    PATCH_RESPONSE="$DATA_DIR/possiblaw-patch.response"
+    PATCH_HTTP="$(curl --silent --max-time 10 \
+        --request PATCH \
+        --header "Content-Type: application/json" \
+        --data "$PATCH_BODY" \
+        --output "$PATCH_RESPONSE" \
+        --write-out '%{http_code}' \
+        "$API_BASE/api/companies/$COMPANY_ID" || echo 000)"
+    if [ "$PATCH_HTTP" = "200" ]; then
+        log "  mission saved as company description"
+    else
+        warn "PATCH /api/companies/$COMPANY_ID returned HTTP $PATCH_HTTP"
+        warn "Mission was not stored as company description. Response: $(head -c 256 "$PATCH_RESPONSE" 2>/dev/null)"
+        warn "You can edit the description in the Paperclip UI."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Final banner + browser open
+# ---------------------------------------------------------------------------
+
+DASHBOARD_URL="$API_BASE"
+if [ -n "$COMPANY_SHORT_CODE" ]; then
+    DASHBOARD_URL="$API_BASE/$COMPANY_SHORT_CODE/dashboard"
+fi
+
+printf '\n'
+printf '======================================================================\n'
+printf '  PossibLaw is ready (%ss to first ready)\n' "$(( $(date +%s) - LAUNCH_START_EPOCH ))"
+printf '======================================================================\n'
+printf '  Company:    %s\n' "$COMPANY_NAME"
+[ -n "$COMPANY_ID" ] && printf '  Company id: %s\n' "$COMPANY_ID"
+printf '  Variant:    %s (%s)\n' "$VARIANT" "$(variant_label "$VARIANT")"
+printf '  Agents:     %s\n' "$AGENT_COUNT"
+printf '  Dashboard:  %s\n' "$DASHBOARD_URL"
+printf '  Data dir:   %s\n' "$DATA_DIR"
+printf '  Server log: %s\n' "$LAUNCHER_LOG"
+printf '  Server pid: %s (saved to %s)\n' "${SERVER_PID:-$PAPERCLIP_PID}" "$LAUNCHER_PID_FILE"
+printf '\n'
+printf '  Tail the log:    tail -f %s\n' "$LAUNCHER_LOG"
+printf '  Stop the server: kill $(cat %s)\n' "$LAUNCHER_PID_FILE"
+printf '\n'
+printf '  Operator walkthrough: %s/docs/operator-walkthrough.md\n' "$REPO_ROOT"
+printf '======================================================================\n'
+
+if [ "$NO_BROWSER" != "true" ]; then
+    if command -v open >/dev/null 2>&1; then
+        open "$DASHBOARD_URL" 2>/dev/null || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$DASHBOARD_URL" 2>/dev/null || true
+    fi
+fi
+
+# Detach trap — leaving the server running intentionally.
+trap - INT TERM
+
+exit 0

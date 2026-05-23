@@ -7,6 +7,34 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.3.0] — 2026-05-23 — Branded one-command onboarding + multi-variant package
+
+### Added
+
+- `bin/possiblaw` — branded one-command launcher. Prompts for variant / org name / mission, runs `paperclipai onboard --yes` in the background, builds and POSTs the company import body directly to `/api/companies/import` (so the full `adapterOverrides` schema is available — model, reasoning effort, timeout per agent), PATCHes the mission as company description, and opens the dashboard URL. Replaces the older `bin/possiblaw-launch`.
+- `companies/legal-operations/variants.yaml` — variant matrix for `codex` / `claude` / `ollama`. Pivots on each agent's `metadata.possiblaw.modelLane` so new agents inherit the right adapter config automatically.
+- `bin/_possiblaw_variants.py` and `bin/_possiblaw_inline_source.py` — pure Python (stdlib-only) helpers with `--self-test` modes. The bash launcher converts YAML → JSON via paperclip's bundled `js-yaml`, then feeds JSON to these helpers to build the import body.
+- `companies/legal-operations/skills/privacy-encoder/SKILL.md` — Ollama health check at the top of "When To Invoke". Confidential/privileged matters now BLOCK at runtime if Ollama isn't reachable, with install hints in the comment.
+- `bin/possiblaw` preflight — scans the package for matters with `privacyTier: confidential|privileged` and warns (non-blocking) if Ollama is not running at launch time.
+- `companies/legal-operations/evals/` — README documenting the eval convention (routine → eval-runner skill → judge agent → `eval-results` project) and a `cases/.gitkeep` placeholder.
+- `companies/legal-operations/projects/eval-results/PROJECT.md` + `.paperclip.yaml` entry — placeholder project, lead = chief-of-staff until the eval-judge agent ships.
+- `docs/known-limitations.md` — importer non-atomicity, sidebar jank at scale, Ollama variant quality caveat, hybrid-variant deferral.
+
+### Changed
+
+- `docs/operator-walkthrough.md` — rewritten for the one-command launcher flow. Adds per-variant setup (codex / claude / ollama + OpenCode global config example) and the Ollama+OpenCode prerequisite section.
+- `README.md` — "Current Direction" quickstart now points at `./bin/possiblaw`.
+
+### Removed
+
+- `bin/possiblaw-launch` — the v1 launcher. The new `bin/possiblaw` replaces it with variant support, direct HTTP POST (so `adapterOverrides.adapterConfig` is no longer stripped), and a cleaner single-entrypoint UX. Same preflight + health-poll + signal-trap machinery, lifted in.
+
+### Validation
+
+End-to-end dry-run smoke (`codex` variant) against a fresh data dir: `agents=11 skills=38 projects=3 issues=3 warnings=0 errors=0` in ~18 seconds. Live runs for `claude` and `ollama` variants are operator-side validation (covered in the operator walkthrough).
+
+---
+
 ## [0.2.0] — 2026-05-21 — Sprint 11: Subscription-auth providers
 
 ### Added
