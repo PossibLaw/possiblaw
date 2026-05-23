@@ -9,3 +9,25 @@ paperclip license appears in paperclip/LICENSE within this repository.
 PossibLaw also draws design-pattern inspiration (not code) from:
 - AnttiHero/lavern — workflow-template patterns, escalation-as-success framing
 - mike — skill-extraction patterns (no code copies; AGPL-3.0 sources)
+
+================================================================
+Third-party content adapted into companies/legal-operations/
+================================================================
+
+claude-for-legal (https://github.com/anthropics/claude-for-legal)
+  Copyright Anthropic and contributors. Licensed under the Apache License, Version 2.0.
+  Adapted at commit b0aeeba for skills:
+    - companies/legal-operations/skills/legal-contract-review-dispatcher
+    - companies/legal-operations/skills/legal-nda-review
+    - companies/legal-operations/skills/legal-saas-msa-review
+    - companies/legal-operations/skills/legal-renewal-tracker
+    - companies/legal-operations/skills/legal-oss-compliance
+    - companies/legal-operations/skills/legal-escalation-flagger
+    - companies/legal-operations/skills/legal-hiring-review
+    - companies/legal-operations/skills/legal-cease-and-desist
+    - companies/legal-operations/skills/legal-ip-infringement-triage
+
+lavern (https://github.com/AnttiHero/lavern)
+  Copyright AnttiHero and contributors. Licensed under the Apache License, Version 2.0.
+  Adapted at commit e04d3a6 for:
+    - companies/legal-operations/agents/contract-reviewer

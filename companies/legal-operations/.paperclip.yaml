@@ -1,0 +1,383 @@
+schema: paperclip/v1
+company:
+  brandColor: "#155EEF"
+  attachmentMaxBytes: 10485760
+  requireBoardApprovalForNewAgents: true
+  feedbackDataSharingEnabled: false
+agents:
+  chief-of-staff:
+    role: executive-router
+    icon: route
+    capabilities: Intake, domain routing, delegation, notifications, and operator escalation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.3-codex
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        PAPERCLIP_BASE_URL:
+          kind: plain
+          requirement: optional
+          default: "http://127.0.0.1:3100"
+        POSSIBLAW_SLACK_WEBHOOK_URL:
+          kind: secret
+          requirement: optional
+        POSSIBLAW_TEAMS_WEBHOOK_URL:
+          kind: secret
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: primary
+        adapterDecision: codex-local-default-2026-05-22
+  chief-counsel:
+    role: legal-router
+    icon: scale
+    capabilities: Legal practice-area classification and legal-team delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.3-codex
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        PAPERCLIP_BASE_URL:
+          kind: plain
+          requirement: optional
+          default: "http://127.0.0.1:3100"
+        POSSIBLAW_SLACK_WEBHOOK_URL:
+          kind: secret
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: primary
+        adapterDecision: codex-local-default-2026-05-22
+  commercial-lead:
+    role: practice-lead
+    icon: briefcase-business
+    capabilities: Commercial-contract triage, review dispatch, and specialist delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.3-codex
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: primary
+        adapterDecision: codex-local-default-2026-05-22
+  nda-drafter:
+    role: specialist
+    icon: file-pen-line
+    capabilities: NDA intake, assumptions tracking, conflicts notice, drafting, and disk output.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.3-codex
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_KEY_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_WORDLIST:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_MONEY_FLOOR:
+          kind: plain
+          requirement: optional
+          default: "10000"
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-05-22
+  contract-reviewer:
+    role: specialist
+    icon: file-search
+    capabilities: Clause-by-clause review of commercial contracts with structured risk scoring and our-side logic.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.3-codex
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_KEY_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_WORDLIST:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-05-22
+        sources:
+          - kind: github
+            repo: AnttiHero/lavern
+            commit: e04d3a6
+            license: Apache-2.0
+            attribution: AnttiHero and contributors to lavern
+  finance-lead:
+    role: practice-lead
+    icon: coins
+    capabilities: Finance and bookkeeping triage; routes billing and expense work to specialists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.3-codex
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-05-22
+  marketing-lead:
+    role: practice-lead
+    icon: megaphone
+    capabilities: Marketing intake and content triage; routes drafting work to specialists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.3-codex
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-05-22
+  admin-lead:
+    role: practice-lead
+    icon: clipboard-list
+    capabilities: Administrative coordination; routes scheduling and ops work to specialists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.3-codex
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-05-22
+  billing-prep:
+    role: specialist
+    icon: receipt
+    capabilities: Billing entry preparation, time aggregation, and invoice drafting.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.3-codex
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-05-22
+  intake-form-drafter:
+    role: specialist
+    icon: clipboard-pen
+    capabilities: Marketing intake-form drafting from operator brief.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.3-codex
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-05-22
+  calendar-coordinator:
+    role: specialist
+    icon: calendar-days
+    capabilities: Calendar coordination, meeting scheduling, and conflict checking.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.3-codex
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-05-22
+sidebar:
+  agents:
+    - chief-of-staff
+    - chief-counsel
+    - commercial-lead
+    - nda-drafter
+    - contract-reviewer
+    - finance-lead
+    - billing-prep
+    - marketing-lead
+    - intake-form-drafter
+    - admin-lead
+    - calendar-coordinator
+  projects:
+    - nda-matters
+    - commercial-reviews
+projects:
+  nda-matters:
+    leadAgentSlug: chief-of-staff
+    status: in_progress
+    color: "#155EEF"
+    metadata:
+      possiblaw:
+        workflow: nda-vertical-slice
+  commercial-reviews:
+    leadAgentSlug: chief-of-staff
+    status: in_progress
+    color: "#9333EA"
+    metadata:
+      possiblaw:
+        workflow: contract-review-vertical-slice
+tasks:
+  draft-mutual-nda-demo:
+    status: backlog
+    priority: medium
+    billingCode: demo
+    metadata:
+      possiblaw:
+        demo: true
+  review-vendor-msa-demo:
+    status: backlog
+    priority: medium
+    billingCode: demo
+    metadata:
+      possiblaw:
+        demo: true
+  weekly-renewal-scan:
+    status: backlog
+    priority: low
+    recurring: true
+    routine:
+      concurrencyPolicy: coalesce_if_active
+      catchUpPolicy: skip_missed
+      triggers:
+        - kind: schedule
+          cronExpression: "0 9 * * 1"
+          timezone: America/Chicago
+          enabled: true
+    metadata:
+      possiblaw:
+        routine: weekly-renewal-scan
+routines:
+  nightly-conflicts-check:
+    triggers:
+      - kind: schedule
+        cronExpression: "0 2 * * *"
+        timezone: America/Chicago
+        enabled: true
+    concurrencyPolicy: coalesce_if_active
+    catchUpPolicy: skip_missed

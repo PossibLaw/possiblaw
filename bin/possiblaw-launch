@@ -1,0 +1,649 @@
+#!/usr/bin/env bash
+#
+# possiblaw-launch — one-command launcher for the PossibLaw Paperclip-native package.
+#
+# Wraps the multi-step operator flow documented in docs/operator-walkthrough.md
+# (onboard -> run -> company import -> optional rename) into a single command.
+#
+# This file is NOT marked executable by the repository. Run once after pulling:
+#
+#     chmod +x bin/possiblaw-launch
+#
+# Then invoke as:
+#
+#     ./bin/possiblaw-launch [--org-name "Acme Legal"] [--data-dir PATH]
+#                            [--port 3100] [--package PATH]
+#                            [--reset] [--yes]
+#
+# See `./bin/possiblaw-launch --help` for the full flag list.
+#
+# Compatibility: macOS zsh / bash 3.2+. POSIX-friendly bash. No jq required.
+# Stops the spawned Paperclip server on SIGINT/SIGTERM.
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+DEFAULT_DATA_DIR="$HOME/.possiblaw/paperclip-data"
+DEFAULT_PORT="3100"
+DEFAULT_PACKAGE="$REPO_ROOT/companies/legal-operations"
+PACKAGE_DEFAULT_ORG_NAME="PossibLaw Legal Operations"
+HEALTH_TIMEOUT_SECS=60
+HEALTH_POLL_INTERVAL_SECS=1
+
+# Track launch start so we can print elapsed seconds at milestones.
+LAUNCH_START_EPOCH="$(date +%s)"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+log() {
+    # stdout, informational
+    printf '[possiblaw-launch] %s\n' "$*"
+}
+
+warn() {
+    printf '[possiblaw-launch][warn] %s\n' "$*" >&2
+}
+
+err() {
+    printf '[possiblaw-launch][error] %s\n' "$*" >&2
+}
+
+elapsed() {
+    local now
+    now="$(date +%s)"
+    printf '%ss' "$(( now - LAUNCH_START_EPOCH ))"
+}
+
+milestone() {
+    log "[$(elapsed)] $*"
+}
+
+usage() {
+    cat <<USAGE
+$SCRIPT_NAME — one-command launcher for PossibLaw on Paperclip
+
+USAGE:
+  $SCRIPT_NAME [options]
+
+OPTIONS:
+  --org-name <name>     Rename the imported company after import.
+                        Default: keep package default ("$PACKAGE_DEFAULT_ORG_NAME").
+  --data-dir <path>     Paperclip data directory (instance home).
+                        Default: $DEFAULT_DATA_DIR
+  --port <port>         Paperclip HTTP port. Default: $DEFAULT_PORT
+  --package <path>      Path to the package source to import.
+                        Default: $DEFAULT_PACKAGE
+  --reset               Wipe the data directory before starting.
+                        Prompts for confirmation unless --yes is given.
+  --yes                 Skip all confirmation prompts.
+  -h, --help            Show this message and exit.
+
+EXAMPLES:
+  # First-run defaults (loopback, port 3100, ~/.possiblaw/paperclip-data):
+  ./bin/$SCRIPT_NAME
+
+  # Custom org name + clean slate:
+  ./bin/$SCRIPT_NAME --org-name "Acme Legal" --reset --yes
+
+  # Use a different port and data dir:
+  ./bin/$SCRIPT_NAME --port 3200 --data-dir /tmp/pl-demo
+USAGE
+}
+
+confirm() {
+    # confirm "Prompt" — returns 0 if user typed y/Y/yes, else non-zero.
+    local prompt="$1"
+    local reply
+    printf '%s [y/N]: ' "$prompt"
+    if ! read -r reply; then
+        return 1
+    fi
+    case "$reply" in
+        y|Y|yes|YES|Yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+require_cmd() {
+    # require_cmd <name> <install-hint>
+    local cmd="$1"
+    local hint="$2"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        err "Required command not found: $cmd"
+        err "Install hint: $hint"
+        return 1
+    fi
+    log "ok: $cmd found at $(command -v "$cmd")"
+    return 0
+}
+
+warn_cmd() {
+    # warn_cmd <name> <warning-text>
+    local cmd="$1"
+    local note="$2"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        warn "$cmd not found in PATH — $note"
+        return 1
+    fi
+    log "ok: $cmd found at $(command -v "$cmd")"
+    return 0
+}
+
+# JSON helpers via python3 (no jq dependency).
+# Each helper reads stdin and prints the extracted value, or empty string.
+
+json_get_str() {
+    # json_get_str <key-path> < json
+    # key-path: dot-separated, e.g. "company.id" or "0.id"
+    local path="$1"
+    python3 - "$path" <<'PY' 2>/dev/null || true
+import json, sys
+path = sys.argv[1].split('.')
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+cur = data
+for part in path:
+    if isinstance(cur, list):
+        try:
+            idx = int(part)
+        except ValueError:
+            sys.exit(0)
+        if idx < 0 or idx >= len(cur):
+            sys.exit(0)
+        cur = cur[idx]
+    elif isinstance(cur, dict):
+        if part not in cur:
+            sys.exit(0)
+        cur = cur[part]
+    else:
+        sys.exit(0)
+if cur is None:
+    sys.exit(0)
+if isinstance(cur, (dict, list)):
+    print(json.dumps(cur))
+else:
+    print(cur)
+PY
+}
+
+json_pick_latest_company() {
+    # Read GET /api/companies JSON, print "<id>\t<shortCode>\t<name>"
+    # for the most-recently-created company. Tolerant of varied shapes.
+    python3 - <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+
+# Possible shapes: list of companies, {"companies":[...]}, {"data":[...]}
+items = None
+if isinstance(data, list):
+    items = data
+elif isinstance(data, dict):
+    for k in ("companies", "data", "items", "results"):
+        if k in data and isinstance(data[k], list):
+            items = data[k]
+            break
+if not items:
+    sys.exit(0)
+
+def created_key(it):
+    if not isinstance(it, dict):
+        return ""
+    for k in ("createdAt", "created_at", "created", "insertedAt"):
+        v = it.get(k)
+        if v:
+            return str(v)
+    return ""
+
+items_sorted = sorted(items, key=created_key)
+latest = items_sorted[-1] if items_sorted else None
+if not isinstance(latest, dict):
+    sys.exit(0)
+
+cid = latest.get("id") or latest.get("companyId") or ""
+short = (
+    latest.get("shortCode")
+    or latest.get("short_code")
+    or latest.get("slug")
+    or latest.get("handle")
+    or ""
+)
+name = latest.get("name") or ""
+print(f"{cid}\t{short}\t{name}")
+PY
+}
+
+json_escape_str() {
+    # Print a JSON-encoded string for the argument (with surrounding quotes).
+    python3 - "$1" <<'PY'
+import json, sys
+print(json.dumps(sys.argv[1]))
+PY
+}
+
+# ---------------------------------------------------------------------------
+# Parse flags
+# ---------------------------------------------------------------------------
+
+ORG_NAME=""
+DATA_DIR="$DEFAULT_DATA_DIR"
+PORT="$DEFAULT_PORT"
+PACKAGE="$DEFAULT_PACKAGE"
+RESET="false"
+ASSUME_YES="false"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --org-name)
+            [ "$#" -ge 2 ] || { err "--org-name requires a value"; exit 2; }
+            ORG_NAME="$2"
+            shift 2
+            ;;
+        --data-dir)
+            [ "$#" -ge 2 ] || { err "--data-dir requires a value"; exit 2; }
+            DATA_DIR="$2"
+            shift 2
+            ;;
+        --port)
+            [ "$#" -ge 2 ] || { err "--port requires a value"; exit 2; }
+            PORT="$2"
+            shift 2
+            ;;
+        --package)
+            [ "$#" -ge 2 ] || { err "--package requires a value"; exit 2; }
+            PACKAGE="$2"
+            shift 2
+            ;;
+        --reset)
+            RESET="true"
+            shift 1
+            ;;
+        --yes)
+            ASSUME_YES="true"
+            shift 1
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            err "Unknown argument: $1"
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+# Normalize paths.
+case "$DATA_DIR" in
+    /*) : ;;
+    *) DATA_DIR="$(pwd)/$DATA_DIR" ;;
+esac
+case "$PACKAGE" in
+    /*) : ;;
+    *) PACKAGE="$(pwd)/$PACKAGE" ;;
+esac
+
+# ---------------------------------------------------------------------------
+# Pre-flight checks
+# ---------------------------------------------------------------------------
+
+log "PossibLaw launcher starting"
+log "repo root: $REPO_ROOT"
+log "data dir:  $DATA_DIR"
+log "port:      $PORT"
+log "package:   $PACKAGE"
+log "org name:  ${ORG_NAME:-<keep package default: $PACKAGE_DEFAULT_ORG_NAME>}"
+log "reset:     $RESET"
+log ""
+log "Pre-flight checks:"
+
+PREFLIGHT_FAILED="false"
+
+if ! require_cmd pnpm "https://pnpm.io/installation (e.g. 'npm install -g pnpm@9.15.4')"; then
+    PREFLIGHT_FAILED="true"
+fi
+
+if ! require_cmd curl "install curl via your package manager"; then
+    PREFLIGHT_FAILED="true"
+fi
+
+if ! require_cmd python3 "install Python 3 via your package manager or Homebrew"; then
+    PREFLIGHT_FAILED="true"
+fi
+
+PAPERCLIP_DIR="$REPO_ROOT/paperclip"
+if [ ! -d "$PAPERCLIP_DIR" ]; then
+    err "Paperclip submodule not found at: $PAPERCLIP_DIR"
+    err "Run: git submodule update --init --recursive"
+    PREFLIGHT_FAILED="true"
+else
+    log "ok: paperclip submodule found at $PAPERCLIP_DIR"
+fi
+
+if [ ! -d "$PACKAGE" ]; then
+    err "Package directory not found at: $PACKAGE"
+    PREFLIGHT_FAILED="true"
+else
+    log "ok: package source found at $PACKAGE"
+fi
+
+# Warn-only: codex CLI (subscription auth for codex_local adapter).
+if ! warn_cmd codex "the package defaults to codex_local; subscription auth: run 'codex login --device-auth' if you haven't"; then
+    : # warn-only
+fi
+
+# Warn-only: pandoc (only needed for DOCX deliverables).
+if ! warn_cmd pandoc "only needed for DOCX deliverables; install with 'brew install pandoc' if you want them"; then
+    : # warn-only
+fi
+
+# Writable data dir parent.
+DATA_DIR_PARENT="$(dirname "$DATA_DIR")"
+if [ ! -d "$DATA_DIR_PARENT" ]; then
+    log "data dir parent does not exist; will create: $DATA_DIR_PARENT"
+    if ! mkdir -p "$DATA_DIR_PARENT"; then
+        err "Could not create data dir parent: $DATA_DIR_PARENT"
+        PREFLIGHT_FAILED="true"
+    fi
+fi
+if [ -d "$DATA_DIR_PARENT" ] && [ ! -w "$DATA_DIR_PARENT" ]; then
+    err "Data dir parent is not writable: $DATA_DIR_PARENT"
+    PREFLIGHT_FAILED="true"
+elif [ -d "$DATA_DIR_PARENT" ]; then
+    log "ok: data dir parent is writable: $DATA_DIR_PARENT"
+fi
+
+if [ "$PREFLIGHT_FAILED" = "true" ]; then
+    err "Pre-flight checks failed. See messages above."
+    exit 1
+fi
+
+milestone "pre-flight complete"
+
+# ---------------------------------------------------------------------------
+# Reset (optional)
+# ---------------------------------------------------------------------------
+
+if [ "$RESET" = "true" ] && [ -e "$DATA_DIR" ]; then
+    if [ "$ASSUME_YES" != "true" ]; then
+        if ! confirm "About to delete existing data dir: $DATA_DIR. Continue?"; then
+            err "Reset cancelled by operator."
+            exit 1
+        fi
+    fi
+    log "removing existing data dir: $DATA_DIR"
+    rm -rf "$DATA_DIR"
+fi
+
+mkdir -p "$DATA_DIR"
+
+LAUNCHER_LOG="$DATA_DIR/paperclip-launcher.log"
+LAUNCHER_PID_FILE="$DATA_DIR/paperclip-launcher.pid"
+
+# Truncate launcher log so each run starts clean.
+: > "$LAUNCHER_LOG"
+
+# ---------------------------------------------------------------------------
+# Trap handler — clean up background Paperclip on signal
+# ---------------------------------------------------------------------------
+
+PAPERCLIP_PID=""
+
+cleanup_on_signal() {
+    local signal="$1"
+    warn "received $signal; stopping Paperclip"
+    if [ -n "$PAPERCLIP_PID" ] && kill -0 "$PAPERCLIP_PID" 2>/dev/null; then
+        kill "$PAPERCLIP_PID" 2>/dev/null || true
+        # Give it a moment, then force.
+        sleep 2
+        if kill -0 "$PAPERCLIP_PID" 2>/dev/null; then
+            kill -9 "$PAPERCLIP_PID" 2>/dev/null || true
+        fi
+    fi
+    if [ -f "$LAUNCHER_PID_FILE" ]; then
+        rm -f "$LAUNCHER_PID_FILE"
+    fi
+    exit 130
+}
+
+trap 'cleanup_on_signal SIGINT' INT
+trap 'cleanup_on_signal SIGTERM' TERM
+
+# ---------------------------------------------------------------------------
+# Onboard
+# ---------------------------------------------------------------------------
+
+log ""
+milestone "running: paperclipai onboard"
+log "(log: $LAUNCHER_LOG)"
+
+# We run onboard via pnpm from the paperclip submodule, matching the
+# operator walkthrough. The package's CLI binary name is `paperclipai`.
+ONBOARD_EXIT=0
+(
+    cd "$PAPERCLIP_DIR"
+    pnpm paperclipai onboard \
+        --data-dir "$DATA_DIR" \
+        --bind loopback \
+        --yes
+) >>"$LAUNCHER_LOG" 2>&1 || ONBOARD_EXIT=$?
+
+if [ "$ONBOARD_EXIT" -ne 0 ]; then
+    err "paperclipai onboard failed (exit $ONBOARD_EXIT). Tail of $LAUNCHER_LOG:"
+    tail -n 50 "$LAUNCHER_LOG" >&2 || true
+    exit "$ONBOARD_EXIT"
+fi
+milestone "onboard complete"
+
+# ---------------------------------------------------------------------------
+# Start Paperclip (background)
+# ---------------------------------------------------------------------------
+
+milestone "starting: paperclipai run (background)"
+
+(
+    cd "$PAPERCLIP_DIR"
+    exec pnpm paperclipai run \
+        --data-dir "$DATA_DIR" \
+        --instance default
+) >>"$LAUNCHER_LOG" 2>&1 &
+PAPERCLIP_PID=$!
+echo "$PAPERCLIP_PID" > "$LAUNCHER_PID_FILE"
+log "paperclip server pid: $PAPERCLIP_PID"
+
+# ---------------------------------------------------------------------------
+# Wait for health
+# ---------------------------------------------------------------------------
+
+HEALTH_URL="http://127.0.0.1:$PORT/api/health"
+log "waiting for $HEALTH_URL (timeout ${HEALTH_TIMEOUT_SECS}s)"
+
+WAITED=0
+HEALTHY="false"
+while [ "$WAITED" -lt "$HEALTH_TIMEOUT_SECS" ]; do
+    # Confirm the process is still alive; if not, fail fast.
+    if ! kill -0 "$PAPERCLIP_PID" 2>/dev/null; then
+        err "paperclip server exited before becoming healthy. Tail of $LAUNCHER_LOG:"
+        tail -n 80 "$LAUNCHER_LOG" >&2 || true
+        rm -f "$LAUNCHER_PID_FILE"
+        exit 1
+    fi
+    HTTP_CODE="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 3 "$HEALTH_URL" || true)"
+    if [ "$HTTP_CODE" = "200" ]; then
+        HEALTHY="true"
+        break
+    fi
+    sleep "$HEALTH_POLL_INTERVAL_SECS"
+    WAITED=$(( WAITED + HEALTH_POLL_INTERVAL_SECS ))
+done
+
+if [ "$HEALTHY" != "true" ]; then
+    err "paperclip did not become healthy within ${HEALTH_TIMEOUT_SECS}s. Tail of $LAUNCHER_LOG:"
+    tail -n 80 "$LAUNCHER_LOG" >&2 || true
+    if kill -0 "$PAPERCLIP_PID" 2>/dev/null; then
+        kill "$PAPERCLIP_PID" 2>/dev/null || true
+    fi
+    rm -f "$LAUNCHER_PID_FILE"
+    exit 1
+fi
+milestone "paperclip healthy at $HEALTH_URL"
+
+# ---------------------------------------------------------------------------
+# Import package
+# ---------------------------------------------------------------------------
+
+API_BASE="http://127.0.0.1:$PORT"
+IMPORT_LOG="$DATA_DIR/paperclip-import.log"
+: > "$IMPORT_LOG"
+
+milestone "importing package: $PACKAGE"
+IMPORT_EXIT=0
+(
+    cd "$PAPERCLIP_DIR"
+    pnpm paperclipai company import "$PACKAGE" \
+        --data-dir "$DATA_DIR" \
+        --api-base "$API_BASE" \
+        --target new \
+        --yes
+) >"$IMPORT_LOG" 2>&1 || IMPORT_EXIT=$?
+
+# Echo import output into the main launcher log as well for one-stop tailing.
+cat "$IMPORT_LOG" >> "$LAUNCHER_LOG" 2>/dev/null || true
+
+if [ "$IMPORT_EXIT" -ne 0 ]; then
+    err "company import failed (exit $IMPORT_EXIT). Tail of $IMPORT_LOG:"
+    tail -n 80 "$IMPORT_LOG" >&2 || true
+    if kill -0 "$PAPERCLIP_PID" 2>/dev/null; then
+        kill "$PAPERCLIP_PID" 2>/dev/null || true
+    fi
+    rm -f "$LAUNCHER_PID_FILE"
+    exit "$IMPORT_EXIT"
+fi
+milestone "import complete"
+
+# ---------------------------------------------------------------------------
+# Discover company id / shortCode
+# ---------------------------------------------------------------------------
+
+COMPANY_ID=""
+COMPANY_SHORT_CODE=""
+COMPANY_NAME=""
+
+# Try to grab an id printed by the importer first. The importer's exact
+# format is not contractually fixed, so we fall back to the REST API if
+# we cannot find one.
+IMPORT_PRINTED_ID="$(
+    grep -Eo '"id"[[:space:]]*:[[:space:]]*"[^"]+"' "$IMPORT_LOG" 2>/dev/null \
+        | head -n 1 \
+        | sed -E 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
+        || true
+)"
+
+# Pull /api/companies and pick the most-recently-created entry. This is
+# the authoritative path even when the importer line above succeeds.
+COMPANIES_JSON="$(curl --silent --max-time 5 "$API_BASE/api/companies" || true)"
+if [ -n "$COMPANIES_JSON" ]; then
+    LATEST_LINE="$(printf '%s' "$COMPANIES_JSON" | json_pick_latest_company)"
+    if [ -n "$LATEST_LINE" ]; then
+        COMPANY_ID="$(printf '%s' "$LATEST_LINE" | awk -F'\t' '{print $1}')"
+        COMPANY_SHORT_CODE="$(printf '%s' "$LATEST_LINE" | awk -F'\t' '{print $2}')"
+        COMPANY_NAME="$(printf '%s' "$LATEST_LINE" | awk -F'\t' '{print $3}')"
+    fi
+fi
+
+# If REST gave nothing but importer printed an id, use that.
+if [ -z "$COMPANY_ID" ] && [ -n "$IMPORT_PRINTED_ID" ]; then
+    COMPANY_ID="$IMPORT_PRINTED_ID"
+fi
+
+if [ -z "$COMPANY_ID" ]; then
+    warn "could not determine company id after import; brand rename (if requested) and dashboard deep-link will be skipped"
+else
+    log "company id:         $COMPANY_ID"
+    [ -n "$COMPANY_SHORT_CODE" ] && log "company shortCode:  $COMPANY_SHORT_CODE"
+    [ -n "$COMPANY_NAME" ] && log "company name:       $COMPANY_NAME"
+fi
+
+# ---------------------------------------------------------------------------
+# Brand customization (optional)
+# ---------------------------------------------------------------------------
+
+if [ -n "$ORG_NAME" ] && [ "$ORG_NAME" != "$PACKAGE_DEFAULT_ORG_NAME" ] && [ -n "$COMPANY_ID" ]; then
+    milestone "renaming company -> $ORG_NAME"
+    PATCH_BODY="{\"name\":$(json_escape_str "$ORG_NAME")}"
+    PATCH_URL="$API_BASE/api/companies/$COMPANY_ID"
+    PATCH_RESPONSE_FILE="$DATA_DIR/paperclip-rename.response"
+    PATCH_HTTP_CODE="$(
+        curl --silent --max-time 10 \
+            --request PATCH \
+            --header "Content-Type: application/json" \
+            --data "$PATCH_BODY" \
+            --output "$PATCH_RESPONSE_FILE" \
+            --write-out '%{http_code}' \
+            "$PATCH_URL" || true
+    )"
+    if [ "$PATCH_HTTP_CODE" = "200" ]; then
+        log "rename ok (HTTP 200)"
+        COMPANY_NAME="$ORG_NAME"
+    else
+        warn "rename returned HTTP $PATCH_HTTP_CODE; response saved to $PATCH_RESPONSE_FILE"
+        warn "you can rename the company manually in the UI"
+    fi
+elif [ -n "$ORG_NAME" ] && [ "$ORG_NAME" = "$PACKAGE_DEFAULT_ORG_NAME" ]; then
+    log "org name matches package default; no rename needed"
+fi
+
+# ---------------------------------------------------------------------------
+# Final banner
+# ---------------------------------------------------------------------------
+
+DASHBOARD_URL="$API_BASE"
+if [ -n "$COMPANY_SHORT_CODE" ]; then
+    DASHBOARD_URL="$API_BASE/$COMPANY_SHORT_CODE/dashboard"
+fi
+
+DISPLAY_NAME="${COMPANY_NAME:-$PACKAGE_DEFAULT_ORG_NAME}"
+
+printf '\n'
+printf '======================================================================\n'
+printf '  PossibLaw is ready (%ss to first ready)\n' "$(( $(date +%s) - LAUNCH_START_EPOCH ))"
+printf '======================================================================\n'
+printf '  Company:    %s\n' "$DISPLAY_NAME"
+[ -n "$COMPANY_ID" ] && printf '  Company id: %s\n' "$COMPANY_ID"
+printf '  Dashboard:  %s\n' "$DASHBOARD_URL"
+printf '  Data dir:   %s\n' "$DATA_DIR"
+printf '  Server log: %s\n' "$LAUNCHER_LOG"
+printf '  Server pid: %s (saved to %s)\n' "$PAPERCLIP_PID" "$LAUNCHER_PID_FILE"
+printf '\n'
+printf '  Tail the log:\n'
+printf '    tail -f %s\n' "$LAUNCHER_LOG"
+printf '\n'
+printf '  Stop the server:\n'
+printf '    kill $(cat %s)\n' "$LAUNCHER_PID_FILE"
+printf '\n'
+printf '  Full operator walkthrough:\n'
+printf '    %s/docs/operator-walkthrough.md\n' "$REPO_ROOT"
+printf '======================================================================\n'
+
+# Detach trap — we are leaving the server running intentionally.
+trap - INT TERM
+
+exit 0

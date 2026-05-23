@@ -1,10 +1,10 @@
 # PossibLaw
 
-**Operating a legal business with AI — a proof-of-concept layer on [paperclip](https://github.com/paperclipai/paperclip).**
+**Operating a legal business with AI — a proof-of-concept Agent Companies package for [paperclip](https://github.com/paperclipai/paperclip).**
 
-> **DISCLAIMER: PossibLaw does not practice law. It is open-source tooling, not a product or a legal-services platform. Non-lawyer operators must consult a licensed attorney before finalizing any work product. Treat all AI output as a first draft.**
+> **Regulated-work note:** The practice of law is regulated. To the extent an operator is practicing law with PossibLaw, the operator needs to involve a lawyer. PossibLaw is open-source tooling, not a legal-services provider.
 
-PossibLaw shows how to wire AI agents into the day-to-day operations of a small legal practice. It is built as a *layer* on top of paperclip, not a fork. All PossibLaw logic lives under `layer/`; the upstream paperclip control plane is wired as a git submodule and is never modified.
+PossibLaw shows how legal-business agents, skills, projects, and starter matters can be packaged as a *layer* on top of paperclip, not a fork. The active implementation lives under `companies/legal-operations/`; the older `layer/` and CLI runtime remain historical source material until the reset is complete. The upstream paperclip control plane is wired as a git submodule and is never modified.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![PoC](https://img.shields.io/badge/status-proof--of--concept-orange.svg)](#whats-not-in-this-poc)
@@ -13,60 +13,23 @@ PossibLaw shows how to wire AI agents into the day-to-day operations of a small 
 
 ---
 
-## Try it in 5 minutes
+## Current Direction
+
+Sprints 0-11 produced a standalone CLI runtime. That proved the content, but it duplicated Paperclip features that should stay in Paperclip: orchestration, UI, auth, audit trail, approvals, budgets, adapters, and task state.
+
+The active path is now the Paperclip-native package under `companies/legal-operations/`. Start there for new work:
 
 ```bash
-git clone --recurse-submodules https://github.com/PossibLaw/possiblaw.git
-cd possiblaw
-pnpm install
-pnpm build
-bin/possiblaw run quick-counsel "draft an NDA for ACME for a mutual disclosure with a 2-year term"
+cd paperclip
+pnpm paperclipai company import ../companies/legal-operations --target new --dry-run
+pnpm paperclipai company import ../companies/legal-operations --target new --yes
 ```
 
-No API key required. The first run uses offline fixtures. Expected output:
+The package now defaults to Paperclip's `codex_local` adapter because the clean UI smoke test used Codex CLI subscription auth. See [docs/operator-walkthrough.md](docs/operator-walkthrough.md) for the repeatable fresh-instance demo and [docs/paperclip-package.md](docs/paperclip-package.md) for the package layout.
 
-```
-PossibLaw does not practice law. Treat output as a starting point.
-[offline mode — ANTHROPIC_API_KEY not set; using deterministic fixtures]
+## Historical CLI Demo
 
-▶ route:chief-counsel | chief-counsel | claude-opus-4-7 (offline)
-    ROUTE_TO: commercial-lead
-
-▶ route:commercial-lead | commercial-lead | claude-sonnet-4-6 (offline)
-    ROUTE_TO: nda-drafter
-
-▶ specialist:nda-drafter | nda-drafter | claude-sonnet-4-6 (offline)
-    NON-DISCLOSURE AGREEMENT
-    This Agreement is entered into as of [DATE] by and between ACME Corp ...
-    Term: 2 years from the Effective Date.
-    DISCLAIMER: This document was prepared with AI assistance ...
-
-✔ test:groundedness — passed
-
-⚠ guardrail:signed-document — HIT (escalating)
-
-╔══════════════════════════════════════════════════════════╗
-║                    ESCALATION CARD                       ║
-╚══════════════════════════════════════════════════════════╝
-Matter: draft an NDA for ACME for a mutual disclosure with a 2-year term
-Guardrail triggered: signed-document
-Reason: A licensed reviewing lawyer must approve before any signed document is sent.
-```
-
-For the full walkthrough, see [docs/getting-started.md](docs/getting-started.md).
-
-### Choose your provider
-
-PossibLaw supports four LLM providers. The default uses each agent's declared model; override per-run with `--provider`:
-
-```bash
-bin/possiblaw run quick-counsel "draft NDA" --provider claude-cli       # subscription via Claude Code
-bin/possiblaw run quick-counsel "draft NDA" --provider codex-cli        # subscription via Codex
-bin/possiblaw run quick-counsel "draft NDA" --provider anthropic        # ANTHROPIC_API_KEY
-bin/possiblaw run quick-counsel "draft NDA" --provider ollama           # local llama3.1:8b
-```
-
-See [docs/auth.md](docs/auth.md) for the full guide.
+Sprints 0-11 produced `bin/possiblaw` and `cli/*`. That runtime is archived for continuity and should not be extended. Its content is being converted into Paperclip packages so Paperclip owns the UI, auth, task state, approvals, budgets, and adapter execution.
 
 ---
 
@@ -120,7 +83,7 @@ This is a proof-of-concept. It is explicitly **not**:
 - A helm chart, Terraform module, or production-grade deployment system.
 - A multi-tenant SaaS platform.
 - A fork of paperclip — do not rename or patch paperclip internals.
-- Legal advice — it cannot substitute for a licensed attorney.
+- Legal advice or a legal-services provider.
 - A finished product with SLAs, support contracts, or security guarantees.
 
 From the plan: *"The goal is to show that the routing hierarchy, test layer, guardrail layer, and MCP connector framework can be composed into a coherent legal-business operating layer — not to ship a consumer product."*
@@ -129,7 +92,7 @@ From the plan: *"The goal is to show that the routing hierarchy, test layer, gua
 
 ## Posture
 
-Open, public, Apache 2.0 from day 1. No SLAs. Fork-friendly. Contributions via pull request. The PoC disclaimer is load-bearing — keep it in all forks and derivatives.
+Open, public, Apache 2.0 from day 1. No SLAs. Fork-friendly. Contributions via pull request.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and [SECURITY.md](SECURITY.md) for the security posture.
 
@@ -160,6 +123,8 @@ See [docs/evals.md](docs/evals.md) for dataset licenses, adapter prompts, scorer
 
 | Guide | What it covers |
 |---|---|
+| [docs/operator-walkthrough.md](docs/operator-walkthrough.md) | Fresh Paperclip instance, package import, and starter NDA demo |
+| [docs/paperclip-package.md](docs/paperclip-package.md) | Current Paperclip-native package path and import instructions |
 | [docs/getting-started.md](docs/getting-started.md) | Stranger-friendly Quickstart — clone to first workflow in 5 minutes |
 | [docs/auth.md](docs/auth.md) | Provider comparison — `anthropic` / `claude-cli` / `codex-cli` / `ollama` |
 | [docs/customize-your-team.md](docs/customize-your-team.md) | Non-engineer guide to adding/removing/renaming agents |

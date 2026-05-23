@@ -131,6 +131,58 @@ Implemented in commits `1f63fa7` (llm.ts providers), `0118bf3` (--provider and -
 
 ---
 
+## Decision: Paperclip-Native Package Before CLI Reset (Post-Sprint 11)
+
+### Context
+
+PossibLaw was intended as a content layer on Paperclip: legal-business agents, skills, workflows, and templates that mount onto Paperclip's orchestration runtime. Sprints 0-11 instead built a standalone CLI that reimplemented orchestration, provider dispatch, audit logging, cost reporting, tests, and guardrails.
+
+That CLI proved useful content, but it did not prove the original product idea: boot Paperclip, import the PossibLaw company, use the localhost UI, and let Paperclip handle the runtime.
+
+### Decision
+
+**Build and validate the Paperclip Agent Companies package before deleting the standalone CLI.**
+
+The first package slice is `companies/legal-operations/` with four agents, three skills, one project, and one starter NDA task. It is intentionally narrow so the replacement path can be tested end to end before the legacy runtime is removed.
+
+### Consequences
+
+- New work should target the package path, not `cli/*` or `bin/possiblaw*`.
+- Deleting the standalone CLI is still the direction, but it is gated on proving the Paperclip-native import and UI demo.
+- `layer/*` remains source material for additional package conversion.
+- Paperclip remains an unchanged pinned submodule.
+
+### Validation
+
+The package imported successfully into a disposable local Paperclip instance. Import preview had no warnings/errors, actual import created the company, agents, project, and starter issue, and readback confirmed NDA Drafter received the three company-scoped legal skills.
+
+---
+
+## Decision: Codex Local Default For Package Demo
+
+### Context
+
+The first Paperclip UI smoke test succeeded after the operator prepared Codex CLI subscription auth with `codex login --device-auth`. The package sidecar still used `claude_local`, which made the default adapter configuration diverge from the proven path.
+
+### Decision
+
+**Default the `companies/legal-operations` Paperclip sidecar to `codex_local` using Paperclip's built-in Codex local model lane.**
+
+The adapter choice lives in `.paperclip.yaml`, not in the base Agent Companies markdown. That keeps the package portable while making the default import runnable on the operator's validated setup. Claude Code remains a documented UI-level option after import.
+
+### Consequences
+
+- `.paperclip.yaml` uses `codex_local` with `gpt-5.3-codex` and high reasoning effort for the four-agent demo slice.
+- No API keys, `cwd` values, local absolute paths, or secret references are exported in the package.
+- Operators should run `codex login --device-auth` before the first live demo if Codex is not already authenticated.
+- Timer heartbeats remain disabled; assignment, on-demand, and automation wakes remain enabled.
+
+### Revisit Criteria
+
+Revisit when the package supports import-time adapter profiles, when Claude Code subscription economics settle after the June 15, 2026 Agent SDK credit change, or when a local/off-cloud model lane is ready for privacy-sensitive work.
+
+---
+
 ## Decision Log
 
 | Date | Sprint | Decision | Rationale | Revisit Criteria |
@@ -142,6 +194,8 @@ Implemented in commits `1f63fa7` (llm.ts providers), `0118bf3` (--provider and -
 | 2026-05-21 | Sprint 2 | Audit log stores plaintext in Sprint 2 (hash-only deferred to Sprint 3) | No Privacy Filter implemented yet; Sprint 3 removes plaintext for privileged matters | Sprint 3 Privacy Filter implementation |
 | 2026-05-21 | Sprint 2 | Regex inline flags `(?im)` stripped and applied as JS RegExp flags | JavaScript RegExp does not support inline flag syntax in pattern strings | N/A — permanent fix |
 | 2026-05-21 | Sprint 11 | Add subscription-auth providers `claude-cli/*` + `codex-cli/*` | Operator already pays for Claude Code + Codex; avoids new API-key billing | Published SDKs replace shell-out, or a third subscription CLI is wanted |
+| 2026-05-21 | Post-Sprint 11 | Build Paperclip-native package before CLI reset | Reduces reset risk and proves the original Paperclip-layer architecture before deleting working content | After localhost UI demo succeeds, delete the obsolete standalone runtime |
+| 2026-05-22 | Package demo | Default package sidecar to `codex_local` | Matches the operator-validated Paperclip/Codex subscription-auth smoke path while keeping adapter config out of base markdown | Import-time adapter profiles, local model lane, or Claude Code auth economics change |
 
 ---
 
