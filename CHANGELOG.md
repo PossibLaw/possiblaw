@@ -18,6 +18,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Codex subscription variant repinned `gpt-5.3-codex` → `gpt-5.5`.** Probed live on codex 0.137 (2026-06-09): ChatGPT-subscription accounts get `"The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT account"` (same for `gpt-5.5-codex`); the default `gpt-5.5` works. This was the root cause of subscription launches failing with model-access errors. `codex-api` pins `gpt-5.5-codex` (codex-tuned, API-served; verified at launch by the probe). Full subscription e2e validated: probe pass → 11 agents imported → 0 warnings, no API key in the environment.
+- Probe hardening: stdin redirected from `/dev/null` (codex exec reads non-TTY stdin) and codex probes force `model_reasoning_effort=low` so they stay fast and cheap regardless of the operator's codex config.
 - `bin/possiblaw --port` was never passed to `paperclipai onboard` (which reads `$PORT`), so custom ports health-checked an address nothing listened on. Worked before only because port 3100 was free or already running paperclip.
 - `json_get_str` fed its Python program through stdin via heredoc, clobbering the JSON the caller piped in — `company.id` always parsed empty on live imports, silently skipping the mission PATCH. Both stdin-reading helpers now use `python3 -c`. Mission PATCH verified working live for the first time.
 - Model-probe diagnostics fall back to stdout when the CLI prints access errors there (claude does).

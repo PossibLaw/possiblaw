@@ -569,16 +569,21 @@ probe_model() {
     local out_file err_file
     out_file="$(mktemp -t possiblaw-probe-out.XXXXXX)"
     err_file="$(mktemp -t possiblaw-probe-err.XXXXXX)"
+    # stdin must be /dev/null: codex exec reads stdin when it isn't a TTY,
+    # and an interactive TTY would make probe behavior terminal-dependent.
     case "$cli" in
         claude)
             ( cd "$REPO_ROOT" && claude -p "Reply with exactly: OK" \
                 --model "$model" --output-format text ) \
-                > "$out_file" 2> "$err_file" &
+                > "$out_file" 2> "$err_file" </dev/null &
             ;;
         codex)
+            # Force low reasoning effort: probes should be cheap/fast even if
+            # the operator's codex config defaults to xhigh.
             ( cd "$REPO_ROOT" && codex exec -s read-only -m "$model" \
+                -c model_reasoning_effort=low \
                 "Reply with exactly: OK" ) \
-                > "$out_file" 2> "$err_file" &
+                > "$out_file" 2> "$err_file" </dev/null &
             ;;
         *)
             rm -f "$out_file" "$err_file"

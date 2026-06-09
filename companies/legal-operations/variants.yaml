@@ -18,10 +18,16 @@ variants:
   codex:
     label: "Codex CLI (subscription)"
     requires_cli: codex
+    notes: >
+      ChatGPT-subscription accounts only get the default model lineup — probed
+      2026-06-09 on codex 0.137: gpt-5.3-codex and gpt-5.5-codex return "not
+      supported when using Codex with a ChatGPT account"; gpt-5.5 works. If a
+      future codex release moves the default model again, the launcher's
+      preflight probe will catch it at launch.
     default:
       adapterType: codex_local
       adapterConfig:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: medium
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 600
@@ -46,16 +52,18 @@ variants:
     secret_env:
       OPENAI_API_KEY: "OpenAI API Key"
     notes: >
-      Same models and lanes as the codex variant, but billed against an OpenAI
-      API key instead of the ChatGPT subscription. Export OPENAI_API_KEY in the
-      shell that runs bin/possiblaw; the launcher stores it once as a paperclip
+      Same lanes as the codex variant, but billed against an OpenAI API key
+      instead of the ChatGPT subscription. Export OPENAI_API_KEY in the shell
+      that runs bin/possiblaw; the launcher stores it once as a paperclip
       company secret and binds it to every agent via a secret_ref env binding —
-      the key never lands in package files or the import body. Use this when
-      the subscription tier rejects models with "you don't have access" errors.
+      the key never lands in package files or the import body. Pinned to
+      gpt-5.5-codex, the codex-tuned model the ChatGPT-account path rejects but
+      the API serves (UNCONFIRMED against a live key; the preflight probe
+      verifies at launch).
     default:
       adapterType: codex_local
       adapterConfig:
-        model: gpt-5.3-codex
+        model: gpt-5.5-codex
         modelReasoningEffort: medium
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 600
