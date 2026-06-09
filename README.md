@@ -4,7 +4,7 @@
 
 > **Regulated-work note:** The practice of law is regulated. To the extent an operator is practicing law with PossibLaw, the operator needs to involve a lawyer. PossibLaw is open-source tooling, not a legal-services provider.
 
-PossibLaw shows how legal-business agents, skills, projects, and starter matters can be packaged as a *layer* on top of paperclip, not a fork. The active implementation lives under `companies/legal-operations/`; the older `layer/` and CLI runtime remain historical source material until the reset is complete. The upstream paperclip control plane is wired as a git submodule and is never modified.
+PossibLaw shows how legal-business agents, skills, projects, and starter matters can be packaged as a *layer* on top of paperclip, not a fork. The active implementation lives under `companies/legal-operations/`; the older `layer/` content remains historical source material for conversion. The upstream paperclip control plane is wired as a git submodule and is never modified.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![PoC](https://img.shields.io/badge/status-proof--of--concept-orange.svg)](#whats-not-in-this-poc)
@@ -38,27 +38,16 @@ The launcher picks the model-provider variant at import time. Three are shipped:
 
 Add `--variant <slug>` to skip the interactive prompt, or `--list-variants` to see them. Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); package layout: [docs/paperclip-package.md](docs/paperclip-package.md); sharp edges: [docs/known-limitations.md](docs/known-limitations.md).
 
-## Historical CLI Demo
-
-Sprints 0-11 produced `bin/possiblaw` and `cli/*`. That runtime is archived for continuity and should not be extended. Its content is being converted into Paperclip packages so Paperclip owns the UI, auth, task state, approvals, budgets, and adapter execution.
-
----
-
 ## What's in here
 
 | Capability | Detail |
 |---|---|
-| **Routing hierarchy** | Chief Counsel → Lead → Specialist (legal, marketing, finance, admin) |
-| **Specialist agents** | NDA drafter, billing prep, pitch polisher, intake drafter, expense categorizer, calendar coordinator + custom agents |
-| **Workflows** | 9 total: quick-counsel, deep-review, stress-test, roundtable, quick-invoice-review, quick-intake-reply, quick-pitch-polish, quick-expense-categorize, quick-counsel-with-cos |
-| **Test layer** | Groundedness, scope-adherence — retryable soft tests |
-| **Guardrail layer** | signed-document, privacy-filter-required — hard gates that escalate to a human |
-| **Privacy Filter** | Reversible entity substitution via local LLM (Ollama) before cloud calls; rule-based fallback when offline |
-| **Cost reporting** | Per-agent token cost at run time; offline runs are $0 |
-| **MCP connectors** | 14 total: Stripe, DocuSign, iManage, NetDocuments, Westlaw (UNCONFIRMED), LexisNexis (UNCONFIRMED), QuickBooks, HubSpot, Notion, Linear, CourtListener, local-fs-doc-store, no-op-signature, Midpage |
-| **Eval datasets** | 5: CUAD, MAUD, ACORD (synthetic), UNFAIR-ToS, LEDGAR; offline fixture sets bundled |
-| **Starter templates** | `solo-lawyer` and `small-firm`; fully customizable |
-| **CLI** | `possiblaw run`, `team`, `workflows`, `connectors`, `eval`, `privacy` subcommands |
+| **Org chart** | Chief of Staff + Chief Counsel + 4 leads (commercial, finance, marketing, admin) + 5 specialists — 11 agents total |
+| **Skills** | 38: contract review (dispatcher, NDA, SaaS MSA, renewals, OSS compliance, hiring, C&D, IP triage, escalation), matter intake, conflicts check, missing-info gate, privacy encoder, Slack/Teams notifications, Markdown/DOCX output, 14 connector descriptors |
+| **Projects & tasks** | NDA Matters, Commercial Reviews, Eval Results; starter issues + a recurring renewal scan |
+| **Model lanes** | Per-agent `modelLane` metadata (primary / routing / drafting / review / extractive) — variants map each lane to the right model automatically |
+| **Variants** | `codex`, `claude`, `ollama` — selected at import time by the launcher |
+| **Privacy posture** | Privacy-encoder skill blocks confidential/privileged matters unless a local model (Ollama) is reachable |
 
 ---
 
@@ -66,22 +55,24 @@ Sprints 0-11 produced `bin/possiblaw` and `cli/*`. That runtime is archived for 
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  bin/possiblaw  (CLI shim)                               │
-│  cli/           (pipeline, router, printer, eval)        │
+│  bin/possiblaw   (one-command launcher: onboard,         │
+│                   variant select, package import)        │
 ├─────────────────────────────────────────────────────────┤
-│  layer/                                                  │
-│  ├── agents/   (chief-counsel, leads, specialists)       │
-│  ├── workflows/ (9 YAML pipeline definitions)            │
-│  ├── tests/     (groundedness, scope-adherence)          │
-│  ├── guardrails/(signed-document, privacy-filter-req'd)  │
-│  ├── skills/    (nda-playbook, billing-playbook, …)      │
-│  ├── connectors/(14 connector YAML descriptors)          │
-│  ├── evals/     (5 dataset adapters + scorers)           │
-│  └── privacy-filter/ (key store + adversarial tests)     │
+│  companies/legal-operations/   (the PossibLaw package)   │
+│  ├── COMPANY.md + .paperclip.yaml + variants.yaml        │
+│  ├── agents/    (11 AGENTS.md — org chart + routing)     │
+│  ├── skills/    (38 SKILL.md — playbooks, gates,         │
+│  │               outputs, notifications, connectors)     │
+│  ├── projects/  (NDA matters, commercial reviews,        │
+│  │               eval results + starter tasks)           │
+│  └── evals/     (eval convention + cases)                │
 ├─────────────────────────────────────────────────────────┤
-│  paperclip/  (git submodule — never modified)            │
+│  paperclip/  (git submodule — never modified; owns UI,   │
+│               auth, orchestration, budgets, adapters)    │
 └─────────────────────────────────────────────────────────┘
 ```
+
+The standalone CLI runtime from Sprints 0-11 was removed in 0.4.0 — paperclip already provides everything it reimplemented. It remains available in git history (`git log --oneline -- cli/`). The `layer/` directory holds remaining unconverted source material (eval datasets, workflow shapes).
 
 Deep dive: [FOUNDATION.md](FOUNDATION.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
@@ -111,22 +102,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and [SECURI
 
 ## Evals
 
-PossibLaw's eval harness runs workflows against public legal-NLP datasets and reports a real per-sample score. As of 2026-05-21, here's CUAD running through the `clause-extract` workflow with `claude-cli/haiku` subscription auth:
+The Paperclip-native eval convention lives at [companies/legal-operations/evals/README.md](companies/legal-operations/evals/README.md): eval cases run as Paperclip issues, a judge agent scores results, and receipts land in the **Eval Results** project. Dataset source material (CUAD, MAUD, ACORD, UNFAIR-ToS, LEDGAR) remains under `layer/evals/`.
 
-| Dataset | Workflow | Samples | Mean score | Median | Std dev | Cost | Model |
-|---|---|---|---|---|---|---|---|
-| CUAD | clause-extract | 15 | 0.5788 | 0.5833 | 0.2105 | subscription | claude-cli/haiku |
-
-Run it yourself:
-
-```bash
-bin/possiblaw eval --dataset cuad --workflow clause-extract \
-  --sample-size 15 --provider claude-cli --model haiku --budget 5
-```
-
-Reproduce or extend in `layer/evals/results/` (JSON + Markdown reports).
-
-See [docs/evals.md](docs/evals.md) for dataset licenses, adapter prompts, scorer tolerances, and budget mechanics.
+Historical receipt from the retired standalone harness (2026-05-21): CUAD × clause-extract × claude-cli/haiku scored mean **0.5788** over 15 samples on subscription auth.
 
 ---
 
@@ -136,17 +114,10 @@ See [docs/evals.md](docs/evals.md) for dataset licenses, adapter prompts, scorer
 |---|---|
 | [docs/operator-walkthrough.md](docs/operator-walkthrough.md) | Fresh Paperclip instance, package import, and starter NDA demo |
 | [docs/paperclip-package.md](docs/paperclip-package.md) | Current Paperclip-native package path and import instructions |
-| [docs/getting-started.md](docs/getting-started.md) | Stranger-friendly Quickstart — clone to first workflow in 5 minutes |
-| [docs/auth.md](docs/auth.md) | Provider comparison — `anthropic` / `claude-cli` / `codex-cli` / `ollama` |
-| [docs/customize-your-team.md](docs/customize-your-team.md) | Non-engineer guide to adding/removing/renaming agents |
-| [docs/workflows.md](docs/workflows.md) | Workflow schema reference — all 7 step kinds, meta-agents, 9 workflows |
+| [docs/known-limitations.md](docs/known-limitations.md) | Sharp edges: importer non-atomicity, sidebar scale, Ollama quality caveat |
 | [docs/connectors-inventory.md](docs/connectors-inventory.md) | All 14 connectors + 14 deferred v1 targets |
 | [docs/privacy-filter.md](docs/privacy-filter.md) | Threat model, token format, adversarial test index |
-| [docs/evals.md](docs/evals.md) | Dataset licenses, scorers, budget mechanics |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architecture decision log |
-| [docs/DEMO-SCRIPT.md](docs/DEMO-SCRIPT.md) | End-to-end demo walkthrough (all sprints) |
-| [docs/extending/](docs/extending/) | Guides for adding specialists, workflows, tests, guardrails, connectors |
-| [docs/test-and-guardrail-model.md](docs/test-and-guardrail-model.md) | Test vs. guardrail distinction, failure modes |
 | [FOUNDATION.md](FOUNDATION.md) | How the paperclip submodule is wired; extension-point inventory |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution workflow |
 | [SECURITY.md](SECURITY.md) | Security posture, reporting, known threats |

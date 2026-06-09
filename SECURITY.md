@@ -38,7 +38,7 @@ We will acknowledge within 7 business days and aim for a fix within 30 days for 
 - **Unauthorized cloud calls** — Privacy Filter bypass that causes raw entity data to reach the Anthropic API without masking when `--privacy-profile cloud-only` is set.
 - **Privilege bypass** — running a workflow as a lower-privilege template that should only be available to a higher-privilege template.
 - **Audit log tampering** — JSONL records under `layer/audit/` being writable or deletable without detection.
-- **CLI injection** — shell-injection or argument-injection vulnerabilities in the `bin/possiblaw` shim or `cli/` commands.
+- **Launcher injection** — shell-injection or argument-injection vulnerabilities in the `bin/possiblaw` launcher or its Python helpers.
 
 ### Out of scope (PoC realities)
 
@@ -63,6 +63,6 @@ The following threats are documented in the codebase and are known PoC limitatio
 
 5. **Connector credentials in environment** — all 14 connector credentials are read from environment variables at runtime. There is no secret-manager integration. Credentials in `.env` files or shell history are not protected by PossibLaw.
 
-6. **UNCONFIRMED connector schemas** — the Westlaw and LexisNexis connectors use placeholder base URLs and request shapes (documented as UNCONFIRMED in `cli/connectors/westlaw.ts` and `cli/connectors/lexis.ts`). These connectors will silently fail without surfacing auth errors if the schema has changed.
+6. **UNCONFIRMED connector schemas** — the Westlaw and LexisNexis connector skills use placeholder base URLs and request shapes (documented as UNCONFIRMED in `companies/legal-operations/skills/connector-westlaw/SKILL.md` and `connector-lexis/SKILL.md`). Agents following them will fail against the real vendor APIs until the endpoints are verified.
 
 7. **No token expiry on key stores** — Privacy Filter key stores do not expire. Keys for completed matters accumulate indefinitely under `layer/privacy-filter/keys/`.

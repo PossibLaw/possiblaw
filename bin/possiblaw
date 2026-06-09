@@ -183,14 +183,22 @@ print(json.dumps(sys.argv[1]))
 PY
 }
 
-# Convert a YAML file to JSON via paperclip's bundled js-yaml.
+# Convert a YAML file to JSON via js-yaml from paperclip's pnpm store.
+# js-yaml is only a transitive dep of paperclip, so it never lands at
+# paperclip/node_modules/js-yaml — resolve it inside the .pnpm store instead.
 yaml_to_json() {
     local yaml_path="$1"
+    local jsyaml_dir
+    jsyaml_dir=$(ls -d "$REPO_ROOT"/paperclip/node_modules/.pnpm/js-yaml@*/node_modules/js-yaml 2>/dev/null | head -1)
+    if [[ -z "$jsyaml_dir" ]]; then
+        err "js-yaml not found in paperclip's dependency store. Run: pnpm -C paperclip install"
+        return 1
+    fi
     pnpm -C "$REPO_ROOT/paperclip" exec node -e "
-        const yaml = require('js-yaml');
+        const yaml = require(process.argv[2]);
         const fs = require('fs');
         process.stdout.write(JSON.stringify(yaml.load(fs.readFileSync(process.argv[1], 'utf8'))));
-    " "$yaml_path"
+    " "$yaml_path" "$jsyaml_dir"
 }
 
 # ---------------------------------------------------------------------------

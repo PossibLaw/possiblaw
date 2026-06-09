@@ -21,7 +21,7 @@ What it isn't: a productized SaaS, legal advice, a Helm chart, or a finished pro
 I'm looking for three things: (1) developers willing to follow the extending docs and tell me what's confusing, (2) operators (small firms, legal ops) willing to try it on a real matter and give honest feedback, and (3) anyone who has thoughts on the architecture.
 
 Repo: https://github.com/PossibLaw/possiblaw
-Getting started: https://github.com/PossibLaw/possiblaw/blob/main/docs/getting-started.md
+Getting started: https://github.com/PossibLaw/possiblaw/blob/main/docs/operator-walkthrough.md
 
 ---
 

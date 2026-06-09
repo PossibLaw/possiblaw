@@ -7,6 +7,30 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.4.0] — 2026-06-09 — Phase 1 reset: standalone CLI runtime removed
+
+### Removed
+
+- `cli/` — the entire standalone CLI runtime (pipeline, provider registry, eval harness, test/guardrail runners, connectors, audit, privacy filter). Paperclip natively provides everything this reimplemented: orchestration, UI, auth, adapters, budgets, audit, approvals. All code remains in git history (`git log --oneline -- cli/`).
+- `bin/possiblaw.dev` (tsx stub for the deleted CLI), top-level `package.json`, `tsconfig.json`, `pnpm-lock.yaml`, `.github/workflows/ci.yml` (CI for the deleted runtime).
+- CLI-era docs: `docs/sprint-{2,4,5,6,7,8,9,10,11}-demo.md`, `docs/sprint-2-handoff.md`, `docs/DEMO-SCRIPT.md`, `docs/getting-started.md` (superseded by `docs/operator-walkthrough.md`), `docs/auth.md`, `docs/evals.md`, `docs/workflows.md`, `docs/test-and-guardrail-model.md`, `docs/customize-your-team.md`, `docs/extending/` (5 guides).
+
+### Changed
+
+- `README.md` — capability table, architecture diagram, evals section, and documentation index rewritten for the package-first reality; historical CUAD receipt retained.
+- `docs/announcement.md` — getting-started link now points at `docs/operator-walkthrough.md`.
+- `CLAUDE.md` — Stack / Commands / Code Map rewritten for the package + launcher layout.
+
+### Fixed
+
+- `bin/possiblaw` — `yaml_to_json` resolved `js-yaml` from the repo's top-level `node_modules` (a dependency of the deleted CLI runtime), so it would break on any clone that never ran the old `pnpm install`. It now resolves js-yaml inside paperclip's pnpm store and fails with a clear `pnpm -C paperclip install` hint when absent.
+
+### Kept deliberately
+
+- `layer/` — unconverted source material (eval datasets + scorer concepts, workflow shapes, agent prompts). Converts into the package incrementally; delete only after conversion completes.
+
+---
+
 ## [0.3.0] — 2026-05-23 — Branded one-command onboarding + multi-variant package
 
 ### Added

@@ -80,33 +80,31 @@ When resuming prior work, read `${REPO_ROOT}/.claude/history.md` first.
 - This is additive. Do not replace `.claude/history.md` or `.agent/HANDOFF.md`.
 
 ## Commands
-`pnpm run dev` - Primary local workflow command.
-`pnpm test` - Run tests.
-`pnpm run lint` - Run linting.
-`pnpm run typecheck` - Run type checks.
-`pnpm run build` - Build or package the project.
+`./bin/possiblaw` - One-command launcher: onboard paperclip, pick variant, import the package, open the dashboard.
+`./bin/possiblaw --dry-run --variant codex --non-interactive --yes` - Validate the import body against `/api/companies/import/preview` without writing.
+`./bin/possiblaw --list-variants` - Show available variants and their requirements.
+`bash -n bin/possiblaw` - Static-check the launcher.
+`python3 bin/_possiblaw_variants.py --self-test && python3 bin/_possiblaw_inline_source.py --self-test` - Self-test the Python helpers.
+`pnpm -C paperclip install` - Install the paperclip submodule's dependencies (the only pnpm usage left).
 
-Run `pnpm run lint && pnpm run typecheck && pnpm test` before handoff.
+Run the launcher dry-run + helper self-tests before handoff. Expected dry-run plan summary: 0 warnings, 0 errors.
 
 ## Stack
-- Runtime: Node.js ≥20.10 (CI on Node 22). TypeScript strict, ES2022, NodeNext modules with `.js` import extensions.
-- Framework: thin CLI (`commander`) + custom pipeline runner; no web framework in the PoC.
-- Data layer: filesystem-only — agent/skill/workflow/template YAML+Markdown under `layer/`; per-matter audit log at `layer/audit/<matter-id>.jsonl`; per-matter Privacy Filter key store at `layer/privacy-filter/keys/<matter-id>.json`.
-- LLM providers: `anthropic/*` (SDK, API key), `ollama/*` (local HTTP), planned `claude-cli/*` + `codex-cli/*` (subscription auth via local CLIs — Sprint 11).
-- Testing: in-tree LLM-as-judge + rule-based evaluators in `cli/test-runner.ts` / `cli/guardrail-runner.ts`. Eval harness for CUAD / MAUD / ACORD / UNFAIR-ToS / LEDGAR in `cli/eval.ts`.
-- Tooling: pnpm@9.15.4 (pinned via `packageManager`), tsx for dev mode, gray-matter for frontmatter, js-yaml for workflows/templates.
+- Runtime: paperclip (git submodule, pinned, never modified) owns UI, auth, orchestration, budgets, adapters, audit.
+- Package: Agent Companies v1 format under `companies/legal-operations/` — Markdown (`COMPANY.md`, `AGENTS.md`, `SKILL.md`, `PROJECT.md`, `TASK.md`) plus the `.paperclip.yaml` sidecar for paperclip-only fidelity.
+- Launcher: `bin/possiblaw` (bash) + `bin/_possiblaw_variants.py` / `bin/_possiblaw_inline_source.py` (stdlib-only Python). Imports via direct HTTP POST to `/api/companies/import` (the CLI strips `adapterConfig`; the HTTP API does not).
+- Variants: `companies/legal-operations/variants.yaml` maps each agent's `metadata.possiblaw.modelLane` (primary / routing / drafting / review / extractive) to per-variant adapter config. Variants: codex (Codex CLI), claude (Claude CLI), ollama (OpenCode → Ollama).
+- The standalone TypeScript CLI runtime was removed in 0.4.0 (see CHANGELOG); do not resurrect it. `layer/` holds remaining unconverted source material.
 
 ## Code Map
-- Entry point: `bin/possiblaw` (compiled) / `bin/possiblaw.dev` (tsx). Both delegate to `cli/index.ts`.
-- Config files: `package.json`, `tsconfig.json`, `.github/workflows/ci.yml`, `.env.example`, `.possiblaw/overrides.yaml` (per-operator, gitignored).
-- CLI surface: `cli/index.ts` (commander setup). Subcommands: `run`, `team`, `workflows`, `audit`, `privacy`, `connectors`, `eval`.
-- Pipeline runtime: `cli/pipeline.ts` (router → specialist → tests → guardrails; `parallel` / `reconcile` / `debate` step kinds), `cli/test-runner.ts`, `cli/guardrail-runner.ts`, `cli/audit.ts`, `cli/privacy-filter.ts`, `cli/ollama.ts`, `cli/anthropic.ts`, `cli/pricing.ts`, `cli/loader.ts`, `cli/types.ts`, `cli/printer.ts`.
-- Connectors: `cli/connectors/<id>.ts` (14 total: 3 open-access stand-ins + 11 named live). Descriptors at `layer/connectors/<id>.yaml`.
-- Domain content (the layer's value): `layer/agents/` (Chief of Staff, Chief Counsel, 4 Leads, 8 specialists, 3 meta agents), `layer/skills/`, `layer/workflows/` (9 workflows), `layer/templates/` (solo-lawyer, small-firm), `layer/tests/`, `layer/guardrails/`.
-- Eval harness + datasets: `cli/eval.ts`, `cli/eval-scorers.ts`, `cli/eval-adapters.ts`, `layer/evals/datasets/<name>/fetch.ts` + `METADATA.json`.
-- Plan + handoff: `/Users/salvadorcarranza/.claude/plans/possiblaw-poc-clean-rebuild.md` (plan-of-record, local-only), `.agent/PLAN.md` (active work queue — Sprint 11), `.agent/HANDOFF.md` (per-sprint commit map).
+- Entry point: `bin/possiblaw` (bash launcher).
+- Package root: `companies/legal-operations/` — 11 agents under `agents/`, 38 skills under `skills/`, 3 projects under `projects/`, eval convention under `evals/`, `variants.yaml`, `.paperclip.yaml`.
+- Org chart: chief-of-staff (orchestrator), chief-counsel, commercial-lead, finance-lead, marketing-lead, admin-lead, plus specialists (nda-drafter, contract-reviewer, billing-prep, intake-form-drafter, calendar-coordinator).
+- Historical source material: `layer/` (agents, skills, workflows, connector YAML, eval datasets) — convert into the package, don't extend.
+- Docs: `docs/operator-walkthrough.md` (canonical getting-started), `docs/paperclip-package.md`, `docs/known-limitations.md`, `docs/ARCHITECTURE.md` (decision log).
+- Plan + handoff: `/Users/salvadorcarranza/.claude/plans/eventual-munching-fairy.md` (plan-of-record, local-only), `.agent/PLAN.md` (active work queue), `.agent/HANDOFF.md`.
 - Submodule: `paperclip/` (pinned, never modified).
-- Tests: no test runner wired in the PoC (placeholder `pnpm test`); verification is via `pnpm typecheck`, `pnpm build`, and the offline NDA demo run.
+- Tests: validation is launcher dry-run against a fresh data dir + helper `--self-test` modes + per-package frontmatter/YAML parse checks. No Node test runner.
 
 ## Canonical Roles
 - `product-strategist` — Clarifies user value, scope, and success criteria. Source of truth: `docs/roles/product-strategist.md`.

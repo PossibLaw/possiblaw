@@ -11,15 +11,15 @@ For non-trivial changes, open an issue first and describe what you want to do an
 ```bash
 git clone --recurse-submodules https://github.com/PossibLaw/possiblaw.git
 cd possiblaw
-pnpm install
-pnpm dev    # runs cli/index.ts via tsx (no build step)
+pnpm -C paperclip install   # install the paperclip submodule's deps
+./bin/possiblaw             # onboard, pick a variant, import the package
 ```
 
-For a full build:
+To validate package changes without writing to a database:
 
 ```bash
-pnpm build        # tsc compile to dist/
-pnpm typecheck    # type-check without emitting
+./bin/possiblaw --dry-run --variant codex --non-interactive --yes
+# expected: plan summary with 0 warnings, 0 errors
 ```
 
 ## Code style
