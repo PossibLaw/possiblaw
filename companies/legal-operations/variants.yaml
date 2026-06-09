@@ -40,9 +40,76 @@ variants:
         modelReasoningEffort: medium
     per_agent: {}
 
+  codex-api:
+    label: "Codex CLI (API key)"
+    requires_cli: codex
+    secret_env:
+      OPENAI_API_KEY: "OpenAI API Key"
+    notes: >
+      Same models and lanes as the codex variant, but billed against an OpenAI
+      API key instead of the ChatGPT subscription. Export OPENAI_API_KEY in the
+      shell that runs bin/possiblaw; the launcher stores it once as a paperclip
+      company secret and binds it to every agent via a secret_ref env binding —
+      the key never lands in package files or the import body. Use this when
+      the subscription tier rejects models with "you don't have access" errors.
+    default:
+      adapterType: codex_local
+      adapterConfig:
+        model: gpt-5.3-codex
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    lanes:
+      primary:
+        modelReasoningEffort: high
+      routing:
+        modelReasoningEffort: medium
+      drafting:
+        modelReasoningEffort: high
+        timeoutSec: 900
+      review:
+        modelReasoningEffort: high
+        timeoutSec: 900
+      extractive:
+        modelReasoningEffort: medium
+    per_agent: {}
+
   claude:
     label: "Claude CLI (subscription)"
     requires_cli: claude
+    default:
+      adapterType: claude_local
+      adapterConfig:
+        model: claude-opus-4-7
+        timeoutSec: 600
+    lanes:
+      primary:
+        model: claude-opus-4-7
+      routing:
+        model: claude-sonnet-4-6
+      drafting:
+        model: claude-opus-4-7
+        timeoutSec: 900
+      review:
+        model: claude-opus-4-7
+        timeoutSec: 900
+      extractive:
+        model: claude-haiku-4-5
+    per_agent: {}
+
+  claude-api:
+    label: "Claude CLI (API key)"
+    requires_cli: claude
+    secret_env:
+      ANTHROPIC_API_KEY: "Anthropic API Key"
+    notes: >
+      Same models and lanes as the claude variant, but billed against an
+      Anthropic API key instead of the Claude subscription. Export
+      ANTHROPIC_API_KEY in the shell that runs bin/possiblaw; the launcher
+      stores it once as a paperclip company secret and binds it to every agent
+      via a secret_ref env binding — the key never lands in package files or
+      the import body. Use this when the subscription tier rejects models with
+      "you don't have access" errors.
     default:
       adapterType: claude_local
       adapterConfig:

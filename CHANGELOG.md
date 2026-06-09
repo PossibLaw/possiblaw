@@ -7,6 +7,23 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.5.0] — 2026-06-09 — Dual-auth: API-key variants + preflight model probe
+
+### Added
+
+- `codex-api` and `claude-api` variants in `companies/legal-operations/variants.yaml` — same models/lanes as their subscription twins, billed against `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`. After import the launcher stores the key once as a paperclip company secret (provider `local_encrypted`, encrypted at rest) and binds all 11 agents to it via `adapterConfig.env` `secret_ref` references. The raw key never appears in package files, the import body, logs, or temp files (validated by grep against a live e2e run).
+- Preflight model probe: live launches of CLI variants probe each distinct lane model with one minimal request (`claude -p` / `codex exec`), so "you don't have access to this model" errors block at launch with remediation options instead of failing mid-issue. New `--skip-model-probe` flag; dry-runs never probe.
+- Preflight key checks: `*-api` variants block (live) or warn (dry-run) when the required key is missing; subscription variants warn when a stray matching API key in the shell would silently flip CLI billing to the API account.
+- `bin/_possiblaw_variants.py` new modes: `--show-secret-env`, `--list-models`, `--build-env-patches` (all covered by `--self-test`).
+
+### Fixed
+
+- `bin/possiblaw --port` was never passed to `paperclipai onboard` (which reads `$PORT`), so custom ports health-checked an address nothing listened on. Worked before only because port 3100 was free or already running paperclip.
+- `json_get_str` fed its Python program through stdin via heredoc, clobbering the JSON the caller piped in — `company.id` always parsed empty on live imports, silently skipping the mission PATCH. Both stdin-reading helpers now use `python3 -c`. Mission PATCH verified working live for the first time.
+- Model-probe diagnostics fall back to stdout when the CLI prints access errors there (claude does).
+
+---
+
 ## [0.4.0] — 2026-06-09 — Phase 1 reset: standalone CLI runtime removed
 
 ### Removed

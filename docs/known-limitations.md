@@ -107,3 +107,21 @@ Not shipped. Paperclip's `assigneeAdapterOverrides` only merges config
 A "route confidential issues to Ollama, everything else to Claude" pattern
 would need either a per-call routing primitive in Paperclip or a custom
 `ollama_local` adapter plugin (out of scope for the current sprint).
+
+## Model probe cost and coverage
+
+Live launches of the codex / codex-api / claude / claude-api variants probe
+each distinct lane model with one minimal CLI request before importing (3
+models on claude variants, 1 on codex). Each probe is a tiny billable request
+against your subscription or API key. `--skip-model-probe` bypasses it; dry
+runs never probe. The probe verifies model *access*, not quota headroom — a
+plan at its usage limit can pass the probe and still fail mid-run.
+
+## API-key variants and dry-run
+
+`--dry-run` never creates the paperclip company secret (there is no company
+to attach it to). A dry-run of `codex-api` / `claude-api` with the key unset
+warns instead of blocking; the live run requires the key exported in the
+launching shell. The key is stored once per import as a company secret
+(provider `local_encrypted`); re-importing into a fresh data dir creates a
+fresh secret, and rotation afterward happens in the Paperclip UI.

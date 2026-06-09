@@ -28,13 +28,19 @@ pnpm -C paperclip install
 # → browser opens to your Paperclip dashboard, 11 agents already loaded
 ```
 
-The launcher picks the model-provider variant at import time. Three are shipped:
+The launcher picks the model-provider variant at import time. Five are shipped:
 
 | Variant | Provider | When |
 |---|---|---|
-| `codex`  | Codex CLI subscription      | Default; works out of the box once `codex login` is done |
-| `claude` | Claude CLI subscription     | If you prefer Anthropic models for legal work |
-| `ollama` | Local Llama via OpenCode    | Fully local — confidential matters, no cloud round-trips |
+| `codex`      | Codex CLI subscription   | Default; works out of the box once `codex login` is done |
+| `codex-api`  | Codex CLI + OpenAI API key | When the subscription tier rejects models; key stored as an encrypted paperclip secret |
+| `claude`     | Claude CLI subscription  | If you prefer Anthropic models for legal work |
+| `claude-api` | Claude CLI + Anthropic API key | Same as `claude`, billed against the API with the full model catalog |
+| `ollama`     | Local Llama via OpenCode | Fully local — confidential matters, no cloud round-trips |
+
+Live launches preflight-probe each lane model with a tiny CLI request, so "you
+don't have access to this model" surfaces before import, not mid-matter
+(`--skip-model-probe` to bypass).
 
 Add `--variant <slug>` to skip the interactive prompt, or `--list-variants` to see them. Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); package layout: [docs/paperclip-package.md](docs/paperclip-package.md); sharp edges: [docs/known-limitations.md](docs/known-limitations.md).
 

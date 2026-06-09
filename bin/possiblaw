@@ -63,8 +63,12 @@ USAGE:
   $SCRIPT_NAME [options]
 
 OPTIONS:
-  --variant <slug>      Variant to apply at import: codex | claude | ollama.
-                        If omitted, the launcher prompts.
+  --variant <slug>      Variant to apply at import: codex | codex-api |
+                        claude | claude-api | ollama. If omitted, prompts.
+                        *-api variants bill an API key instead of the CLI
+                        subscription: export the key (OPENAI_API_KEY or
+                        ANTHROPIC_API_KEY) before running; it is stored once
+                        as a paperclip company secret, never in files.
   --mission <text>      Mission statement for the company (one line).
                         If omitted, the launcher prompts.
   --org-name <name>     Company name. Default: "$PACKAGE_DEFAULT_ORG_NAME".
@@ -77,7 +81,11 @@ OPTIONS:
   --non-interactive     Never prompt. Requires --variant, --mission, --yes
                         (and a stable --org-name).
   --dry-run             POST to /api/companies/import/preview instead of /import.
+                        Skips the model probe and secret creation.
   --list-variants       Print available variants from variants.yaml and exit.
+  --skip-model-probe    Skip the preflight per-model CLI probe (codex/claude
+                        variants probe each lane model with a tiny request so
+                        "no access to model" errors surface before launch).
   --no-browser          Don't auto-open the dashboard URL.
   -h, --help            Show this help and exit.
 
@@ -120,11 +128,13 @@ require_cmd() {
 }
 
 # Read a JSON value off stdin via python3, dot-path notation.
+# NOTE: must use `python3 -c`, NOT `python3 - <<heredoc` — the heredoc would
+# occupy stdin, clobbering the JSON the caller redirects in.
 json_get_str() {
     local path="$1"
-    python3 - "$path" <<'PY' 2>/dev/null || true
+    python3 -c '
 import json, sys
-path = sys.argv[1].split('.')
+path = sys.argv[1].split(".")
 try:
     data = json.load(sys.stdin)
 except Exception:
@@ -143,12 +153,12 @@ for part in path:
 if cur is None: sys.exit(0)
 if isinstance(cur, (dict, list)): print(json.dumps(cur))
 else: print(cur)
-PY
+' "$path" 2>/dev/null || true
 }
 
 # Pick most-recent company from GET /api/companies and print "<id>\t<shortCode>\t<name>".
 json_pick_latest_company() {
-    python3 - <<'PY' 2>/dev/null || true
+    python3 -c '
 import json, sys
 try: data = json.load(sys.stdin)
 except Exception: sys.exit(0)
@@ -173,7 +183,7 @@ short = (latest.get("shortCode") or latest.get("short_code")
          or latest.get("slug") or latest.get("handle") or "")
 name = latest.get("name") or ""
 print(f"{cid}\t{short}\t{name}")
-PY
+' 2>/dev/null || true
 }
 
 json_escape_str() {
@@ -219,6 +229,7 @@ NON_INTERACTIVE="false"
 DRY_RUN="false"
 LIST_VARIANTS_ONLY="false"
 NO_BROWSER="false"
+SKIP_MODEL_PROBE="false"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -234,6 +245,7 @@ while [ "$#" -gt 0 ]; do
         --non-interactive) NON_INTERACTIVE="true"; shift ;;
         --dry-run) DRY_RUN="true"; shift ;;
         --list-variants) LIST_VARIANTS_ONLY="true"; shift ;;
+        --skip-model-probe) SKIP_MODEL_PROBE="true"; shift ;;
         --no-browser) NO_BROWSER="true"; shift ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
@@ -282,8 +294,10 @@ for slug, v in variants.items():
     if v.get("requires_ollama"): reqs.append("ollama")
     if v.get("requires_opencode_provider"):
         reqs.append(f"opencode-provider: {v['requires_opencode_provider']}")
+    for env_key in (v.get("secret_env") or {}):
+        reqs.append(f"env: {env_key}")
     suffix = f"  [{', '.join(reqs)}]" if reqs else ""
-    print(f"  {slug:8s}  {label}{suffix}")
+    print(f"  {slug:10s}  {label}{suffix}")
 PY
     rm -f "$LV_TMP"
     exit 0
@@ -426,6 +440,54 @@ if [ -n "$REQUIRES_CLI" ]; then
     require_cmd "$REQUIRES_CLI" "the '$VARIANT' variant requires the '$REQUIRES_CLI' CLI" || exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Dual-auth preflight
+# ---------------------------------------------------------------------------
+#
+# API-key variants declare secret_env in variants.yaml (ENV_KEY -> display
+# name). The key must be exported in this shell; after a live import it is
+# stored ONCE as a paperclip company secret and bound to every agent via a
+# secret_ref env binding. It never lands in package files or the import body.
+
+SECRET_ENV_TSV="$(python3 "$VARIANTS_PY" --variants-json "$VARIANTS_JSON_FILE" --variant "$VARIANT" --show-secret-env || true)"
+if [ -n "$SECRET_ENV_TSV" ]; then
+    while IFS=$'\t' read -r env_key env_name; do
+        [ -n "$env_key" ] || continue
+        if [ -z "${!env_key:-}" ]; then
+            if [ "$DRY_RUN" = "true" ]; then
+                warn "$env_key is not set. Dry-run continues (no secret is created),"
+                warn "but a live run of '$VARIANT' requires: export $env_key=..."
+            else
+                err "The '$VARIANT' variant requires \$$env_key ($env_name) in this shell."
+                err "Either: export $env_key=...   then re-run,"
+                err "or use the subscription variant instead (e.g. --variant ${VARIANT%-api})."
+                exit 1
+            fi
+        else
+            log "ok: \$$env_key is set ($env_name; stored as a company secret after import)"
+        fi
+    done <<< "$SECRET_ENV_TSV"
+else
+    # Subscription variants: warn if an API key in this shell would silently
+    # flip the CLI to API billing (the paperclip server inherits this env).
+    case "$REQUIRES_CLI" in
+        claude)
+            if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+                warn "ANTHROPIC_API_KEY is set in this shell. The claude CLI will bill your"
+                warn "API account instead of the subscription. Unset it before running, or"
+                warn "switch to '--variant claude-api' to make API billing explicit."
+            fi
+            ;;
+        codex)
+            if [ -n "${OPENAI_API_KEY:-}" ]; then
+                warn "OPENAI_API_KEY is set in this shell. The codex CLI will bill your"
+                warn "API account instead of the subscription. Unset it before running, or"
+                warn "switch to '--variant codex-api' to make API billing explicit."
+            fi
+            ;;
+    esac
+fi
+
 # Ollama-specific preflight: ollama daemon + OpenCode global config.
 REQUIRES_OLLAMA="$(variant_field "$VARIANT" requires_ollama)"
 REQUIRES_OPENCODE_PROVIDER="$(variant_field "$VARIANT" requires_opencode_provider)"
@@ -486,6 +548,99 @@ PY
             exit 1
         fi
         log "ok: OpenCode global config declares provider.$REQUIRES_OPENCODE_PROVIDER"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Preflight model probe (codex/claude variants, live runs only)
+# ---------------------------------------------------------------------------
+#
+# The paperclip adapters ship hardcoded model catalogs, but the real access
+# check happens inside the CLI at run time — a model your plan doesn't include
+# fails mid-run with "you don't have access". Probe each distinct lane model
+# with a tiny request now so that error surfaces before anything is imported.
+# Skip with --skip-model-probe. Each probe is one minimal CLI call.
+
+MODEL_PROBE_TIMEOUT_SECS=120
+
+probe_model() {
+    # probe_model <cli> <model> → 0 on success; failure detail on stderr
+    local cli="$1" model="$2" rc=0
+    local out_file err_file
+    out_file="$(mktemp -t possiblaw-probe-out.XXXXXX)"
+    err_file="$(mktemp -t possiblaw-probe-err.XXXXXX)"
+    case "$cli" in
+        claude)
+            ( cd "$REPO_ROOT" && claude -p "Reply with exactly: OK" \
+                --model "$model" --output-format text ) \
+                > "$out_file" 2> "$err_file" &
+            ;;
+        codex)
+            ( cd "$REPO_ROOT" && codex exec -s read-only -m "$model" \
+                "Reply with exactly: OK" ) \
+                > "$out_file" 2> "$err_file" &
+            ;;
+        *)
+            rm -f "$out_file" "$err_file"
+            return 0
+            ;;
+    esac
+    local probe_pid=$!
+    ( sleep "$MODEL_PROBE_TIMEOUT_SECS"; kill "$probe_pid" 2>/dev/null ) &
+    local watchdog_pid=$!
+    if wait "$probe_pid"; then rc=0; else rc=$?; fi
+    kill "$watchdog_pid" 2>/dev/null || true
+    wait "$watchdog_pid" 2>/dev/null || true
+    if [ "$rc" -ne 0 ] || [ ! -s "$out_file" ]; then
+        err "model probe failed for '$model' (exit $rc)"
+        # claude prints model-access errors to stdout; codex to stderr.
+        if [ -s "$err_file" ]; then
+            head -3 "$err_file" | sed 's/^/  /' >&2
+        elif [ -s "$out_file" ]; then
+            head -3 "$out_file" | sed 's/^/  /' >&2
+        fi
+        rm -f "$out_file" "$err_file"
+        return 1
+    fi
+    rm -f "$out_file" "$err_file"
+    return 0
+}
+
+if [ "$DRY_RUN" != "true" ] && [ "$SKIP_MODEL_PROBE" != "true" ] \
+        && { [ "$REQUIRES_CLI" = "claude" ] || [ "$REQUIRES_CLI" = "codex" ]; }; then
+    PROBE_PAPERCLIP_JSON="$(mktemp -t possiblaw-probe-paperclip.XXXXXX.json)"
+    yaml_to_json "$PAPERCLIP_YAML" > "$PROBE_PAPERCLIP_JSON"
+    PROBE_MODELS="$(python3 "$VARIANTS_PY" \
+        --variants-json "$VARIANTS_JSON_FILE" \
+        --paperclip-json "$PROBE_PAPERCLIP_JSON" \
+        --variant "$VARIANT" --list-models 2>/dev/null || true)"
+    rm -f "$PROBE_PAPERCLIP_JSON"
+    if [ -n "$PROBE_MODELS" ]; then
+        PROBE_FAILED=""
+        while IFS= read -r probe_model_id; do
+            [ -n "$probe_model_id" ] || continue
+            log "probing $REQUIRES_CLI model '$probe_model_id' (timeout ${MODEL_PROBE_TIMEOUT_SECS}s)..."
+            if probe_model "$REQUIRES_CLI" "$probe_model_id"; then
+                log "ok: model '$probe_model_id' responds"
+            else
+                PROBE_FAILED="$PROBE_FAILED $probe_model_id"
+            fi
+        done <<< "$PROBE_MODELS"
+        if [ -n "$PROBE_FAILED" ]; then
+            err "These models failed the preflight probe:$PROBE_FAILED"
+            err "Likely causes: your plan/tier doesn't include them, or the CLI login expired."
+            err "Options:"
+            case "$VARIANT" in
+                *-api)
+                    err "  1. Verify the API key is valid and has access to these models." ;;
+                *)
+                    err "  1. Use the API-key twin variant (--variant ${VARIANT}-api) — API auth"
+                    err "     usually unlocks the full catalog." ;;
+            esac
+            err "  2. Edit the lane models in $VARIANTS_FILE to ones your plan includes."
+            err "  3. Re-run with --skip-model-probe to proceed anyway (runs may fail mid-issue)."
+            exit 1
+        fi
     fi
 fi
 
@@ -621,7 +776,10 @@ milestone "running: paperclipai onboard --yes (background; runs the server inlin
 log "(log: $LAUNCHER_LOG)"
 (
     cd "$PAPERCLIP_DIR"
-    exec pnpm paperclipai onboard --data-dir "$DATA_DIR" --bind loopback --yes
+    # onboard reads its port from $PORT (cli/src/commands/onboard.ts); without
+    # this it requests 3100 regardless of --port and the health poll on
+    # $API_BASE never succeeds when a custom port was chosen.
+    exec env PORT="$PORT" pnpm paperclipai onboard --data-dir "$DATA_DIR" --bind loopback --yes
 ) >>"$LAUNCHER_LOG" 2>&1 </dev/null &
 PAPERCLIP_PID=$!
 echo "$PAPERCLIP_PID" > "$LAUNCHER_PID_FILE"
@@ -899,6 +1057,115 @@ if [ -n "$COMPANY_ID" ] && [ -n "$MISSION" ]; then
         warn "PATCH /api/companies/$COMPANY_ID returned HTTP $PATCH_HTTP"
         warn "Mission was not stored as company description. Response: $(head -c 256 "$PATCH_RESPONSE" 2>/dev/null)"
         warn "You can edit the description in the Paperclip UI."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Bind API-key secrets (dual-auth variants)
+# ---------------------------------------------------------------------------
+#
+# For *-api variants: store each declared key ONCE as a paperclip company
+# secret, then PATCH every imported agent so its adapterConfig.env references
+# the secret (type: secret_ref). The raw key is passed to helpers via child
+# process env and to curl via stdin — never argv, never a file on disk.
+
+if [ -n "$SECRET_ENV_TSV" ] && [ -n "$COMPANY_ID" ]; then
+    milestone "binding API-key secret(s) to agents"
+    SECRET_IDS_FILE="$(mktemp -t possiblaw-secret-ids.XXXXXX.json)"
+    printf '{}' > "$SECRET_IDS_FILE"
+    SECRET_BIND_FAILED="false"
+    while IFS=$'\t' read -r env_key env_name; do
+        [ -n "$env_key" ] || continue
+        if [ -z "${!env_key:-}" ]; then
+            warn "\$$env_key vanished from the environment; skipping secret creation"
+            SECRET_BIND_FAILED="true"
+            continue
+        fi
+        SECRET_BODY="$(PCSECRET_VALUE="${!env_key}" PCSECRET_KEY="$env_key" PCSECRET_NAME="$env_name" python3 -c '
+import json, os
+print(json.dumps({
+    "name": os.environ["PCSECRET_NAME"],
+    "key": os.environ["PCSECRET_KEY"],
+    "value": os.environ["PCSECRET_VALUE"],
+    "description": "Created by bin/possiblaw for the API-key variant",
+}))')"
+        SECRET_RESPONSE="$(printf '%s' "$SECRET_BODY" | curl --silent --max-time 15 \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data-binary @- \
+            "$API_BASE/api/companies/$COMPANY_ID/secrets" || true)"
+        SECRET_ID="$(printf '%s' "$SECRET_RESPONSE" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = {}
+print(d.get("id") or "")' 2>/dev/null || true)"
+        if [ -z "$SECRET_ID" ]; then
+            warn "could not create company secret for \$$env_key"
+            warn "response: $(printf '%s' "$SECRET_RESPONSE" | head -c 200)"
+            SECRET_BIND_FAILED="true"
+            continue
+        fi
+        log "  secret created: $env_name (id $SECRET_ID)"
+        python3 - "$SECRET_IDS_FILE" "$env_key" "$SECRET_ID" <<'PY'
+import json, sys
+path, key, sid = sys.argv[1:4]
+d = json.load(open(path))
+d[key] = sid
+json.dump(d, open(path, "w"))
+PY
+    done <<< "$SECRET_ENV_TSV"
+
+    PATCHES_FILE="$(mktemp -t possiblaw-env-patches.XXXXXX.json)"
+    if ! python3 "$VARIANTS_PY" --build-env-patches \
+            --overrides-json "$OVERRIDES_FILE" \
+            --secret-ids-json "$SECRET_IDS_FILE" > "$PATCHES_FILE"; then
+        warn "env patch generation failed; agents keep subscription auth until configured in the UI"
+        SECRET_BIND_FAILED="true"
+    else
+        PATCHED=0; PATCH_FAILED=0
+        while IFS=$'\t' read -r agent_slug agent_id; do
+            { [ -n "$agent_slug" ] && [ -n "$agent_id" ]; } || continue
+            AGENT_PATCH_BODY="$(python3 - "$PATCHES_FILE" "$agent_slug" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+entry = d.get(sys.argv[2])
+print(json.dumps(entry) if entry else "")
+PY
+)"
+            [ -n "$AGENT_PATCH_BODY" ] || continue
+            PATCH_HTTP_CODE="$(printf '%s' "$AGENT_PATCH_BODY" | curl --silent --output /dev/null --write-out '%{http_code}' --max-time 15 \
+                --request PATCH \
+                --header "Content-Type: application/json" \
+                --data-binary @- \
+                "$API_BASE/api/agents/$agent_id" || echo 000)"
+            if [ "$PATCH_HTTP_CODE" = "200" ]; then
+                PATCHED=$((PATCHED + 1))
+            else
+                PATCH_FAILED=$((PATCH_FAILED + 1))
+                warn "  PATCH /api/agents/$agent_id ($agent_slug) returned HTTP $PATCH_HTTP_CODE"
+            fi
+        done < <(python3 - "$IMPORT_RESPONSE_FILE" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for a in (d.get("agents") or []):
+    slug = a.get("slug") or ""
+    aid = a.get("id") or ""
+    if slug and aid:
+        print(f"{slug}\t{aid}")
+PY
+)
+        log "  API key bound to $PATCHED agent(s) via secret_ref"
+        if [ "$PATCH_FAILED" -gt 0 ]; then
+            warn "  $PATCH_FAILED agent(s) could not be patched; bind the secret in the"
+            warn "  Paperclip UI instead (agent settings → adapter config → env)."
+            SECRET_BIND_FAILED="true"
+        fi
+    fi
+    rm -f "$SECRET_IDS_FILE" "$PATCHES_FILE"
+    if [ "$SECRET_BIND_FAILED" = "true" ]; then
+        warn "API-key binding incomplete — affected agents fall back to subscription auth."
     fi
 fi
 

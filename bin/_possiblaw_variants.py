@@ -10,6 +10,15 @@ Output: JSON object on stdout, keyed by agent slug, conforming to
 CompanyPortabilityAdapterOverride[] from paperclip's shared types:
   { "<agent-slug>": { "adapterType": "...", "adapterConfig": { ... } } }
 
+Extra modes:
+  --show-secret-env     print 'ENV_KEY<TAB>display name' lines for the
+                        variant's secret_env block (dual-auth variants)
+  --list-models         print the variant's distinct effective models
+                        (consumed by the launcher's preflight model probe)
+  --build-env-patches   given --overrides-json and --secret-ids-json, emit
+                        per-agent { adapterConfig } patch bodies that bind
+                        each secret into adapterConfig.env as a secret_ref
+
 Warnings go to stderr (one per line, prefixed "warning: ").
 Errors exit non-zero with a "error: ..." line on stderr.
 
@@ -115,6 +124,71 @@ def build_overrides(
     return overrides
 
 
+def _variant_block(variants_doc: dict, variant_slug: str) -> dict:
+    variants_block = (variants_doc or {}).get("variants") or {}
+    if variant_slug not in variants_block:
+        valid = ", ".join(sorted(variants_block.keys())) or "(none)"
+        raise ValueError(f"unknown variant '{variant_slug}'. Valid: {valid}")
+    return variants_block[variant_slug] or {}
+
+
+def variant_secret_env(variants_doc: dict, variant_slug: str) -> dict[str, str]:
+    """Return the variant's secret_env map: env key -> secret display name.
+
+    Variants that don't take API keys return {}. Display name falls back to
+    the env key itself when the YAML value is empty.
+    """
+    raw = _variant_block(variants_doc, variant_slug).get("secret_env") or {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"variant '{variant_slug}' secret_env must be a mapping of "
+            f"ENV_KEY -> display name"
+        )
+    return {str(k): (str(v) if v else str(k)) for k, v in raw.items()}
+
+
+def list_models(
+    variants_doc: dict, paperclip_doc: dict, variant_slug: str
+) -> list[str]:
+    """Distinct effective `model` values across all agents for a variant.
+
+    Used by the launcher's preflight model probe so model-access errors
+    surface at launch time instead of mid-run.
+    """
+    overrides = build_overrides(
+        variants_doc, paperclip_doc, variant_slug, warn=lambda m: None
+    )
+    models = {
+        (entry.get("adapterConfig") or {}).get("model")
+        for entry in overrides.values()
+    }
+    return sorted(m for m in models if m)
+
+
+def build_env_patches(
+    overrides: dict, secret_ids: dict[str, str]
+) -> dict[str, dict]:
+    """Build PATCH /api/agents/:id bodies binding secrets into adapter env.
+
+    Input: the adapterOverrides map already produced by build_overrides, and
+    a map of ENV_KEY -> paperclip secretId (created post-import via
+    POST /api/companies/:id/secrets). Output per agent slug:
+    { "adapterConfig": <override config + env secret_ref bindings> }.
+    Inputs are not mutated; existing env bindings are preserved.
+    """
+    if not secret_ids:
+        return {}
+    patches: dict[str, dict] = {}
+    for slug, entry in overrides.items():
+        config = dict((entry or {}).get("adapterConfig") or {})
+        env = dict(config.get("env") or {})
+        for key, secret_id in secret_ids.items():
+            env[key] = {"type": "secret_ref", "secretId": secret_id}
+        config["env"] = env
+        patches[slug] = {"adapterConfig": config}
+    return patches
+
+
 def _self_test() -> int:
     variants = {
         "schema": "possiblaw/variants/v1",
@@ -195,6 +269,65 @@ def _self_test() -> int:
     else:
         raise AssertionError("expected ValueError for unknown variant")
 
+    # --- secret_env extraction (dual-auth variants) ---
+    variants["variants"]["codex-api"] = {
+        "default": {
+            "adapterType": "codex_local",
+            "adapterConfig": {"model": "gpt-5.3-codex"},
+        },
+        "secret_env": {"OPENAI_API_KEY": "OpenAI API Key"},
+        "lanes": {},
+        "per_agent": {},
+    }
+    assert variant_secret_env(variants, "codex-api") == {
+        "OPENAI_API_KEY": "OpenAI API Key"
+    }
+    assert variant_secret_env(variants, "codex") == {}
+    try:
+        variant_secret_env(variants, "nope")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for unknown variant")
+
+    # --- list_models: distinct effective models across all agents ---
+    models = list_models(variants, paperclip, "claude")
+    assert models == ["claude-haiku-4-5", "claude-opus-4-7"], models
+    models_codex = list_models(variants, paperclip, "codex")
+    assert models_codex == ["gpt-5.3-codex"], models_codex
+
+    # --- build_env_patches: secret_ref env bindings merged per agent ---
+    overrides_for_patch = {
+        "chief-of-staff": {
+            "adapterType": "codex_local",
+            "adapterConfig": {"model": "gpt-5.3-codex", "env": {"EXISTING": "keep"}},
+        },
+        "nda-drafter": {
+            "adapterType": "codex_local",
+            "adapterConfig": {"model": "gpt-5.3-codex"},
+        },
+    }
+    patches = build_env_patches(overrides_for_patch, {"OPENAI_API_KEY": "sec-123"})
+    assert patches["nda-drafter"]["adapterConfig"]["env"]["OPENAI_API_KEY"] == {
+        "type": "secret_ref",
+        "secretId": "sec-123",
+    }
+    assert patches["chief-of-staff"]["adapterConfig"]["env"]["EXISTING"] == "keep"
+    assert patches["chief-of-staff"]["adapterConfig"]["env"]["OPENAI_API_KEY"] == {
+        "type": "secret_ref",
+        "secretId": "sec-123",
+    }
+    assert patches["chief-of-staff"]["adapterConfig"]["model"] == "gpt-5.3-codex"
+    # originals must not be mutated
+    assert "OPENAI_API_KEY" not in (
+        overrides_for_patch["nda-drafter"]["adapterConfig"].get("env") or {}
+    )
+    assert overrides_for_patch["chief-of-staff"]["adapterConfig"]["env"] == {
+        "EXISTING": "keep"
+    }
+    # no secrets → no patches
+    assert build_env_patches(overrides_for_patch, {}) == {}
+
     print("OK: _possiblaw_variants self-test passed")
     return 0
 
@@ -205,10 +338,45 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--paperclip-json", help="path to .paperclip.yaml as JSON (or '-' for stdin)")
     parser.add_argument("--variant", help="variant slug")
     parser.add_argument("--self-test", action="store_true", help="run built-in tests and exit")
+    parser.add_argument(
+        "--show-secret-env", action="store_true",
+        help="print the variant's secret_env as 'ENV_KEY<TAB>display name' lines and exit",
+    )
+    parser.add_argument(
+        "--list-models", action="store_true",
+        help="print the variant's distinct effective models, one per line, and exit",
+    )
+    parser.add_argument(
+        "--build-env-patches", action="store_true",
+        help="emit per-agent adapterConfig patches binding secrets into env",
+    )
+    parser.add_argument("--overrides-json", help="path to a previously generated overrides map (for --build-env-patches)")
+    parser.add_argument("--secret-ids-json", help="path to {ENV_KEY: secretId} map (for --build-env-patches)")
     args = parser.parse_args(argv)
 
     if args.self_test:
         return _self_test()
+
+    if args.build_env_patches:
+        if not (args.overrides_json and args.secret_ids_json):
+            parser.error("--build-env-patches requires --overrides-json and --secret-ids-json")
+        overrides = _read_json(args.overrides_json)
+        secret_ids = _read_json(args.secret_ids_json)
+        json.dump(build_env_patches(overrides, secret_ids), sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
+
+    if args.show_secret_env:
+        if not (args.variants_json and args.variant):
+            parser.error("--show-secret-env requires --variants-json and --variant")
+        try:
+            secret_env = variant_secret_env(_read_json(args.variants_json), args.variant)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        for key, name in sorted(secret_env.items()):
+            print(f"{key}\t{name}")
+        return 0
 
     if not (args.variants_json and args.paperclip_json and args.variant):
         parser.error("--variants-json, --paperclip-json, and --variant are required")
@@ -218,6 +386,15 @@ def main(argv: list[str]) -> int:
 
     variants_doc = _read_json(args.variants_json)
     paperclip_doc = _read_json(args.paperclip_json)
+
+    if args.list_models:
+        try:
+            for model in list_models(variants_doc, paperclip_doc, args.variant):
+                print(model)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        return 0
 
     try:
         overrides = build_overrides(variants_doc, paperclip_doc, args.variant)

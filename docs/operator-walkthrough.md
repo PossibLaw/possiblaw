@@ -127,6 +127,37 @@ Per-lane model applied at import:
 | routing | `claude-sonnet-4-6` |
 | extractive | `claude-haiku-4-5` |
 
+### codex-api / claude-api (API key instead of subscription)
+
+Same models and lanes as their subscription twins, but billed against an API
+key. Use these when subscription auth rejects models with "you don't have
+access" errors — API auth usually unlocks the full catalog.
+
+1. Export the key in the shell that runs the launcher:
+   - `export OPENAI_API_KEY=...` for `--variant codex-api`
+   - `export ANTHROPIC_API_KEY=...` for `--variant claude-api`
+2. Run `./bin/possiblaw --variant codex-api` (or `claude-api`).
+
+Where the key goes: after import, the launcher stores it **once** as a
+paperclip company secret (provider `local_encrypted` — encrypted at rest),
+then binds every agent to it with a `secret_ref` env reference. The raw key
+never lands in package files, the import body, logs, or temp files. Rotate or
+revoke it any time in the Paperclip UI under company secrets; agents pick up
+the new value via the `latest` version reference.
+
+Conversely, if you run a **subscription** variant (`codex` / `claude`) with
+the matching API key exported in your shell, the CLI silently bills the API
+account instead of the subscription — the launcher warns when it detects this.
+
+### Preflight model probe (codex / codex-api / claude / claude-api)
+
+Before starting anything, live runs probe each distinct lane model with one
+minimal CLI request so "you don't have access to this model" errors surface
+at launch instead of mid-issue. A failed probe blocks the launch and prints
+per-model remediation options. Each probe is a tiny billable request (3
+distinct models on the claude variants, 1 on codex). Skip with
+`--skip-model-probe`; dry-runs never probe.
+
 ### ollama
 
 Fully local — no cloud round-trips. Three pieces of setup:
