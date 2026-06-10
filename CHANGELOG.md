@@ -7,6 +7,22 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.14.0] — 2026-06-09 — Practice-management, email, and drive connectors (18 connectors, 71 skills)
+
+### Added
+
+- **`connector-clio`** — Clio Manage API v4 (matters, contacts, time entries, bills). Regional base URLs and endpoints extracted from the official OpenAPI spec (docs.developers.clio.com, accessed 2026-06-09); OAuth 2.0 with 30-day access / non-expiring refresh tokens; bills read-only; matter content privacy-encoder-gated.
+- **`connector-gmail`** / **`connector-outlook`** — matter email via the Gmail API and Microsoft Graph: read + draft creation ONLY. Sending is contractually blocked (`[CONNECTOR:*_SEND_BLOCKED]`; the send scopes are never requested) — drafts are work products for operator review, matching the package-wide no-external-transmission posture.
+- **`connector-google-drive`** — Drive v3 doc store (list, fetch, upload to a matter folder); `drive.file` least-privilege scope recommended; no sharing or permission changes.
+- All endpoint claims carry official-doc citations dated 2026-06-09 or explicit `UNCONFIRMED` flags (imanage-style) for the few unverified details.
+
+### Validation
+
+- Cross-check: 52 agents == sidecar == sidebar; 71 skills; all refs resolve; whitespace clean; new connector frontmatter parses with `name` == slug.
+- Dry-run: `agents=52 skills=71 projects=3 issues=3 warnings=0 errors=0`.
+
+---
+
 ## [0.13.0] — 2026-06-09 — Synthetic demo profiles (--demo) for three launch personas
 
 ### Added
