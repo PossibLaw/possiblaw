@@ -13,7 +13,7 @@ agents:
     adapter:
       type: codex_local
       config:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: high
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 600
@@ -48,7 +48,7 @@ agents:
     adapter:
       type: codex_local
       config:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: high
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 600
@@ -80,7 +80,7 @@ agents:
     adapter:
       type: codex_local
       config:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: high
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 600
@@ -103,7 +103,7 @@ agents:
     adapter:
       type: codex_local
       config:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: high
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 900
@@ -141,7 +141,7 @@ agents:
     adapter:
       type: codex_local
       config:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: high
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 900
@@ -181,7 +181,7 @@ agents:
     adapter:
       type: codex_local
       config:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: medium
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 600
@@ -204,7 +204,7 @@ agents:
     adapter:
       type: codex_local
       config:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: medium
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 600
@@ -227,7 +227,7 @@ agents:
     adapter:
       type: codex_local
       config:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: medium
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 600
@@ -250,7 +250,7 @@ agents:
     adapter:
       type: codex_local
       config:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: medium
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 600
@@ -273,7 +273,7 @@ agents:
     adapter:
       type: codex_local
       config:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: medium
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 600
@@ -296,7 +296,7 @@ agents:
     adapter:
       type: codex_local
       config:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: medium
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 600
@@ -319,7 +319,7 @@ agents:
     adapter:
       type: codex_local
       config:
-        model: gpt-5.3-codex
+        model: gpt-5.5
         modelReasoningEffort: medium
         dangerouslyBypassApprovalsAndSandbox: true
         timeoutSec: 600
