@@ -7,6 +7,23 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.11.0] — 2026-06-09 — Launch theme: light-first dashboard with the PossibLaw palette
+
+### Added
+
+- **`--theme possiblaw|light|dark`** on the launcher (default `possiblaw`; env override `POSSIBLAW_THEME`). paperclip already ships a complete light theme behind a per-browser localStorage toggle; the launcher now seeds new browsers to light mode and layers a warm cream-and-coral palette over the stock light tokens — without modifying the submodule. Mechanism: one-time UI build → patched copy of `index.html` served from `paperclip/server/ui-dist/` (the server's first static lookup path) + `PAPERCLIP_UI_DEV_MIDDLEWARE=false` for launcher-started servers. The in-app toggle always wins once a user sets it.
+- `bin/_possiblaw_theme.py` — stdlib-only patch helper with `--self-test` (TDD): injects a localStorage seed script at the top of `<head>` (runs before the stock theme script, minification-proof) and the `possiblaw-theme` style block before `</head>`.
+- Company `brandColor` warmed to `#F97316` (company avatar + picker badges).
+- Docs: walkthrough theme section, known-limitations overlay caveats.
+
+### Validation
+
+- Helper self-test green; `bash -n`; all prior helper self-tests green.
+- Live e2e on a disposable server: UI built once, overlay created with marker; served HTML asserts — seed script present at top of `<head>` (before the stock script), `possiblaw-theme` style present, hashed asset URLs return HTTP 200 through overlay symlinks.
+- Failure paths: build failure warns and falls back to stock dark vite-dev UI; existing non-possiblaw `server/ui-dist` is never touched; `--theme dark` removes the overlay (marker-gated).
+
+---
+
 ## [0.10.0] — 2026-06-09 — Gemini variants (10 variants total)
 
 ### Added

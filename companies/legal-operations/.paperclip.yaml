@@ -1,6 +1,6 @@
 schema: paperclip/v1
 company:
-  brandColor: "#155EEF"
+  brandColor: "#F97316"
   attachmentMaxBytes: 10485760
   requireBoardApprovalForNewAgents: true
   feedbackDataSharingEnabled: false

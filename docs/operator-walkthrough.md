@@ -153,6 +153,24 @@ Conversely, if you run a **subscription** variant (`codex` / `claude`) with
 the matching API key exported in your shell, the CLI silently bills the API
 account instead of the subscription — the launcher warns when it detects this.
 
+### Dashboard theme (chipper by default)
+
+Live launches default to `--theme possiblaw`: a light-first dashboard with a
+warm cream-and-coral palette. On the first themed run the launcher builds
+paperclip's UI once (~1-2 min) and serves a patched copy from
+`paperclip/server/ui-dist/` (untracked overlay — the submodule source is never
+modified). Options:
+
+- `--theme possiblaw` (default) — light-first + the PossibLaw palette.
+- `--theme light` — light-first, paperclip's stock light palette.
+- `--theme dark` — stock behavior; also removes the overlay.
+- Env override: `POSSIBLAW_THEME=dark ./bin/possiblaw ...`
+
+The in-app toggle (sidebar account menu → "Switch to dark/light mode") always
+wins once a user clicks it — the theme flag only seeds the default for
+browsers with no stored preference. If the UI build fails, the launcher warns
+and falls back to the stock dark UI; nothing blocks the launch.
+
 ### Preflight model probe (codex / codex-api / claude / claude-api)
 
 Before starting anything, live runs probe each distinct lane model with one

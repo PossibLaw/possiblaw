@@ -153,6 +153,24 @@ catalog pin check (each pinned model must exist in
 endpoint preflights only, so a Zen-catalog rotation or a wrong GGUF surfaces
 on the first live run rather than at launch.
 
+## Theme overlay caveats
+
+The `--theme possiblaw|light` overlay serves a patched copy of the BUILT
+paperclip UI from `paperclip/server/ui-dist/` (the server's first static
+lookup path) and forces static UI mode for launcher-started servers. Caveats:
+
+- The build output (`paperclip/ui/dist/`) and the overlay are untracked files
+  inside the submodule working tree — the same class of dirt as
+  `node_modules`; the pinned submodule commit never changes. `--theme dark`
+  removes the overlay.
+- Markdown code blocks in the editor keep a hardcoded dark palette upstream
+  (`ui/src/index.css` Catppuccin tokens) even in light mode.
+- A server you started some other way (e.g. a long-lived instance launched
+  before the overlay existed) picks the overlay up on its next restart, since
+  the static path wins over the monorepo dist path.
+- After a paperclip submodule update, delete `paperclip/ui/dist` to force a
+  rebuild on the next themed run (stale assets otherwise persist).
+
 ## Gemini variants have no reasoning-effort lanes
 
 Paperclip's `gemini_local` adapter exposes no reasoning-effort or thinking
