@@ -59,6 +59,8 @@ Add `--variant <slug>` to skip the interactive prompt, or `--list-variants` to s
 | **Projects & tasks** | NDA Matters, Commercial Reviews, Eval Results; starter issues + a recurring renewal scan |
 | **Model lanes** | Per-agent `modelLane` metadata (primary / routing / drafting / review / extractive) — variants map each lane to the right model automatically |
 | **Variants** | `codex`, `claude`, `gemini`, `ollama`, `llamacpp`, `opencode`, `openrouter` (+ `-api` twins) — selected at import time by the launcher |
+| **Demos** | `--demo law-firm` / `inhouse-legal` / `biglaw-practice-group` — synthetic demo matters for a boutique firm, an in-house department, and a BigLaw practice group |
+| **Theme** | `--theme possiblaw` (default) — light-first dashboard with a warm launch palette; `light` / `dark` also available |
 | **Privacy posture** | Privacy-encoder skill blocks confidential/privileged matters unless a local model (Ollama or llama.cpp) is reachable |
 
 ---

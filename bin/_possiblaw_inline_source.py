@@ -63,7 +63,12 @@ def _encode_file(abs_path: Path):
         }
 
 
-def build_inline_source(package_root: Path) -> dict:
+# From extra roots (demo overlays) only importer-discoverable content may
+# enter the bundle; READMEs and helper files stay out of the import body.
+EXTRA_ROOT_BASENAMES = {"PROJECT.md", "TASK.md"}
+
+
+def build_inline_source(package_root: Path, extra_roots: list[Path] | None = None) -> dict:
     if not package_root.exists():
         raise ValueError(f"package root does not exist: {package_root}")
     if not package_root.is_dir():
@@ -72,6 +77,19 @@ def build_inline_source(package_root: Path) -> dict:
     files: dict[str, object] = {}
     for rel, abs_path in _iter_files(package_root):
         files[rel] = _encode_file(abs_path)
+
+    for extra in extra_roots or []:
+        extra = Path(extra)
+        if not extra.is_dir():
+            raise ValueError(f"extra root is not a directory: {extra}")
+        for rel, abs_path in _iter_files(extra):
+            if Path(rel).name not in EXTRA_ROOT_BASENAMES:
+                continue
+            if rel in files:
+                raise ValueError(
+                    f"extra root {extra} collides with the package on '{rel}'"
+                )
+            files[rel] = _encode_file(abs_path)
 
     return {
         "source": {
@@ -119,6 +137,31 @@ def _self_test() -> int:
         assert "rootPath" in out["source"]
         assert isinstance(out["source"]["files"], dict)
 
+        # Extra roots (demo overlays) merge into the same file map.
+        extra = Path(td) / "demo"
+        (extra / "projects" / "demo-p" / "tasks" / "demo-t").mkdir(parents=True)
+        (extra / "projects" / "demo-p" / "PROJECT.md").write_text("# p\n", encoding="utf-8")
+        (extra / "projects" / "demo-p" / "tasks" / "demo-t" / "TASK.md").write_text("# t\n", encoding="utf-8")
+        (extra / "README.md").write_text("demo readme\n", encoding="utf-8")
+        out2 = build_inline_source(root, extra_roots=[extra])
+        files2 = out2["source"]["files"]
+        assert files2["projects/demo-p/PROJECT.md"] == "# p\n"
+        assert files2["projects/demo-p/tasks/demo-t/TASK.md"] == "# t\n"
+        # Non-discoverable demo files (README) are excluded from the merge.
+        assert "README.md" not in files2 or files2.get("README.md") != "demo readme\n"
+        # Package files still present.
+        assert files2["AGENTS.md"].startswith("---\nslug: x")
+
+        # Path collisions between package and extra root are an error.
+        (root / "projects" / "demo-p").mkdir(parents=True)
+        (root / "projects" / "demo-p" / "PROJECT.md").write_text("pkg version\n", encoding="utf-8")
+        try:
+            build_inline_source(root, extra_roots=[extra])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("path collision must raise ValueError")
+
     print("OK: _possiblaw_inline_source self-test passed")
     return 0
 
@@ -126,6 +169,12 @@ def _self_test() -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--package-root", help="path to the package directory to bundle")
+    parser.add_argument(
+        "--extra-root",
+        action="append",
+        default=[],
+        help="extra directory whose PROJECT.md/TASK.md files merge into the bundle (repeatable; demo overlays)",
+    )
     parser.add_argument("--self-test", action="store_true", help="run built-in tests and exit")
     args = parser.parse_args(argv)
 
@@ -136,7 +185,10 @@ def main(argv: list[str]) -> int:
         parser.error("--package-root is required")
 
     try:
-        payload = build_inline_source(Path(args.package_root))
+        payload = build_inline_source(
+            Path(args.package_root),
+            extra_roots=[Path(p) for p in args.extra_root],
+        )
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2

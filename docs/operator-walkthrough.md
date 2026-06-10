@@ -171,6 +171,23 @@ wins once a user clicks it — the theme flag only seeds the default for
 browsers with no stored preference. If the UI build fails, the launcher warns
 and falls back to the stock dark UI; nothing blocks the launch.
 
+### Demo profiles (synthetic data)
+
+Three self-contained demo stories ship under `companies/demos/`, each with
+fictional clients, matters, and tasks that exercise the full org chart:
+
+```bash
+./bin/possiblaw --demo law-firm                # Harbor & Finch LLP (boutique firm)
+./bin/possiblaw --demo inhouse-legal           # Meridian Robotics legal department
+./bin/possiblaw --demo biglaw-practice-group   # Whitfield Sterling — Tech Transactions group
+```
+
+The flag merges the profile's projects and tasks into the import (package
+content is unchanged). Each profile's `README.md` is the demo script: the org
+name and mission to paste at launch, which tasks to move to `todo` first, and
+the delegation chain to expect. Every entity, person, citation, and statute in
+the demo data is fictional.
+
 ### Preflight model probe (codex / codex-api / claude / claude-api)
 
 Before starting anything, live runs probe each distinct lane model with one

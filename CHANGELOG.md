@@ -7,6 +7,27 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.13.0] — 2026-06-09 — Synthetic demo profiles (--demo) for three launch personas
+
+### Added
+
+- **`--demo <profile>`** on the launcher, merging a demo profile's synthetic projects/tasks into the import. Three profiles under `companies/demos/`, each a self-contained story with a README demo script (org name + mission to paste, run-the-demo task order, expected delegation chain per task):
+  - `law-firm` — **Harbor & Finch LLP**, a fictional 12-lawyer boutique firm: client NDA + MSA review, client employment matters, firm BD (RFP with conflicts-check prerequisite, CRM hygiene), firm ops (invoice summary, intake SOP).
+  - `inhouse-legal` — **Meridian Robotics Legal**, a fictional 5-person in-house department: vendor MSA review, partner NDA, DPA with SCC placeholders, data-incident tabletop, offer letter, handbook review, board consent, regulatory-change intake.
+  - `biglaw-practice-group` — **Whitfield Sterling — Tech Transactions**, a fictional 40-lawyer group in a global firm: patent/know-how license, OSS compliance, due-diligence extraction, clause inventories, connector-backed research memo, citation check, litigation hold, docket monitoring.
+- `bin/_possiblaw_inline_source.py --extra-root` (TDD red→green): merges only importer-discoverable PROJECT.md/TASK.md from extra roots (READMEs stay out of the import body); path collisions raise errors.
+- Launcher: pre-server profile validation with available-profile listing; demo project/task counts logged with the README pointer.
+- Docs: walkthrough demo section, README capability rows (demos + theme).
+- Every entity, person, citation, case number, and statute in the demo data is fictional; each README carries the regulated-practice note once.
+
+### Validation
+
+- Helper self-tests green (incl. new extra-root merge + collision tests); `bash -n`; unknown-profile error path exits 2 before any server starts.
+- Dry-run e2e ×3 (one per profile): all `agents=52 skills=67 projects=7 issues=11 warnings=0 errors=0`.
+- Live import + readback (law-firm profile): 7 projects (4 demo in backlog + 3 base), all 8 demo tasks created in backlog with correct titles, 0 warnings.
+
+---
+
 ## [0.12.0] — 2026-06-09 — Expansion batches 4–5: research, BD, ops teams + layer conversions (52 agents / 67 skills)
 
 ### Added

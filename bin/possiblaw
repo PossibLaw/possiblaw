@@ -93,6 +93,10 @@ OPTIONS:
   --skip-model-probe    Skip the preflight per-model CLI probe (codex/claude/
                         gemini variants probe each lane model with a tiny request so
                         "no access to model" errors surface before launch).
+  --demo <profile>      Merge a synthetic demo profile's projects/tasks into
+                        the import (companies/demos/<profile>): law-firm,
+                        inhouse-legal, or biglaw-practice-group. Each profile's
+                        README.md is the demo script. All demo data is fictional.
   --theme <name>        UI look for the dashboard: possiblaw (default —
                         light-first with the warm PossibLaw palette), light
                         (paperclip's stock light theme as the default), or
@@ -246,6 +250,7 @@ NO_BROWSER="false"
 SKIP_MODEL_PROBE="false"
 THEME="${POSSIBLAW_THEME:-possiblaw}"
 ONBOARD_EXTRA_ENV=""
+DEMO_PROFILE=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -263,6 +268,7 @@ while [ "$#" -gt 0 ]; do
         --list-variants) LIST_VARIANTS_ONLY="true"; shift ;;
         --skip-model-probe) SKIP_MODEL_PROBE="true"; shift ;;
         --theme) [ "$#" -ge 2 ] || { err "--theme requires a value"; exit 2; }; THEME="$2"; shift 2 ;;
+        --demo) [ "$#" -ge 2 ] || { err "--demo requires a value"; exit 2; }; DEMO_PROFILE="$2"; shift 2 ;;
         --no-browser) NO_BROWSER="true"; shift ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
@@ -945,6 +951,21 @@ case "$THEME" in
     *) err "Unknown --theme '$THEME' (expected: possiblaw, light, dark)"; exit 2 ;;
 esac
 
+DEMO_DIR=""
+if [ -n "$DEMO_PROFILE" ]; then
+    DEMO_DIR="$REPO_ROOT/companies/demos/$DEMO_PROFILE"
+    if [ ! -d "$DEMO_DIR" ]; then
+        err "Unknown demo profile: $DEMO_PROFILE"
+        if [ -d "$REPO_ROOT/companies/demos" ]; then
+            err "Available profiles:"
+            for d in "$REPO_ROOT/companies/demos"/*/; do
+                [ -d "$d" ] && err "  - $(basename "$d")"
+            done
+        fi
+        exit 2
+    fi
+fi
+
 apply_theme_overlay() {
     local ui_dist="$PAPERCLIP_DIR/ui/dist"
     local overlay="$PAPERCLIP_DIR/server/ui-dist"
@@ -1101,8 +1122,16 @@ if ! python3 "$VARIANTS_PY" \
     exit 1
 fi
 
+DEMO_ARGS=()
+if [ -n "$DEMO_DIR" ]; then
+    DEMO_ARGS=(--extra-root "$DEMO_DIR")
+    DEMO_PROJECT_COUNT="$(find "$DEMO_DIR" -name PROJECT.md | wc -l | tr -d ' ')"
+    DEMO_TASK_COUNT="$(find "$DEMO_DIR" -name TASK.md | wc -l | tr -d ' ')"
+    log "demo profile: $DEMO_PROFILE (+$DEMO_PROJECT_COUNT projects, +$DEMO_TASK_COUNT tasks; see $DEMO_DIR/README.md for the demo script)"
+fi
+
 INLINE_FILE="$(mktemp -t possiblaw-inline.XXXXXX.json)"
-if ! python3 "$INLINE_PY" --package-root "$PACKAGE" > "$INLINE_FILE"; then
+if ! python3 "$INLINE_PY" --package-root "$PACKAGE" ${DEMO_ARGS+"${DEMO_ARGS[@]}"} > "$INLINE_FILE"; then
     err "inline source bundling failed"
     kill_paperclip_tree "$PAPERCLIP_PID"
     rm -f "$LAUNCHER_PID_FILE"
