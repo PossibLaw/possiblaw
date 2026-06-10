@@ -28,7 +28,7 @@ pnpm -C paperclip install
 # → browser opens to your Paperclip dashboard, 11 agents already loaded
 ```
 
-The launcher picks the model-provider variant at import time. Five are shipped:
+The launcher picks the model-provider variant at import time. Eight are shipped:
 
 | Variant | Provider | When |
 |---|---|---|
@@ -37,10 +37,14 @@ The launcher picks the model-provider variant at import time. Five are shipped:
 | `claude`     | Claude CLI subscription  | If you prefer Anthropic models for legal work |
 | `claude-api` | Claude CLI + Anthropic API key | Same as `claude`, billed against the API with the full model catalog |
 | `ollama`     | Local Llama via OpenCode | Fully local — confidential matters, no cloud round-trips |
+| `llamacpp`   | Local HF GGUF via llama.cpp + OpenCode | Fully local without the Ollama client — bring any GGUF |
+| `opencode`   | OpenCode Zen gateway (`OPENCODE_API_KEY`) | One key for OpenCode's curated catalog, no vendor logins |
+| `openrouter` | OpenRouter (`OPENROUTER_API_KEY`) | One key for the multi-vendor cloud catalog |
 
-Live launches preflight-probe each lane model with a tiny CLI request, so "you
-don't have access to this model" surfaces before import, not mid-matter
-(`--skip-model-probe` to bypass).
+Live launches preflight-probe each lane model with a tiny CLI request (and
+check OpenRouter pins against its public catalog), so "you don't have access
+to this model" surfaces before import, not mid-matter (`--skip-model-probe`
+to bypass).
 
 Add `--variant <slug>` to skip the interactive prompt, or `--list-variants` to see them. Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); package layout: [docs/paperclip-package.md](docs/paperclip-package.md); sharp edges: [docs/known-limitations.md](docs/known-limitations.md).
 
@@ -52,8 +56,8 @@ Add `--variant <slug>` to skip the interactive prompt, or `--list-variants` to s
 | **Skills** | 38: contract review (dispatcher, NDA, SaaS MSA, renewals, OSS compliance, hiring, C&D, IP triage, escalation), matter intake, conflicts check, missing-info gate, privacy encoder, Slack/Teams notifications, Markdown/DOCX output, 14 connector descriptors |
 | **Projects & tasks** | NDA Matters, Commercial Reviews, Eval Results; starter issues + a recurring renewal scan |
 | **Model lanes** | Per-agent `modelLane` metadata (primary / routing / drafting / review / extractive) — variants map each lane to the right model automatically |
-| **Variants** | `codex`, `claude`, `ollama` — selected at import time by the launcher |
-| **Privacy posture** | Privacy-encoder skill blocks confidential/privileged matters unless a local model (Ollama) is reachable |
+| **Variants** | `codex`, `claude`, `ollama`, `llamacpp`, `opencode`, `openrouter` (+ `-api` twins) — selected at import time by the launcher |
+| **Privacy posture** | Privacy-encoder skill blocks confidential/privileged matters unless a local model (Ollama or llama.cpp) is reachable |
 
 ---
 

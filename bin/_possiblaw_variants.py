@@ -18,6 +18,9 @@ Extra modes:
   --build-env-patches   given --overrides-json and --secret-ids-json, emit
                         per-agent { adapterConfig } patch bodies that bind
                         each secret into adapterConfig.env as a secret_ref
+  --lint                structurally validate the variants doc (adapterType,
+                        models present, opencode provider/model format) and
+                        exit non-zero on problems
 
 Warnings go to stderr (one per line, prefixed "warning: ").
 Errors exit non-zero with a "error: ..." line on stderr.
@@ -189,6 +192,70 @@ def build_env_patches(
     return patches
 
 
+def _is_opencode_model_id(value: Any) -> bool:
+    """Mirror paperclip's isValidOpenCodeModelId: 'provider/model', both halves
+    non-empty (paperclip/packages/adapters/opencode-local/src/index.ts)."""
+    if not isinstance(value, str):
+        return False
+    trimmed = value.strip()
+    slash = trimmed.find("/")
+    return bool(trimmed) and slash > 0 and slash != len(trimmed) - 1
+
+
+def lint_variants(variants_doc: dict) -> list[str]:
+    """Structural lint of a variants doc. Returns problem strings (empty = clean).
+
+    Per variant:
+      - default.adapterType and default.adapterConfig.model are present
+      - secret_env / lanes / per_agent are mappings when present
+      - opencode_local variants: every model (default, lane, per_agent) is in
+        OpenCode's required provider/model format — paperclip rejects agents
+        whose opencode_local model id has no provider prefix
+    """
+    problems: list[str] = []
+    variants_block = (variants_doc or {}).get("variants")
+    if not isinstance(variants_block, dict) or not variants_block:
+        return ["variants document missing a non-empty 'variants' mapping"]
+
+    for slug, v in variants_block.items():
+        v = v or {}
+        default = v.get("default") or {}
+        adapter_type = default.get("adapterType")
+        config = default.get("adapterConfig") or {}
+        if not adapter_type:
+            problems.append(f"variant '{slug}': missing default.adapterType")
+        if not config.get("model"):
+            problems.append(f"variant '{slug}': missing default.adapterConfig.model")
+        for field in ("secret_env", "lanes", "per_agent"):
+            val = v.get(field)
+            if val is not None and not isinstance(val, dict):
+                problems.append(f"variant '{slug}': {field} must be a mapping")
+
+        if adapter_type == "opencode_local":
+            def check_model(model: Any, where: str) -> None:
+                if model is None:
+                    return
+                if not _is_opencode_model_id(model):
+                    problems.append(
+                        f"variant '{slug}': {where} model '{model}' is not in "
+                        f"OpenCode provider/model format"
+                    )
+
+            check_model(config.get("model"), "default")
+            lanes = v.get("lanes")
+            if isinstance(lanes, dict):
+                for lane, overrides in lanes.items():
+                    if isinstance(overrides, dict):
+                        check_model(overrides.get("model"), f"lane '{lane}'")
+            per_agent = v.get("per_agent")
+            if isinstance(per_agent, dict):
+                for agent, overrides in per_agent.items():
+                    if isinstance(overrides, dict):
+                        check_model(overrides.get("model"), f"per_agent '{agent}'")
+
+    return problems
+
+
 def _self_test() -> int:
     variants = {
         "schema": "possiblaw/variants/v1",
@@ -328,6 +395,59 @@ def _self_test() -> int:
     # no secrets → no patches
     assert build_env_patches(overrides_for_patch, {}) == {}
 
+    # --- lint_variants: structural validation of a variants doc ---
+    lint_doc = {
+        "schema": "possiblaw/variants/v1",
+        "variants": {
+            "good-opencode": {
+                "default": {
+                    "adapterType": "opencode_local",
+                    "adapterConfig": {"model": "openrouter/anthropic/claude-opus-4.7"},
+                },
+                "lanes": {
+                    "extractive": {"model": "openrouter/anthropic/claude-haiku-4.5"},
+                    "drafting": {"timeoutSec": 900},  # no model key → no format check
+                },
+                "secret_env": {"OPENROUTER_API_KEY": "OpenRouter API Key"},
+                "local": False,
+                "per_agent": {},
+            },
+            "bad-model-format": {
+                "default": {
+                    "adapterType": "opencode_local",
+                    "adapterConfig": {"model": "no-slash-model"},
+                },
+                "lanes": {"routing": {"model": "also-bad/"}},
+                "per_agent": {"nda-drafter": {"model": "/leading-slash"}},
+            },
+            "missing-model": {
+                "default": {"adapterType": "codex_local", "adapterConfig": {}},
+                "lanes": {},
+                "per_agent": {},
+            },
+            "bad-secret-env": {
+                "default": {
+                    "adapterType": "codex_local",
+                    "adapterConfig": {"model": "gpt-5.5"},
+                },
+                "secret_env": ["OPENAI_API_KEY"],
+                "lanes": {},
+                "per_agent": {},
+            },
+        },
+    }
+    problems = lint_variants(lint_doc)
+    assert not [p for p in problems if "good-opencode" in p], problems
+    assert any("bad-model-format" in p and "no-slash-model" in p for p in problems), problems
+    assert any("bad-model-format" in p and "also-bad/" in p for p in problems), problems
+    assert any("bad-model-format" in p and "/leading-slash" in p for p in problems), problems
+    assert any("missing-model" in p and "default.adapterConfig.model" in p for p in problems), problems
+    assert any("bad-secret-env" in p and "secret_env" in p for p in problems), problems
+    # non-opencode adapters are exempt from the provider/model format rule
+    assert not any("missing-model" in p and "format" in p for p in problems), problems
+    # empty doc fails loudly
+    assert lint_variants({}) == ["variants document missing a non-empty 'variants' mapping"]
+
     print("OK: _possiblaw_variants self-test passed")
     return 0
 
@@ -347,6 +467,10 @@ def main(argv: list[str]) -> int:
         help="print the variant's distinct effective models, one per line, and exit",
     )
     parser.add_argument(
+        "--lint", action="store_true",
+        help="structurally validate the variants doc and exit non-zero on problems",
+    )
+    parser.add_argument(
         "--build-env-patches", action="store_true",
         help="emit per-agent adapterConfig patches binding secrets into env",
     )
@@ -364,6 +488,19 @@ def main(argv: list[str]) -> int:
         secret_ids = _read_json(args.secret_ids_json)
         json.dump(build_env_patches(overrides, secret_ids), sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
+        return 0
+
+    if args.lint:
+        if not args.variants_json:
+            parser.error("--lint requires --variants-json")
+        doc = _read_json(args.variants_json)
+        problems = lint_variants(doc)
+        if problems:
+            for p in problems:
+                print(f"error: {p}", file=sys.stderr)
+            return 1
+        count = len((doc.get("variants") or {}))
+        print(f"OK: variants lint passed ({count} variants)")
         return 0
 
     if args.show_secret_env:

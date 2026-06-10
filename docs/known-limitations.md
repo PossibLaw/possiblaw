@@ -75,12 +75,42 @@ config block on first run.
 
 ### Privacy-encoder dependency
 
-Even when the operator picks `codex` or `claude`, any matter with
+Even when the operator picks a cloud variant (`codex`, `claude`, `opencode`,
+`openrouter`, or an `-api` twin), any matter with
 `metadata.possiblaw.privacyTier: confidential|privileged` will block at
-runtime unless Ollama is also running (the privacy-encoder skill routes the
-substitution step through a local model so confidential plaintext never
-reaches a cloud CLI). The launcher emits a non-blocking warning at startup
-when this combination is detected.
+runtime unless a local model lane is also reachable — an Ollama daemon or a
+llama.cpp server (the privacy-encoder skill routes the substitution step
+through a local model so confidential plaintext never reaches a cloud CLI).
+The launcher emits a non-blocking warning at startup when this combination
+is detected.
+
+## llamacpp variant
+
+### One model per llama-server
+
+llama.cpp's `llama-server` serves whichever GGUF it was started with and
+ignores the model name in the request, so all five lanes pin
+`llamacpp/default` — there is no per-lane quality split like the Ollama
+variant's 8B/70B mix. Pick the GGUF at server start. Running two
+llama-server instances on different ports for a real lane split would need
+per-lane `baseURL`s, which OpenCode providers can't express in one provider
+block (declare two providers and edit `variants.yaml` lanes if you need
+this).
+
+### Same quality and setup caveats as Ollama
+
+Local GGUF models trail the cloud variants on long legal-drafting tasks, and
+the variant needs `llama-server` running plus the `llamacpp` provider block
+in `~/.config/opencode/opencode.json` (the launcher offers to write it).
+
+## opencode variant interpretation
+
+The `opencode` variant pins OpenCode's own Zen gateway (`OPENCODE_API_KEY`)
+— the no-other-vendor-logins reading of "first-class OpenCode". If you
+instead want agents to ride a provider you've connected via
+`opencode auth login`, edit the lane models in
+`companies/legal-operations/variants.yaml` to that provider's prefix; the
+adapter passes any `provider/model` id through to OpenCode.
 
 ## Routines
 
@@ -116,6 +146,12 @@ models on claude variants, 1 on codex). Each probe is a tiny billable request
 against your subscription or API key. `--skip-model-probe` bypasses it; dry
 runs never probe. The probe verifies model *access*, not quota headroom — a
 plan at its usage limit can pass the probe and still fail mid-run.
+
+The opencode-based variants are not CLI-probed. `openrouter` gets a keyless
+catalog pin check (each pinned model must exist in
+`openrouter.ai/api/v1/models`); `opencode` and `llamacpp` rely on the key /
+endpoint preflights only, so a Zen-catalog rotation or a wrong GGUF surfaces
+on the first live run rather than at launch.
 
 ## API-key variants and dry-run
 

@@ -4,13 +4,14 @@
 # Agent Companies package.
 #
 # Replaces bin/possiblaw-launch with two changes:
-#   1. Variant selection (codex / claude / ollama) via variants.yaml
+#   1. Variant selection (codex / claude / ollama / llamacpp / opencode /
+#      openrouter, plus the codex-api / claude-api twins) via variants.yaml
 #   2. Direct HTTP POST to /api/companies/import instead of the paperclipai CLI,
 #      so we can use the full adapterOverrides schema (model + reasoning effort
 #      + timeout per agent, keyed by metadata.possiblaw.modelLane).
 #
 # Run as:
-#     ./bin/possiblaw [--variant codex|claude|ollama] [--mission "…"] \
+#     ./bin/possiblaw [--variant <slug>] [--mission "…"] \
 #                     [--org-name "…"] [--data-dir PATH] [--port N] \
 #                     [--package PATH] [--reset] [--yes] [--dry-run] \
 #                     [--list-variants] [--non-interactive] [--no-browser]
@@ -64,11 +65,15 @@ USAGE:
 
 OPTIONS:
   --variant <slug>      Variant to apply at import: codex | codex-api |
-                        claude | claude-api | ollama. If omitted, prompts.
-                        *-api variants bill an API key instead of the CLI
-                        subscription: export the key (OPENAI_API_KEY or
-                        ANTHROPIC_API_KEY) before running; it is stored once
-                        as a paperclip company secret, never in files.
+                        claude | claude-api | ollama | llamacpp | opencode |
+                        openrouter. If omitted, prompts.
+                        Key-taking variants (codex-api, claude-api, opencode,
+                        openrouter) bill an API key: export it (OPENAI_API_KEY,
+                        ANTHROPIC_API_KEY, OPENCODE_API_KEY, OPENROUTER_API_KEY)
+                        before running; it is stored once as a paperclip
+                        company secret, never in files.
+                        Fully local variants: ollama (Ollama daemon) and
+                        llamacpp (llama-server with an HF GGUF model).
   --mission <text>      Mission statement for the company (one line).
                         If omitted, the launcher prompts.
   --org-name <name>     Company name. Default: "$PACKAGE_DEFAULT_ORG_NAME".
@@ -292,10 +297,13 @@ for slug, v in variants.items():
     reqs = []
     if v.get("requires_cli"): reqs.append(f"cli: {v['requires_cli']}")
     if v.get("requires_ollama"): reqs.append("ollama")
+    if v.get("requires_endpoint"):
+        reqs.append(f"endpoint: {v['requires_endpoint']}")
     if v.get("requires_opencode_provider"):
         reqs.append(f"opencode-provider: {v['requires_opencode_provider']}")
     for env_key in (v.get("secret_env") or {}):
         reqs.append(f"env: {env_key}")
+    if v.get("local"): reqs.append("fully local")
     suffix = f"  [{', '.join(reqs)}]" if reqs else ""
     print(f"  {slug:10s}  {label}{suffix}")
 PY
@@ -434,10 +442,18 @@ if ! list_variant_slugs | grep -qx "$VARIANT"; then
 fi
 milestone "variant: $VARIANT ($(variant_label "$VARIANT"))"
 
-# Per-variant CLI preflight.
+# Per-variant CLI preflight. Dry-run never invokes the variant CLI (the
+# preview is server-side), so a missing CLI only warns there — same pattern
+# as the secret_env dry-run behavior below.
 REQUIRES_CLI="$(variant_field "$VARIANT" requires_cli)"
 if [ -n "$REQUIRES_CLI" ]; then
-    require_cmd "$REQUIRES_CLI" "the '$VARIANT' variant requires the '$REQUIRES_CLI' CLI" || exit 1
+    if ! require_cmd "$REQUIRES_CLI" "the '$VARIANT' variant requires the '$REQUIRES_CLI' CLI"; then
+        if [ "$DRY_RUN" = "true" ]; then
+            warn "dry-run continues without the '$REQUIRES_CLI' CLI, but a live run requires it."
+        else
+            exit 1
+        fi
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -460,7 +476,10 @@ if [ -n "$SECRET_ENV_TSV" ]; then
             else
                 err "The '$VARIANT' variant requires \$$env_key ($env_name) in this shell."
                 err "Either: export $env_key=...   then re-run,"
-                err "or use the subscription variant instead (e.g. --variant ${VARIANT%-api})."
+                case "$VARIANT" in
+                    *-api) err "or use the subscription variant instead (--variant ${VARIANT%-api})." ;;
+                    *)     err "or pick a variant that doesn't need it (see --list-variants)." ;;
+                esac
                 exit 1
             fi
         else
@@ -488,33 +507,52 @@ else
     esac
 fi
 
-# Ollama-specific preflight: ollama daemon + OpenCode global config.
+# Local-runtime preflight: ollama daemon / generic endpoint + OpenCode config.
+# Reachability blocks live runs and warns on dry-run (preview is server-side).
 REQUIRES_OLLAMA="$(variant_field "$VARIANT" requires_ollama)"
+REQUIRES_ENDPOINT="$(variant_field "$VARIANT" requires_endpoint)"
+ENDPOINT_HINT="$(variant_field "$VARIANT" endpoint_hint)"
 REQUIRES_OPENCODE_PROVIDER="$(variant_field "$VARIANT" requires_opencode_provider)"
 if [ "$REQUIRES_OLLAMA" = "true" ]; then
     OLLAMA_VERSION_HTTP="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 3 http://localhost:11434/api/version || true)"
     if [ "$OLLAMA_VERSION_HTTP" != "200" ]; then
-        err "Ollama daemon not reachable at http://localhost:11434/api/version (HTTP $OLLAMA_VERSION_HTTP)."
-        err "Install: https://ollama.com — then 'ollama serve' and 'ollama pull llama3.1:8b'."
-        exit 1
-    fi
-    log "ok: Ollama daemon reachable"
-fi
-if [ -n "$REQUIRES_OPENCODE_PROVIDER" ]; then
-    OPENCODE_CONFIG="$HOME/.config/opencode/opencode.json"
-    if [ ! -f "$OPENCODE_CONFIG" ]; then
-        err "OpenCode global config missing: $OPENCODE_CONFIG"
-        err "The '$VARIANT' variant needs the '$REQUIRES_OPENCODE_PROVIDER' provider declared there."
-        if [ "$NON_INTERACTIVE" = "true" ] || [ "$ASSUME_YES" = "true" ]; then
-            err "Re-run interactively to let the launcher write a starter config, or create it manually."
+        if [ "$DRY_RUN" = "true" ]; then
+            warn "Ollama daemon not reachable at http://localhost:11434 (HTTP $OLLAMA_VERSION_HTTP)."
+            warn "Dry-run continues, but a live '$VARIANT' run requires it."
         else
-            if confirm "Write a minimal $OPENCODE_CONFIG with provider.$REQUIRES_OPENCODE_PROVIDER?"; then
-                mkdir -p "$(dirname "$OPENCODE_CONFIG")"
-                cat > "$OPENCODE_CONFIG" <<JSON
+            err "Ollama daemon not reachable at http://localhost:11434/api/version (HTTP $OLLAMA_VERSION_HTTP)."
+            err "Install: https://ollama.com — then 'ollama serve' and 'ollama pull llama3.1:8b'."
+            exit 1
+        fi
+    else
+        log "ok: Ollama daemon reachable"
+    fi
+fi
+if [ -n "$REQUIRES_ENDPOINT" ]; then
+    ENDPOINT_HTTP="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 3 "$REQUIRES_ENDPOINT" || true)"
+    if [ "$ENDPOINT_HTTP" != "200" ]; then
+        if [ "$DRY_RUN" = "true" ]; then
+            warn "endpoint not reachable: $REQUIRES_ENDPOINT (HTTP $ENDPOINT_HTTP)."
+            warn "Dry-run continues, but a live '$VARIANT' run requires it."
+            [ -n "$ENDPOINT_HINT" ] && warn "hint: $ENDPOINT_HINT"
+        else
+            err "The '$VARIANT' variant needs a local server, but $REQUIRES_ENDPOINT is not reachable (HTTP $ENDPOINT_HTTP)."
+            [ -n "$ENDPOINT_HINT" ] && err "hint: $ENDPOINT_HINT"
+            exit 1
+        fi
+    else
+        log "ok: endpoint reachable: $REQUIRES_ENDPOINT"
+    fi
+fi
+# Starter opencode.json provider block per provider name. Empty output means
+# no template exists and the operator must write the block manually.
+opencode_provider_template() {
+    case "$1" in
+        ollama) cat <<'JSON'
 {
-  "\$schema": "https://opencode.ai/config.json",
+  "$schema": "https://opencode.ai/config.json",
   "provider": {
-    "$REQUIRES_OPENCODE_PROVIDER": {
+    "ollama": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "Ollama (local)",
       "options": { "baseURL": "http://localhost:11434/v1" },
@@ -526,6 +564,45 @@ if [ -n "$REQUIRES_OPENCODE_PROVIDER" ]; then
   }
 }
 JSON
+            ;;
+        llamacpp) cat <<'JSON'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "llamacpp": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "llama.cpp (local llama-server)",
+      "options": { "baseURL": "http://127.0.0.1:8080/v1" },
+      "models": {
+        "default": { "name": "llama-server loaded model" }
+      }
+    }
+  }
+}
+JSON
+            ;;
+    esac
+}
+
+if [ -n "$REQUIRES_OPENCODE_PROVIDER" ]; then
+    OPENCODE_CONFIG="$HOME/.config/opencode/opencode.json"
+    if [ ! -f "$OPENCODE_CONFIG" ]; then
+        if [ "$DRY_RUN" = "true" ]; then
+            warn "OpenCode global config missing: $OPENCODE_CONFIG"
+            warn "Dry-run continues, but a live '$VARIANT' run needs provider.$REQUIRES_OPENCODE_PROVIDER declared there."
+        else
+            err "OpenCode global config missing: $OPENCODE_CONFIG"
+            err "The '$VARIANT' variant needs the '$REQUIRES_OPENCODE_PROVIDER' provider declared there."
+            TEMPLATE="$(opencode_provider_template "$REQUIRES_OPENCODE_PROVIDER")"
+            if [ -z "$TEMPLATE" ]; then
+                err "No starter template for provider '$REQUIRES_OPENCODE_PROVIDER' — create it manually (see https://opencode.ai/docs/providers)."
+                exit 1
+            elif [ "$NON_INTERACTIVE" = "true" ] || [ "$ASSUME_YES" = "true" ]; then
+                err "Re-run interactively to let the launcher write a starter config, or create it manually."
+                exit 1
+            elif confirm "Write a minimal $OPENCODE_CONFIG with provider.$REQUIRES_OPENCODE_PROVIDER?"; then
+                mkdir -p "$(dirname "$OPENCODE_CONFIG")"
+                printf '%s\n' "$TEMPLATE" > "$OPENCODE_CONFIG"
                 log "wrote $OPENCODE_CONFIG"
             else
                 exit 1
@@ -543,11 +620,17 @@ print("yes" if sys.argv[2] in prov else "no")
 PY
 )"
         if [ "$HAS_PROVIDER" != "yes" ]; then
-            err "$OPENCODE_CONFIG exists but does not declare provider.$REQUIRES_OPENCODE_PROVIDER"
-            err "Add it manually (see https://opencode.ai/docs/providers)."
-            exit 1
+            if [ "$DRY_RUN" = "true" ]; then
+                warn "$OPENCODE_CONFIG exists but does not declare provider.$REQUIRES_OPENCODE_PROVIDER"
+                warn "Dry-run continues, but a live '$VARIANT' run requires it (see https://opencode.ai/docs/providers)."
+            else
+                err "$OPENCODE_CONFIG exists but does not declare provider.$REQUIRES_OPENCODE_PROVIDER"
+                err "Add it manually (see https://opencode.ai/docs/providers)."
+                exit 1
+            fi
+        else
+            log "ok: OpenCode global config declares provider.$REQUIRES_OPENCODE_PROVIDER"
         fi
-        log "ok: OpenCode global config declares provider.$REQUIRES_OPENCODE_PROVIDER"
     fi
 fi
 
@@ -650,15 +733,66 @@ if [ "$DRY_RUN" != "true" ] && [ "$SKIP_MODEL_PROBE" != "true" ] \
 fi
 
 # ---------------------------------------------------------------------------
+# OpenRouter catalog pin check (opencode variants, live runs only)
+# ---------------------------------------------------------------------------
+#
+# The probe above only covers the claude/codex CLIs. For variants riding
+# OpenCode's native openrouter provider, verify each pinned model id still
+# exists in the public catalog (one keyless GET — no token spend). Model pins
+# rot as vendors rotate catalogs; surface that at launch, not mid-matter.
+
+if [ "$DRY_RUN" != "true" ] && [ "$SKIP_MODEL_PROBE" != "true" ] && [ "$REQUIRES_CLI" = "opencode" ]; then
+    ORC_PAPERCLIP_JSON="$(mktemp -t possiblaw-orc-paperclip.XXXXXX.json)"
+    yaml_to_json "$PAPERCLIP_YAML" > "$ORC_PAPERCLIP_JSON"
+    ORC_MODELS="$(python3 "$VARIANTS_PY" \
+        --variants-json "$VARIANTS_JSON_FILE" \
+        --paperclip-json "$ORC_PAPERCLIP_JSON" \
+        --variant "$VARIANT" --list-models 2>/dev/null | { grep '^openrouter/' || true; })"
+    rm -f "$ORC_PAPERCLIP_JSON"
+    if [ -n "$ORC_MODELS" ]; then
+        ORC_CATALOG="$(mktemp -t possiblaw-orc-catalog.XXXXXX.json)"
+        if curl --silent --fail --max-time 15 https://openrouter.ai/api/v1/models -o "$ORC_CATALOG"; then
+            ORC_FAILED=""
+            while IFS= read -r orc_model; do
+                [ -n "$orc_model" ] || continue
+                orc_id="${orc_model#openrouter/}"
+                if python3 -c '
+import json, sys
+ids = {m.get("id") for m in (json.load(open(sys.argv[1])).get("data") or [])}
+sys.exit(0 if sys.argv[2] in ids else 1)
+' "$ORC_CATALOG" "$orc_id"; then
+                    log "ok: openrouter catalog lists '$orc_id'"
+                else
+                    ORC_FAILED="$ORC_FAILED $orc_model"
+                fi
+            done <<< "$ORC_MODELS"
+            if [ -n "$ORC_FAILED" ]; then
+                err "These pinned models are missing from the OpenRouter catalog:$ORC_FAILED"
+                err "Edit the lane models in $VARIANTS_FILE (see https://openrouter.ai/models),"
+                err "or re-run with --skip-model-probe to proceed anyway."
+                rm -f "$ORC_CATALOG"
+                exit 1
+            fi
+        else
+            warn "could not fetch the OpenRouter catalog (offline?) — skipping the model pin check"
+        fi
+        rm -f "$ORC_CATALOG"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Privacy-lane preflight scan (non-blocking warning)
 # ---------------------------------------------------------------------------
 #
 # If the package ships any matter declaring metadata.possiblaw.privacyTier =
-# confidential|privileged, the privacy-encoder skill will require Ollama at
-# runtime (see skills/privacy-encoder/SKILL.md §0). Warn now so the operator
-# can start Ollama before a confidential matter blocks. Non-blocking — the
-# operator may not run any confidential matter this session.
+# confidential|privileged, the privacy-encoder skill will require a local
+# model lane at runtime (see skills/privacy-encoder/SKILL.md §0). Warn now so
+# the operator can start one before a confidential matter blocks. Non-blocking
+# — the operator may not run any confidential matter this session. Variants
+# flagged `local: true` in variants.yaml (ollama, llamacpp) already ARE the
+# local lane, so the warning is skipped for them.
 #
+IS_LOCAL_VARIANT="$(variant_field "$VARIANT" local)"
 CONFIDENTIAL_HITS=0
 if [ -d "$PACKAGE/projects" ]; then
     CONFIDENTIAL_HITS="$(
@@ -666,7 +800,7 @@ if [ -d "$PACKAGE/projects" ]; then
             | wc -l | tr -d ' '
     )"
 fi
-if [ "$CONFIDENTIAL_HITS" -gt 0 ] && [ "$REQUIRES_OLLAMA" != "true" ]; then
+if [ "$CONFIDENTIAL_HITS" -gt 0 ] && [ "$IS_LOCAL_VARIANT" != "true" ]; then
     OLLAMA_PRESENT_HTTP="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 http://localhost:11434/api/version 2>/dev/null || echo 000)"
     if [ "$OLLAMA_PRESENT_HTTP" != "200" ]; then
         warn "package contains $CONFIDENTIAL_HITS matter(s) with privacyTier confidential/privileged"

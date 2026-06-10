@@ -7,6 +7,27 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.6.0] — 2026-06-09 — Variant expansion: llamacpp / opencode / openrouter
+
+### Added
+
+- **`llamacpp` variant** — fully local HF GGUF models through a llama.cpp server (`llama-server`), no Ollama client. Rides paperclip's `opencode_local` adapter via an OpenCode `@ai-sdk/openai-compatible` provider block (`baseURL http://127.0.0.1:8080/v1`); the launcher offers to write the block on first run. All lanes pin `llamacpp/default` (llama-server serves its loaded GGUF and ignores the requested name). New generic `requires_endpoint` preflight verifies the server is reachable before live runs.
+- **`opencode` variant** — first-class OpenCode via the OpenCode Zen gateway under a single `OPENCODE_API_KEY`. Lane pins mirror the `claude` variant 1:1 (Zen serves the same Claude models — verified against the models.dev registry 2026-06-09). Key stored via the same encrypted company-secret + `secret_ref` flow as the `-api` variants.
+- **`openrouter` variant** — multi-vendor cloud catalog under `OPENROUTER_API_KEY`, through OpenCode's native openrouter provider (auto-enabled by the env key; no `opencode.json` block needed). Lane pins mirror the `claude` variant via OpenRouter IDs (dots, not dashes). Live launches verify each pin against the keyless public catalog (`openrouter.ai/api/v1/models`) and block with remediation on rot; `--skip-model-probe` bypasses.
+- Privacy lane now recognizes llama.cpp: `skills/privacy-encoder/SKILL.md` §0 accepts either a reachable Ollama daemon or a llama-server as the required local lane for confidential/privileged matters, and the launcher's startup warning keys off a new `local: true` variants.yaml flag (ollama, llamacpp) instead of hardcoding Ollama.
+- `bin/_possiblaw_variants.py --lint` — structural validation of variants.yaml (adapterType/model presence, mapping shapes, OpenCode `provider/model` model-id format on `opencode_local` variants), covered by `--self-test`.
+
+### Changed
+
+- Environment preflights (variant CLI presence, Ollama daemon, endpoint reachability, OpenCode provider config) now **warn on `--dry-run` instead of blocking** — the preview is server-side and never invokes the variant runtime. Live runs still block. This matches the existing dry-run behavior of the API-key checks.
+- The launcher's auto-written OpenCode config template is now per-provider (ollama and llamacpp templates shipped; other providers get manual instructions).
+
+### Fixed
+
+- Missing `~/.config/opencode/opencode.json` on a live non-interactive run now exits non-zero; previously it printed errors and continued into a launch that would fail at the first agent run.
+
+---
+
 ## [0.5.0] — 2026-06-09 — Dual-auth: API-key variants + preflight model probe
 
 ### Added

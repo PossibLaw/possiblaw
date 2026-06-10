@@ -143,6 +143,7 @@ variants:
     requires_cli: opencode
     requires_ollama: true
     requires_opencode_provider: ollama
+    local: true
     default:
       adapterType: opencode_local
       adapterConfig:
@@ -167,6 +168,107 @@ variants:
       have Ollama running locally AND a one-time OpenCode global config declaring
       the 'ollama' provider in ~/.config/opencode/opencode.json. The launcher's
       preflight verifies both and offers to write the OpenCode config on first run.
+    per_agent: {}
+
+  llamacpp:
+    label: "llama.cpp (fully local — HF GGUF via OpenCode)"
+    requires_cli: opencode
+    requires_endpoint: "http://127.0.0.1:8080/v1/models"
+    endpoint_hint: "start llama-server first, e.g.: llama-server -hf <org>/<model>-GGUF --port 8080"
+    requires_opencode_provider: llamacpp
+    local: true
+    notes: >
+      Runs Hugging Face GGUF models through a local llama.cpp server
+      (llama-server) without the Ollama client. Rides Paperclip's
+      opencode_local adapter; the OpenCode global config must declare a
+      'llamacpp' provider (npm @ai-sdk/openai-compatible, baseURL
+      http://127.0.0.1:8080/v1) — the launcher offers to write it on first
+      run. llama-server serves whichever model it was started with and
+      ignores the requested model name, so every lane pins 'llamacpp/default';
+      pick quality by starting llama-server with the GGUF you want.
+    default:
+      adapterType: opencode_local
+      adapterConfig:
+        model: llamacpp/default
+        timeoutSec: 900
+        dangerouslySkipPermissions: true
+    lanes:
+      primary: {}
+      routing: {}
+      drafting:
+        timeoutSec: 1200
+      review:
+        timeoutSec: 1200
+      extractive: {}
+    per_agent: {}
+
+  opencode:
+    label: "OpenCode Zen (OpenCode's model gateway, API key)"
+    requires_cli: opencode
+    secret_env:
+      OPENCODE_API_KEY: "OpenCode Zen API Key"
+    notes: >
+      First-class OpenCode: models served by OpenCode's own Zen gateway under
+      a single OPENCODE_API_KEY — no other vendor logins. Lane pins mirror
+      the claude variant 1:1 because Zen serves the same Claude models
+      (verified against the models.dev registry 2026-06-09). To ride a
+      different provider you have connected via `opencode auth login`
+      instead, edit the lane models to that provider's prefix (for example
+      anthropic/claude-opus-4-7).
+    default:
+      adapterType: opencode_local
+      adapterConfig:
+        model: opencode/claude-opus-4-7
+        timeoutSec: 600
+        dangerouslySkipPermissions: true
+    lanes:
+      primary:
+        model: opencode/claude-opus-4-7
+      routing:
+        model: opencode/claude-sonnet-4-6
+      drafting:
+        model: opencode/claude-opus-4-7
+        timeoutSec: 900
+      review:
+        model: opencode/claude-opus-4-7
+        timeoutSec: 900
+      extractive:
+        model: opencode/claude-haiku-4-5
+    per_agent: {}
+
+  openrouter:
+    label: "OpenRouter (multi-vendor cloud catalog, API key)"
+    requires_cli: opencode
+    secret_env:
+      OPENROUTER_API_KEY: "OpenRouter API Key"
+    notes: >
+      Rides Paperclip's opencode_local adapter through OpenCode's native
+      openrouter provider — no opencode.json block needed; OpenCode enables
+      the provider when OPENROUTER_API_KEY is present in the agent process
+      env (models.dev registry entry, checked 2026-06-09). Lane pins mirror
+      the claude variant via OpenRouter model IDs — note OpenRouter uses
+      dots (claude-opus-4.7) where Anthropic-direct uses dashes. All three
+      pins verified in the public catalog on 2026-06-09; the launcher
+      preflight re-checks them against openrouter.ai/api/v1/models at launch.
+    default:
+      adapterType: opencode_local
+      adapterConfig:
+        model: openrouter/anthropic/claude-opus-4.7
+        timeoutSec: 600
+        dangerouslySkipPermissions: true
+    lanes:
+      primary:
+        model: openrouter/anthropic/claude-opus-4.7
+      routing:
+        model: openrouter/anthropic/claude-sonnet-4.6
+      drafting:
+        model: openrouter/anthropic/claude-opus-4.7
+        timeoutSec: 900
+      review:
+        model: openrouter/anthropic/claude-opus-4.7
+        timeoutSec: 900
+      extractive:
+        model: openrouter/anthropic/claude-haiku-4.5
     per_agent: {}
 
   # hybrid: DEFERRED.

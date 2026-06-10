@@ -22,6 +22,9 @@ pnpm -C paperclip install
   | `codex`  (default) | [Codex CLI](https://github.com/openai/codex-cli)  | `codex login --device-auth` |
   | `claude`           | [Claude CLI](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/quickstart) | `claude login` |
   | `ollama`           | [OpenCode](https://opencode.ai) + [Ollama](https://ollama.com)  | none (fully local) — see Ollama section below |
+  | `llamacpp`         | [OpenCode](https://opencode.ai) + [llama.cpp](https://github.com/ggml-org/llama.cpp) | none (fully local) — see llama.cpp section below |
+  | `opencode`         | [OpenCode](https://opencode.ai) | `OPENCODE_API_KEY` (OpenCode Zen gateway) |
+  | `openrouter`       | [OpenCode](https://opencode.ai) | `OPENROUTER_API_KEY` |
 
 - (Optional) `pandoc` if you want DOCX deliverables in addition to Markdown:
 
@@ -56,7 +59,7 @@ From the repo root:
 
 The launcher prompts for three things, then does everything else:
 
-1. **Variant** — `codex`, `claude`, or `ollama`. The launcher checks the matching CLI is installed and (for `ollama`) that the daemon is reachable.
+1. **Variant** — `codex`, `claude`, `ollama`, `llamacpp`, `opencode`, `openrouter`, or an `-api` twin. The launcher checks the matching CLI is installed and that any required local server (Ollama daemon, llama-server) is reachable.
 2. **Org name** — defaults to `PossibLaw Legal Operations`. The launcher renames the imported company via `PATCH /api/companies/{id}` after import.
 3. **Mission** — single line. Saved as the company description so it appears in the Paperclip UI banner.
 
@@ -194,6 +197,64 @@ Fully local — no cloud round-trips. Three pieces of setup:
 6. Run `./bin/possiblaw --variant ollama`.
 
 Quality caveat: Llama 3.1 trails the cloud variants on long legal-drafting tasks. Use this variant for fully-local development or where confidential matter content cannot leave the machine. See [known-limitations.md](known-limitations.md#ollama-variant).
+
+### llamacpp (fully local, HF GGUF models — no Ollama client)
+
+Runs any Hugging Face GGUF model through a local [llama.cpp](https://github.com/ggml-org/llama.cpp) server. Setup:
+
+1. **Install llama.cpp**: `brew install llama.cpp` (provides `llama-server`).
+2. **Install OpenCode**: https://opencode.ai
+3. **Start llama-server with the GGUF you want** (it downloads from Hugging Face on first run):
+
+   ```bash
+   llama-server -hf bartowski/Meta-Llama-3.1-8B-Instruct-GGUF --port 8080
+   ```
+
+4. **Declare the llamacpp provider** in `~/.config/opencode/opencode.json`. The launcher offers to write this on first run; manual shape:
+
+   ```json
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "provider": {
+       "llamacpp": {
+         "npm": "@ai-sdk/openai-compatible",
+         "name": "llama.cpp (local llama-server)",
+         "options": { "baseURL": "http://127.0.0.1:8080/v1" },
+         "models": {
+           "default": { "name": "llama-server loaded model" }
+         }
+       }
+     }
+   }
+   ```
+
+5. Run `./bin/possiblaw --variant llamacpp`.
+
+llama-server serves whichever model it was started with and ignores the requested model name, so every lane pins `llamacpp/default` — you choose quality by choosing which GGUF to load. The launcher preflight checks `http://127.0.0.1:8080/v1/models` is reachable before a live run. Same quality caveat as the Ollama variant; same privacy posture (counts as the local lane for confidential matters).
+
+### opencode (OpenCode Zen gateway)
+
+First-class OpenCode: models served by OpenCode's own Zen gateway under a single key — no other vendor logins.
+
+1. **Install OpenCode**: https://opencode.ai
+2. Get a Zen key (`opencode auth login` → OpenCode Zen, or the OpenCode dashboard) and export it: `export OPENCODE_API_KEY=...`
+3. Run `./bin/possiblaw --variant opencode`.
+
+Lane pins mirror the `claude` variant 1:1 (`opencode/claude-opus-4-7` on judgment lanes, `claude-sonnet-4-6` routing, `claude-haiku-4-5` extractive) because Zen serves the same Claude models. Prefer a different provider you've already connected via `opencode auth login`? Edit the lane models in `companies/legal-operations/variants.yaml` to that provider's prefix (e.g. `anthropic/claude-opus-4-7`).
+
+The key is stored the same way as the `-api` variants: once, as an encrypted paperclip company secret, bound to agents via `secret_ref` — never in package files or the import body.
+
+### openrouter
+
+One key, the whole multi-vendor cloud catalog.
+
+1. **Install OpenCode**: https://opencode.ai
+2. Create a key at https://openrouter.ai/keys and export it: `export OPENROUTER_API_KEY=...`
+3. Run `./bin/possiblaw --variant openrouter`.
+
+No `opencode.json` block is needed — OpenCode's native openrouter provider activates when the key is present in the agent process env. Lane pins mirror the `claude` variant via OpenRouter model IDs (`openrouter/anthropic/claude-opus-4.7` judgment, `claude-sonnet-4.6` routing, `claude-haiku-4.5` extractive — note OpenRouter uses dots where Anthropic-direct uses dashes). Live launches verify each pin against the public catalog (`openrouter.ai/api/v1/models`, keyless) and block with remediation if a pin has rotted; skip with `--skip-model-probe`.
+
+Key storage matches the other keyed variants: encrypted company secret + per-agent `secret_ref`.
 
 ## UI Demo
 

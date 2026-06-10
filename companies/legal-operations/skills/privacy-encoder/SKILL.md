@@ -20,28 +20,39 @@ This skill is agent-side: it is a runtime instruction set the agent walks throug
 
 ## When To Invoke
 
-### 0. Ollama health check (FIRST step when matter is confidential or privileged)
+### 0. Local model health check (FIRST step when matter is confidential or privileged)
 
-If the matter's `metadata.possiblaw.privacyTier` is `confidential` or `privileged`, the encoder requires a local Ollama daemon — regardless of which overall variant the operator picked at launch. Confidential matters always route the substitution step through the local model. Before running detection rules:
+If the matter's `metadata.possiblaw.privacyTier` is `confidential` or `privileged`, the encoder requires a local model lane — regardless of which overall variant the operator picked at launch. Confidential matters always route the substitution step through a local model. Two local lanes qualify: an Ollama daemon, or a llama.cpp server (`llama-server`, the `llamacpp` variant's runtime). Before running detection rules:
 
 ```bash
-# Daemon reachable?
-curl -sf --max-time 3 http://localhost:11434/api/version >/dev/null || {
-    echo "BLOCKED: privacy-encoder-required — Ollama daemon not reachable at http://localhost:11434"
-    echo "Install: https://ollama.com — then run 'ollama serve' in a separate terminal."
-    exit 0
-}
-
-# Required model pulled?
+# Lane 1: Ollama daemon reachable with the required model pulled?
+LOCAL_LANE=""
 MODEL="${POSSIBLAW_PRIVACY_MODEL:-llama3.1:8b}"
-curl -sf --max-time 3 "http://localhost:11434/api/tags" | grep -q "\"$MODEL\"" || {
-    echo "BLOCKED: privacy-encoder-required — model '$MODEL' not pulled"
-    echo "Run: ollama pull $MODEL"
+if curl -sf --max-time 3 http://localhost:11434/api/version >/dev/null; then
+    if curl -sf --max-time 3 "http://localhost:11434/api/tags" | grep -q "\"$MODEL\""; then
+        LOCAL_LANE="ollama"
+    else
+        echo "note: Ollama is running but model '$MODEL' is not pulled (ollama pull $MODEL)"
+    fi
+fi
+
+# Lane 2: llama.cpp server reachable? (llama-server serves whatever GGUF it
+# was started with; no separate model-pull check applies.)
+if [ -z "$LOCAL_LANE" ] && curl -sf --max-time 3 http://127.0.0.1:8080/v1/models >/dev/null; then
+    LOCAL_LANE="llamacpp"
+fi
+
+if [ -z "$LOCAL_LANE" ]; then
+    echo "BLOCKED: privacy-encoder-required — no local model lane reachable"
+    echo "Start one of:"
+    echo "  Ollama:    'ollama serve' then 'ollama pull $MODEL'  (https://ollama.com)"
+    echo "  llama.cpp: 'llama-server -hf <org>/<model>-GGUF --port 8080'"
     exit 0
-}
+fi
+echo "privacy-encoder local lane: $LOCAL_LANE"
 ```
 
-Both checks must pass. If either fails, post a comment beginning with `BLOCKED: privacy-encoder-required` and stop. The operator's `bin/possiblaw` launcher also surfaces a non-blocking startup warning when the package contains matters with `privacyTier: confidential|privileged` and Ollama is not running, so this in-task check is the second line of defense.
+A lane must resolve. If neither does, post a comment beginning with `BLOCKED: privacy-encoder-required` and stop. The operator's `bin/possiblaw` launcher also surfaces a non-blocking startup warning when the package contains matters with `privacyTier: confidential|privileged` and the chosen variant is not fully local, so this in-task check is the second line of defense.
 
 ### 1. Trigger conditions
 
@@ -50,7 +61,7 @@ Run the encoder before any cloud-capable adapter call (`anthropic/*`, `codex_loc
 - The matter's `metadata.possiblaw.privacyTier` is `confidential` or `privileged`.
 - The operator has explicitly tagged the current task with `privacy-encoder: required` in the task metadata.
 
-If the adapter is strictly local (`opencode_local` pointed at an `ollama/*` model on the operator's own machine, or any future `ollama_local` adapter) AND no operator override is present, the encoder is skipped.
+If the adapter is strictly local (`opencode_local` pointed at an `ollama/*` or `llamacpp/*` model on the operator's own machine, or any future `ollama_local` adapter) AND no operator override is present, the encoder is skipped.
 
 Run the decoder after the cloud call returns, before the agent emits the output to the operator, before any persistence step (`output-local-docx`, `output-local-markdown`, `output-storage-config`), and before any downstream notification (`notify-slack`, `notify-teams`).
 
