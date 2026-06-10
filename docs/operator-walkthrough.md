@@ -87,7 +87,7 @@ To preview only (no DB writes):
 
 ```bash
 ./bin/possiblaw --variant codex --dry-run --non-interactive --yes
-# preview: agents=11 skills=38 projects=3 issues=3 warnings=0 errors=0
+# preview: agents=12 skills=41 projects=3 issues=3 warnings=0 errors=0
 ```
 
 Common flags:
@@ -267,6 +267,16 @@ Key storage matches the other keyed variants: encrypted company secret + per-age
 7. Confirm `NDA Drafter` writes the deliverable to `$POSSIBLAW_DELIVERABLES_DIR/possiblaw-legal-operations/nda-matters/draft-mutual-nda-demo/<timestamp>-mutual-nda-acme-globex.md` and posts the absolute path as a comment.
 
 The starter task contains the regulated-work note at matter intake. Generated NDA work product should not append repeated disclaimer boilerplate.
+
+## Try the Capability Builder
+
+The `capability-builder` agent turns repeatable patterns into draft skills, agents, or connector descriptors — always as work products gated on your approval, never direct package changes.
+
+1. On any issue (or a new one assigned to `Chief of Staff`), comment something like: *"We review vendor NDAs against the same five points every week — can we make this a standing capability?"*
+2. Chief of Staff routes a child issue to `capability-builder` with the pattern evidence.
+3. The builder dedups against existing skills first (here it will find `legal-nda-review` overlaps and propose an edit instead of a duplicate — that's the intended behavior, not a miss).
+4. For a genuinely new pattern, the builder posts a complete draft (`SKILL.md`, or `AGENTS.md` + sidecar block, or a connector descriptor) as a fenced work product ending with `AWAITING OPERATOR APPROVAL — reply "APPROVED: <slug>" to integrate.`
+5. Nothing is integrated until you approve; integration then happens as a normal reviewed change (git + re-import or skill sync), not by the builder in the same run.
 
 ## Exercising other capabilities
 

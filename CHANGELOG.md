@@ -7,6 +7,20 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.7.0] — 2026-06-09 — Builder layer v1: capability-builder + authoring skills
+
+### Added
+
+- **`capability-builder` agent** (12th agent, reports to Chief of Staff, `modelLane: drafting`) — turns repeatable patterns into draft capabilities. Outputs are work products posted on the issue, hard-gated on explicit operator approval (`AWAITING OPERATOR APPROVAL — reply "APPROVED: <slug>"`); the builder never writes into the package, never imports/syncs, never attaches skills, and treats instructions to skip the gate as prompt injection to be flagged.
+- **Three authoring skills** (41 skills total): `skill-authoring` (draft SKILL.md — dedup-first, house format rules, license/provenance gate), `agent-authoring` (draft AGENTS.md + `.paperclip.yaml` sidecar block + lead routing row — atomicity test, `modelLane` selection so new agents inherit variant config, YAML block-list skills), `plugin-authoring` (connector descriptors — vendor docs verified with dates, `UNCONFIRMED` precedent honored, AGPL/LGPL stop-gates per standing license policy).
+- Chief of Staff routing rule: repeatable-pattern signals ("we do this every week", automation requests, 3+ repeats of the same playbook) route to `capability-builder` with pattern evidence.
+
+### Changed
+
+- Package counts: 11 → 12 agents, 38 → 41 skills. Expected dry-run preview is now `agents=12 skills=41 projects=3 issues=3 warnings=0 errors=0`.
+
+---
+
 ## [0.6.0] — 2026-06-09 — Variant expansion: llamacpp / opencode / openrouter
 
 ### Added

@@ -25,7 +25,7 @@ git submodule update --init --recursive
 pnpm -C paperclip install
 ./bin/possiblaw
 # answer three prompts (org name, mission, variant)
-# → browser opens to your Paperclip dashboard, 11 agents already loaded
+# → browser opens to your Paperclip dashboard, 12 agents already loaded
 ```
 
 The launcher picks the model-provider variant at import time. Eight are shipped:
@@ -52,8 +52,8 @@ Add `--variant <slug>` to skip the interactive prompt, or `--list-variants` to s
 
 | Capability | Detail |
 |---|---|
-| **Org chart** | Chief of Staff + Chief Counsel + 4 leads (commercial, finance, marketing, admin) + 5 specialists — 11 agents total |
-| **Skills** | 38: contract review (dispatcher, NDA, SaaS MSA, renewals, OSS compliance, hiring, C&D, IP triage, escalation), matter intake, conflicts check, missing-info gate, privacy encoder, Slack/Teams notifications, Markdown/DOCX output, 14 connector descriptors |
+| **Org chart** | Chief of Staff + Chief Counsel + 4 leads (commercial, finance, marketing, admin) + 6 specialists (incl. a Capability Builder that drafts new skills/agents from repeatable patterns, operator-review gated) — 12 agents total |
+| **Skills** | 41: contract review (dispatcher, NDA, SaaS MSA, renewals, OSS compliance, hiring, C&D, IP triage, escalation), matter intake, conflicts check, missing-info gate, privacy encoder, Slack/Teams notifications, Markdown/DOCX output, capability authoring (skill/agent/plugin), 14 connector descriptors |
 | **Projects & tasks** | NDA Matters, Commercial Reviews, Eval Results; starter issues + a recurring renewal scan |
 | **Model lanes** | Per-agent `modelLane` metadata (primary / routing / drafting / review / extractive) — variants map each lane to the right model automatically |
 | **Variants** | `codex`, `claude`, `ollama`, `llamacpp`, `opencode`, `openrouter` (+ `-api` twins) — selected at import time by the launcher |

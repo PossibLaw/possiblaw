@@ -311,6 +311,29 @@ agents:
       possiblaw:
         modelLane: extractive
         adapterDecision: codex-local-default-2026-05-22
+  capability-builder:
+    role: specialist
+    icon: hammer
+    capabilities: Drafts new skills, agent definitions, and connector descriptors from observed repeatable patterns; operator-review gated.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.3-codex
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-05-22
 sidebar:
   agents:
     - chief-of-staff
@@ -324,6 +347,7 @@ sidebar:
     - intake-form-drafter
     - admin-lead
     - calendar-coordinator
+    - capability-builder
   projects:
     - nda-matters
     - commercial-reviews
