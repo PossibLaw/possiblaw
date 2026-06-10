@@ -28,7 +28,7 @@ pnpm -C paperclip install
 # → browser opens to your Paperclip dashboard, 52 agents already loaded
 ```
 
-The launcher picks the model-provider variant at import time. Eight are shipped:
+The launcher picks the model-provider variant at import time. Ten are shipped:
 
 | Variant | Provider | When |
 |---|---|---|
