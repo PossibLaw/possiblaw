@@ -1006,6 +1006,18 @@ apply_theme_overlay() {
         [ "$base" = "index.html" ] && continue
         ln -s "$entry" "$overlay/$base"
     done
+    # Branded favicons: the stock index.html links and site.webmanifest all
+    # reference these root files by name, so replacing the files swaps the
+    # browser-tab icon to the PossibLaw tree with zero HTML changes.
+    local branding_dir="$REPO_ROOT/branding/favicon"
+    if [ -d "$branding_dir" ]; then
+        for entry in "$branding_dir"/*; do
+            base="${entry##*/}"
+            rm -f "$overlay/$base"
+            cp "$entry" "$overlay/$base"
+        done
+        log "theme: PossibLaw favicon set applied (browser tabs show the circuit tree)"
+    fi
     : > "$marker"
     ONBOARD_EXTRA_ENV="PAPERCLIP_UI_DEV_MIDDLEWARE=false"
     log "theme: '$THEME' overlay ready (light-first; the in-app toggle still works and persists per browser)"

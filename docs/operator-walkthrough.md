@@ -166,6 +166,11 @@ modified). Options:
 - `--theme dark` — stock behavior; also removes the overlay.
 - Env override: `POSSIBLAW_THEME=dark ./bin/possiblaw ...`
 
+Themed launches also swap the browser-tab favicon to the PossibLaw circuit
+tree (all sizes: .ico, SVG, PNGs, apple-touch, manifest icons) — sourced from
+`branding/favicon/`. `--theme dark` reverts to the stock paperclip favicon
+along with the rest of the overlay.
+
 The in-app toggle (sidebar account menu → "Switch to dark/light mode") always
 wins once a user clicks it — the theme flag only seeds the default for
 browsers with no stored preference. If the UI build fails, the launcher warns

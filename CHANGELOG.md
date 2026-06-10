@@ -7,6 +7,20 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.15.0] — 2026-06-10 — PossibLaw circuit-tree favicon on themed launches
+
+### Added
+
+- `branding/possiblaw-circuit-tree.png` (source logo) + `branding/favicon/` — full favicon set generated from it: `favicon.ico` (PNG-embedded 16/32/48), `favicon.svg` (SVG-wrapped 512px), `favicon-16x16.png`, `favicon-32x32.png`, `apple-touch-icon.png` (180), `android-chrome-192x192.png` / `-512x512.png`.
+- Theme overlay now copies the branded set over the stock paperclip favicons. The stock `index.html` links and `site.webmanifest` reference these root files by name, so the swap needs zero HTML changes and survives the server's startup favicon-block rewrite. `--theme dark` reverts everything with the overlay.
+
+### Validation
+
+- `file` confirms a well-formed 3-icon ICO; `bash -n` green.
+- Live e2e on a disposable themed server: `favicon.ico`, `favicon.svg`, `favicon-16x16.png`, `favicon-32x32.png`, `apple-touch-icon.png` each served byte-identical to `branding/favicon/`.
+
+---
+
 ## [0.14.0] — 2026-06-09 — Practice-management, email, and drive connectors (18 connectors, 71 skills)
 
 ### Added
