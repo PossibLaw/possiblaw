@@ -7,6 +7,24 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.10.0] — 2026-06-09 — Gemini variants (10 variants total)
+
+### Added
+
+- **`gemini` variant** — Google models via paperclip's `gemini_local` adapter and the gemini CLI's OAuth subscription login. Lanes: `gemini-2.5-pro` (primary/drafting/review, 900s on drafting/review), `gemini-2.5-flash` (routing), `gemini-2.5-flash-lite` (extractive); pins date-stamped 2026-06-09 against the adapter catalog. No reasoning-effort knob exists on `gemini_local` (documented in known-limitations).
+- **`gemini-api` variant** — same lanes, billed via `GEMINI_API_KEY` through the existing dual-auth secret_ref machinery (`gemini_local` accepts `adapterConfig.env` like claude/codex adapters).
+- Launcher: gemini case in the preflight model probe (`gemini -m <model> -p`), stray-key warning on the subscription variant when `GEMINI_API_KEY`/`GOOGLE_API_KEY` is set, help-text updates.
+- Docs: walkthrough setup section, README variant table (10 variants), known-limitations note.
+
+### Validation
+
+- `bash -n`, both helper self-tests, `--lint` (10 variants), `--list-variants` showing both new variants with requirements.
+- Override mapping verified per-lane against the real `.paperclip.yaml`: chief-counsel → `gemini-2.5-pro`/600s, privacy-lead → `gemini-2.5-flash`, drafters/reviewers → `gemini-2.5-pro`/900s, extractive → `gemini-2.5-flash-lite`, no effort key emitted.
+- Dry-run e2e on a disposable server: missing gemini CLI warns (dry-run) as designed; preview `agents=36 skills=57 projects=3 issues=3 warnings=0 errors=0`.
+- Not validated machine-side: live gemini runs (gemini CLI not installed on this machine); the launch-time probe covers it operator-side.
+
+---
+
 ## [0.9.0] — 2026-06-09 — Expansion batches 2–3: privacy, litigation, corporate, regulatory teams (36 agents / 57 skills)
 
 ### Added

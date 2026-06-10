@@ -271,6 +271,68 @@ variants:
         model: openrouter/anthropic/claude-haiku-4.5
     per_agent: {}
 
+  gemini:
+    label: "Gemini CLI (subscription)"
+    requires_cli: gemini
+    notes: >
+      Rides paperclip's gemini_local adapter. Auth via the gemini CLI's stored
+      OAuth login; no API key needed. Model pins verified against the adapter's
+      catalog (paperclip/packages/adapters/gemini-local/src/index.ts) on
+      2026-06-09: gemini-2.5-pro / gemini-2.5-flash / gemini-2.5-flash-lite.
+      gemini_local exposes no reasoning-effort knob, so lanes differ by model
+      and timeout only. Install: npm install -g @google/gemini-cli.
+    default:
+      adapterType: gemini_local
+      adapterConfig:
+        model: gemini-2.5-pro
+        timeoutSec: 600
+    lanes:
+      primary:
+        model: gemini-2.5-pro
+      routing:
+        model: gemini-2.5-flash
+      drafting:
+        model: gemini-2.5-pro
+        timeoutSec: 900
+      review:
+        model: gemini-2.5-pro
+        timeoutSec: 900
+      extractive:
+        model: gemini-2.5-flash-lite
+    per_agent: {}
+
+  gemini-api:
+    label: "Gemini CLI (API key)"
+    requires_cli: gemini
+    secret_env:
+      GEMINI_API_KEY: "Gemini API Key"
+    notes: >
+      Same models and lanes as the gemini variant, but billed against a Gemini
+      API key. Export GEMINI_API_KEY in the shell that runs bin/possiblaw; the
+      launcher stores it once as a paperclip company secret and binds it to
+      every agent via a secret_ref env binding — the key never lands in package
+      files or the import body. The adapter also honors GOOGLE_API_KEY; this
+      variant binds GEMINI_API_KEY. Pins date-stamped 2026-06-09.
+    default:
+      adapterType: gemini_local
+      adapterConfig:
+        model: gemini-2.5-pro
+        timeoutSec: 600
+    lanes:
+      primary:
+        model: gemini-2.5-pro
+      routing:
+        model: gemini-2.5-flash
+      drafting:
+        model: gemini-2.5-pro
+        timeoutSec: 900
+      review:
+        model: gemini-2.5-pro
+        timeoutSec: 900
+      extractive:
+        model: gemini-2.5-flash-lite
+    per_agent: {}
+
   # hybrid: DEFERRED.
   # Paperclip's `assigneeAdapterOverrides` can only merge config within the same
   # adapter type — it cannot swap adapter types per issue today. A true hybrid

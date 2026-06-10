@@ -153,6 +153,15 @@ catalog pin check (each pinned model must exist in
 endpoint preflights only, so a Zen-catalog rotation or a wrong GGUF surfaces
 on the first live run rather than at launch.
 
+## Gemini variants have no reasoning-effort lanes
+
+Paperclip's `gemini_local` adapter exposes no reasoning-effort or thinking
+knob, so the `gemini` / `gemini-api` lanes differ by model and timeout only
+(`gemini-2.5-pro` judgment, `gemini-2.5-flash` routing, `gemini-2.5-flash-lite`
+extractive). The adapter also honors `GOOGLE_API_KEY`; the `gemini-api`
+variant binds `GEMINI_API_KEY` specifically — if both are set, the CLI's own
+precedence applies.
+
 ## API-key variants and dry-run
 
 `--dry-run` never creates the paperclip company secret (there is no company

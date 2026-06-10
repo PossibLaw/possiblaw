@@ -40,6 +40,8 @@ The launcher picks the model-provider variant at import time. Eight are shipped:
 | `llamacpp`   | Local HF GGUF via llama.cpp + OpenCode | Fully local without the Ollama client — bring any GGUF |
 | `opencode`   | OpenCode Zen gateway (`OPENCODE_API_KEY`) | One key for OpenCode's curated catalog, no vendor logins |
 | `openrouter` | OpenRouter (`OPENROUTER_API_KEY`) | One key for the multi-vendor cloud catalog |
+| `gemini`     | Gemini CLI subscription  | Google models via the gemini CLI's OAuth login |
+| `gemini-api` | Gemini CLI + Gemini API key | Same as `gemini`, billed against the API (`GEMINI_API_KEY`) |
 
 Live launches preflight-probe each lane model with a tiny CLI request (and
 check OpenRouter pins against its public catalog), so "you don't have access
@@ -56,7 +58,7 @@ Add `--variant <slug>` to skip the interactive prompt, or `--list-variants` to s
 | **Skills** | 57: contract review (dispatcher, NDA, SaaS MSA, renewals, OSS compliance, hiring, C&D, IP triage, escalation), practice playbooks and checklists (employment, IP, privacy, litigation, corporate, regulatory), matter intake, conflicts check, missing-info gate, privacy encoder, Slack/Teams notifications, Markdown/DOCX output, capability authoring (skill/agent/plugin), 14 connector descriptors |
 | **Projects & tasks** | NDA Matters, Commercial Reviews, Eval Results; starter issues + a recurring renewal scan |
 | **Model lanes** | Per-agent `modelLane` metadata (primary / routing / drafting / review / extractive) — variants map each lane to the right model automatically |
-| **Variants** | `codex`, `claude`, `ollama`, `llamacpp`, `opencode`, `openrouter` (+ `-api` twins) — selected at import time by the launcher |
+| **Variants** | `codex`, `claude`, `gemini`, `ollama`, `llamacpp`, `opencode`, `openrouter` (+ `-api` twins) — selected at import time by the launcher |
 | **Privacy posture** | Privacy-encoder skill blocks confidential/privileged matters unless a local model (Ollama or llama.cpp) is reachable |
 
 ---

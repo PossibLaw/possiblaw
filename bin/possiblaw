@@ -69,7 +69,8 @@ OPTIONS:
                         openrouter. If omitted, prompts.
                         Key-taking variants (codex-api, claude-api, opencode,
                         openrouter) bill an API key: export it (OPENAI_API_KEY,
-                        ANTHROPIC_API_KEY, OPENCODE_API_KEY, OPENROUTER_API_KEY)
+                        ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENCODE_API_KEY,
+                        OPENROUTER_API_KEY)
                         before running; it is stored once as a paperclip
                         company secret, never in files.
                         Fully local variants: ollama (Ollama daemon) and
@@ -88,8 +89,8 @@ OPTIONS:
   --dry-run             POST to /api/companies/import/preview instead of /import.
                         Skips the model probe and secret creation.
   --list-variants       Print available variants from variants.yaml and exit.
-  --skip-model-probe    Skip the preflight per-model CLI probe (codex/claude
-                        variants probe each lane model with a tiny request so
+  --skip-model-probe    Skip the preflight per-model CLI probe (codex/claude/
+                        gemini variants probe each lane model with a tiny request so
                         "no access to model" errors surface before launch).
   --no-browser          Don't auto-open the dashboard URL.
   -h, --help            Show this help and exit.
@@ -504,6 +505,13 @@ else
                 warn "switch to '--variant codex-api' to make API billing explicit."
             fi
             ;;
+        gemini)
+            if [ -n "${GEMINI_API_KEY:-}" ] || [ -n "${GOOGLE_API_KEY:-}" ]; then
+                warn "GEMINI_API_KEY/GOOGLE_API_KEY is set in this shell. The gemini CLI will"
+                warn "bill your API account instead of the subscription. Unset it before"
+                warn "running, or switch to '--variant gemini-api' to make API billing explicit."
+            fi
+            ;;
     esac
 fi
 
@@ -668,6 +676,11 @@ probe_model() {
                 "Reply with exactly: OK" ) \
                 > "$out_file" 2> "$err_file" </dev/null &
             ;;
+        gemini)
+            ( cd "$REPO_ROOT" && gemini -m "$model" \
+                -p "Reply with exactly: OK" ) \
+                > "$out_file" 2> "$err_file" </dev/null &
+            ;;
         *)
             rm -f "$out_file" "$err_file"
             return 0
@@ -695,7 +708,8 @@ probe_model() {
 }
 
 if [ "$DRY_RUN" != "true" ] && [ "$SKIP_MODEL_PROBE" != "true" ] \
-        && { [ "$REQUIRES_CLI" = "claude" ] || [ "$REQUIRES_CLI" = "codex" ]; }; then
+        && { [ "$REQUIRES_CLI" = "claude" ] || [ "$REQUIRES_CLI" = "codex" ] \
+             || [ "$REQUIRES_CLI" = "gemini" ]; }; then
     PROBE_PAPERCLIP_JSON="$(mktemp -t possiblaw-probe-paperclip.XXXXXX.json)"
     yaml_to_json "$PAPERCLIP_YAML" > "$PROBE_PAPERCLIP_JSON"
     PROBE_MODELS="$(python3 "$VARIANTS_PY" \

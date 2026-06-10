@@ -25,6 +25,7 @@ pnpm -C paperclip install
   | `llamacpp`         | [OpenCode](https://opencode.ai) + [llama.cpp](https://github.com/ggml-org/llama.cpp) | none (fully local) — see llama.cpp section below |
   | `opencode`         | [OpenCode](https://opencode.ai) | `OPENCODE_API_KEY` (OpenCode Zen gateway) |
   | `openrouter`       | [OpenCode](https://opencode.ai) | `OPENROUTER_API_KEY` |
+  | `gemini`           | [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`npm install -g @google/gemini-cli`) | `gemini` OAuth login, or `GEMINI_API_KEY` for `gemini-api` |
 
 - (Optional) `pandoc` if you want DOCX deliverables in addition to Markdown:
 
@@ -59,7 +60,7 @@ From the repo root:
 
 The launcher prompts for three things, then does everything else:
 
-1. **Variant** — `codex`, `claude`, `ollama`, `llamacpp`, `opencode`, `openrouter`, or an `-api` twin. The launcher checks the matching CLI is installed and that any required local server (Ollama daemon, llama-server) is reachable.
+1. **Variant** — `codex`, `claude`, `gemini`, `ollama`, `llamacpp`, `opencode`, `openrouter`, or an `-api` twin. The launcher checks the matching CLI is installed and that any required local server (Ollama daemon, llama-server) is reachable.
 2. **Org name** — defaults to `PossibLaw Legal Operations`. The launcher renames the imported company via `PATCH /api/companies/{id}` after import.
 3. **Mission** — single line. Saved as the company description so it appears in the Paperclip UI banner.
 
@@ -255,6 +256,16 @@ One key, the whole multi-vendor cloud catalog.
 No `opencode.json` block is needed — OpenCode's native openrouter provider activates when the key is present in the agent process env. Lane pins mirror the `claude` variant via OpenRouter model IDs (`openrouter/anthropic/claude-opus-4.7` judgment, `claude-sonnet-4.6` routing, `claude-haiku-4.5` extractive — note OpenRouter uses dots where Anthropic-direct uses dashes). Live launches verify each pin against the public catalog (`openrouter.ai/api/v1/models`, keyless) and block with remediation if a pin has rotted; skip with `--skip-model-probe`.
 
 Key storage matches the other keyed variants: encrypted company secret + per-agent `secret_ref`.
+
+### gemini / gemini-api
+
+Google models through paperclip's `gemini_local` adapter.
+
+1. **Install the Gemini CLI**: `npm install -g @google/gemini-cli`
+2. Subscription path: run `gemini` once and complete the OAuth login. API path: `export GEMINI_API_KEY=...` and use `--variant gemini-api` (key stored as an encrypted company secret, bound via `secret_ref`).
+3. Run `./bin/possiblaw --variant gemini` (or `--variant gemini-api`).
+
+Lane pins (date-stamped 2026-06-09 against the adapter's catalog): `gemini-2.5-pro` on primary/drafting/review, `gemini-2.5-flash` on routing, `gemini-2.5-flash-lite` on extractive. The `gemini_local` adapter has no reasoning-effort knob, so lanes differ by model and timeout only. Live launches probe each lane model with a tiny `gemini -p` request; skip with `--skip-model-probe`. If both `GEMINI_API_KEY`/`GOOGLE_API_KEY` are set in the shell on the subscription variant, the launcher warns about silent API billing.
 
 ## UI Demo
 
