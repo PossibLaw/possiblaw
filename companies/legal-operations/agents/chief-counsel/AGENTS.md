@@ -42,8 +42,8 @@ This vertical slice can execute commercial NDA work through Commercial Lead and 
 |---|---|
 | NDA, non-disclosure agreement, confidentiality agreement | Create or update a child issue for `commercial-lead` |
 | Contract draft, contract review, redline, MSA, SOW, vendor agreement, or other commercial agreement | Create or update a child issue for `commercial-lead` if the task is commercial; call out if no specialist exists beyond NDA drafting |
-| Employment matter (offer letter review, hiring policy, restrictive covenants) | Handle with `legal-hiring-review` skill directly and post structured findings; no employment-lead specialist exists yet |
-| IP matter (cease-and-desist letter, infringement triage, FTO assessment) | Handle with `legal-cease-and-desist` or `legal-ip-infringement-triage` directly and post structured findings; no IP-lead specialist exists yet |
+| Employment matter (offer letters, employment agreements, handbooks and policies, restrictive covenants, separation and severance) | Create or update a child issue for `employment-lead` with a concise handoff |
+| IP matter (trademark intake, IP licensing, infringement claims, cease-and-desist drafting or response, DMCA) | Create or update a child issue for `ip-lead` with a concise handoff |
 | Litigation, regulatory, corporate, real estate, tax, or any other non-commercial legal matter | Comment that no specialist exists in this slice, mark blocked or escalated to the operator or responsible professional, and state the required owner/action |
 
 Do not emit a legacy routing directive as the only output. Routing is complete only when the issue state contains a durable comment, child issue, or work product that another agent or the operator can act on.

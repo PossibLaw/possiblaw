@@ -334,6 +334,211 @@ agents:
       possiblaw:
         modelLane: drafting
         adapterDecision: codex-local-default-2026-05-22
+  employment-lead:
+    role: practice-lead
+    icon: users
+    capabilities: Employment-law triage; routes offer, policy, and separation work to specialists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-09
+  employment-offer-letter-drafter:
+    role: specialist
+    icon: file-signature
+    capabilities: Offer letter and employment agreement drafting from matter facts.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
+  employment-policy-reviewer:
+    role: specialist
+    icon: shield-check
+    capabilities: Clause-by-clause handbook, policy, and restrictive-covenant review with risk ratings.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-09
+  employment-separation-drafter:
+    role: specialist
+    icon: file-minus
+    capabilities: Separation agreement, severance, and release drafting with privacy-encoder gating.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_KEY_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_WORDLIST:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
+  ip-lead:
+    role: practice-lead
+    icon: lightbulb
+    capabilities: IP-matter triage; routes trademark, licensing, and infringement work to specialists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-09
+  ip-trademark-intake-triage:
+    role: specialist
+    icon: tag
+    capabilities: Trademark intake extraction, structured intake records, and clearance-search outlines.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-09
+  ip-licensing-drafter:
+    role: specialist
+    icon: file-key
+    capabilities: IP license agreement and license-section drafting with OSS-compliance checks.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
+  ip-infringement-analyst:
+    role: specialist
+    icon: shield-alert
+    capabilities: Infringement triage both directions, structured findings, and C&D or response drafts.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-09
 sidebar:
   agents:
     - chief-of-staff
@@ -348,6 +553,14 @@ sidebar:
     - admin-lead
     - calendar-coordinator
     - capability-builder
+    - employment-lead
+    - employment-offer-letter-drafter
+    - employment-policy-reviewer
+    - employment-separation-drafter
+    - ip-lead
+    - ip-trademark-intake-triage
+    - ip-licensing-drafter
+    - ip-infringement-analyst
   projects:
     - nda-matters
     - commercial-reviews

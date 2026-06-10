@@ -7,6 +7,22 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.8.0] — 2026-06-09 — Expansion batch 1: employment + IP teams (20 agents / 46 skills)
+
+### Added
+
+- **Employment team** (reports to Chief Counsel): `employment-lead` (routing) + `employment-offer-letter-drafter` (drafting), `employment-policy-reviewer` (review), `employment-separation-drafter` (drafting, privacy-encoder gated for confidential separations). Skills: `employment-offer-letter-playbook`, `employment-policy-review-checklist`, `employment-separation-playbook`.
+- **IP team** (reports to Chief Counsel): `ip-lead` (routing) + `ip-trademark-intake-triage` (extractive), `ip-licensing-drafter` (drafting, runs `legal-oss-compliance` when OSS is in scope), `ip-infringement-analyst` (review, drafts C&D/response letters via `legal-cease-and-desist`, may use `connector-courtlistener`). Skills: `ip-trademark-intake-checklist`, `ip-license-playbook`.
+- Chief Counsel routing: the "no employment-lead / no IP-lead specialist exists yet" placeholder rows are replaced with real delegation to the new leads.
+- All specialists carry the standing security boundary: drafts are work products; sending, filing, or transmitting to any external party/registry blocks pending operator approval.
+
+### Changed
+
+- Package counts: 12 → 20 agents, 41 → 46 skills. Expected dry-run preview is now `agents=20 skills=46 projects=3 issues=3 warnings=0 errors=0`.
+- Sidecar static model defaults bumped `gpt-5.3-codex` → `gpt-5.5` across all agent blocks (subscription-served; launcher still overrides per variant). New agent blocks date-stamp `adapterDecision: codex-local-default-2026-06-09`.
+
+---
+
 ## [0.7.0] — 2026-06-09 — Builder layer v1: capability-builder + authoring skills
 
 ### Added

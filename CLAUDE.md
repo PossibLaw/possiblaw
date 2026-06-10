@@ -98,8 +98,8 @@ Run the launcher dry-run + helper self-tests before handoff. Expected dry-run pl
 
 ## Code Map
 - Entry point: `bin/possiblaw` (bash launcher).
-- Package root: `companies/legal-operations/` — 12 agents under `agents/`, 41 skills under `skills/`, 3 projects under `projects/`, eval convention under `evals/`, `variants.yaml`, `.paperclip.yaml`.
-- Org chart: chief-of-staff (orchestrator), chief-counsel, commercial-lead, finance-lead, marketing-lead, admin-lead, plus specialists (nda-drafter, contract-reviewer, billing-prep, intake-form-drafter, calendar-coordinator, capability-builder — drafts new skills/agents/connectors, operator-review gated).
+- Package root: `companies/legal-operations/` — 20 agents under `agents/`, 46 skills under `skills/`, 3 projects under `projects/`, eval convention under `evals/`, `variants.yaml`, `.paperclip.yaml`.
+- Org chart: chief-of-staff (orchestrator), chief-counsel, six leads (commercial, employment, ip, finance, marketing, admin), plus specialists (nda-drafter, contract-reviewer, employment-offer-letter-drafter, employment-policy-reviewer, employment-separation-drafter, ip-trademark-intake-triage, ip-licensing-drafter, ip-infringement-analyst, billing-prep, intake-form-drafter, calendar-coordinator, capability-builder — drafts new skills/agents/connectors, operator-review gated).
 - Historical source material: `layer/` (agents, skills, workflows, connector YAML, eval datasets) — convert into the package, don't extend.
 - Docs: `docs/operator-walkthrough.md` (canonical getting-started), `docs/paperclip-package.md`, `docs/known-limitations.md`, `docs/ARCHITECTURE.md` (decision log).
 - Plan + handoff: `/Users/salvadorcarranza/.claude/plans/eventual-munching-fairy.md` (plan-of-record, local-only), `.agent/PLAN.md` (active work queue), `.agent/HANDOFF.md`.

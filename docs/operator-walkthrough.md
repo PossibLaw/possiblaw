@@ -87,7 +87,7 @@ To preview only (no DB writes):
 
 ```bash
 ./bin/possiblaw --variant codex --dry-run --non-interactive --yes
-# preview: agents=12 skills=41 projects=3 issues=3 warnings=0 errors=0
+# preview: agents=20 skills=46 projects=3 issues=3 warnings=0 errors=0
 ```
 
 Common flags:
@@ -112,10 +112,10 @@ Common flags:
 1. Install Codex CLI: see [openai/codex-cli](https://github.com/openai/codex-cli).
 2. Authenticate once: `codex login --device-auth` (opens a browser for ChatGPT subscription auth).
 
-Per-lane reasoning effort applied at import:
+Per-lane reasoning effort applied at import (by each agent's `modelLane`):
 
-- `high` — chief-of-staff, chief-counsel, commercial-lead, nda-drafter, contract-reviewer, intake-form-drafter (drafting + judgment)
-- `medium` — finance-lead, marketing-lead, admin-lead, billing-prep, calendar-coordinator (routing + extractive)
+- `high` — primary, drafting, and review lanes (chiefs, drafters, reviewers, capability-builder)
+- `medium` — routing and extractive lanes (domain leads, intake/triage specialists)
 
 ### claude
 
