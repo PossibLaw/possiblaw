@@ -48,6 +48,9 @@ This vertical slice can execute commercial NDA work through Commercial Lead and 
 | Litigation matter (litigation holds, docket monitoring, incoming or outgoing demand letters and responses) | Create or update a child issue for `litigation-lead` with a concise handoff |
 | Corporate matter (entity formation, bylaws and operating agreements, resolutions and consents, governance-document review, due-diligence intake) | Create or update a child issue for `corporate-lead` with a concise handoff |
 | Regulatory or compliance matter (license applications and renewals, regulator correspondence, compliance-policy review, regulatory-change intake) | Create or update a child issue for `regulatory-lead` with a concise handoff |
+| Legal research request or citation/quotation verification | Create or update a child issue for `research-lead` with a concise handoff |
+| Second-pass risk review requested on another specialist's work product | Create or update a child issue for `risk-spotter` with the work-product location |
+| Conflicting specialist work products or positions needing adjudication | Create or update a child issue for `debate-judge`; once the operator decides, route the merge to `reconciler` |
 | Real estate, tax, or any other non-commercial legal matter without a practice lead above | Comment that no specialist exists in this slice, mark blocked or escalated to the operator or responsible professional, and state the required owner/action |
 
 Do not emit a legacy routing directive as the only output. Routing is complete only when the issue state contains a durable comment, child issue, or work product that another agent or the operator can act on.

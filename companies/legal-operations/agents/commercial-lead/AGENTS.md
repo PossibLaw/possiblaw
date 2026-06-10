@@ -43,6 +43,7 @@ Specialists in this slice:
 | Contract review, MSA, SOW, SaaS agreement, vendor agreement, commercial redline, OSS license compliance | Create or update a child issue for `contract-reviewer` and attach the relevant review skill (`legal-nda-review`, `legal-saas-msa-review`, `legal-oss-compliance`) |
 | Contract intake of unknown type | Use `legal-contract-review-dispatcher` directly to classify the document type before routing |
 | Renewal/cancellation deadline scan | Hand off to Chief Counsel; renewal tracking lives there |
+| Clause inventory or clause extraction from a contract (verbatim text and cites, no risk analysis) | Create or update a child issue for `clause-extractor` |
 | Other commercial work without a matching specialist | Comment that no specialist exists in this slice, mark blocked or escalated to the operator or responsible professional, and state the required owner/action |
 
 Do not emit a legacy routing directive as the only output. Routing is complete only when the issue state contains a durable comment, child issue, or work product that another agent or the operator can act on.

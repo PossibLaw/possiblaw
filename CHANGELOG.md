@@ -7,6 +7,24 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.12.0] — 2026-06-09 — Expansion batches 4–5: research, BD, ops teams + layer conversions (52 agents / 67 skills)
+
+### Added
+
+- **Legal research team** (reports to Chief Counsel): `research-lead` (routing) + `legal-research-analyst` (review; runs the 4 research connectors — CourtListener, Lexis, Westlaw, midpage — with a hard no-fabricated-citations rule) and `legal-citation-checker` (extractive; per-citation verification table, currency checks as operator follow-ups). Skills: `legal-research-playbook`, `citation-verification-checklist`.
+- **Business development team** (reports to Chief of Staff): `bd-lead` (routing) + `bd-proposal-drafter` (drafting; never invents credentials, never sends to prospects, conflicts-check prerequisite for named adverse parties) and `bd-crm-coordinator` (extractive; HubSpot hygiene, merge/delete proposed as operator follow-ups). Skills: `bd-proposal-playbook`, `bd-crm-hygiene-checklist`.
+- **Internal ops team** (reports to Chief of Staff): `ops-lead` (routing) + `ops-vendor-intake` (extractive), `ops-sop-curator` (drafting), `hr-internal-coordinator` (drafting; employment-LAW questions route to the employment practice). Skills: `ops-vendor-intake-checklist`, `ops-sop-playbook`, `hr-internal-onboarding-playbook`.
+- **Layer conversions** (the last 6 unconverted layer/ agents): `clause-extractor` (extractive, under commercial-lead), `risk-spotter` (review, additive-only second-pass risk registers), `debate-judge` (review, adjudicates conflicting work products — operator decides), `reconciler` (drafting, merges resolved positions with a change log), `expense-categorizer` (extractive, under finance-lead), `pitch-polisher` (drafting, under marketing-lead). Skills: `clause-extraction-checklist`, `risk-spotting-checklist`, `debate-adjudication-playbook` (shared by judge + reconciler).
+- Routing: chief-of-staff gains BD + internal-ops rows; chief-counsel gains research, second-pass-review, and adjudication rows; commercial/finance/marketing leads gain their new specialist rows with narrowed catch-alls.
+
+### Validation
+
+- Cross-check: 52 agents on disk == sidecar == sidebar; 67 skills; every skill ref and reportsTo resolves; lanes 3 primary / 16 drafting / 9 review / 12 routing / 12 extractive; whitespace clean.
+- Dry-run preview: `agents=52 skills=67 projects=3 issues=3 warnings=0 errors=0`.
+- Live import + readback on a disposable server: 52 agents, 0 warnings; lane spot-checks exact across all 5 new teams; skill bindings match frontmatter counts (research analyst 7/7 incl. 4 connectors); reportsTo resolved to live agent IDs.
+
+---
+
 ## [0.11.0] — 2026-06-09 — Launch theme: light-first dashboard with the PossibLaw palette
 
 ### Added

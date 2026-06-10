@@ -37,8 +37,10 @@ This package routes by business domain. Delegate to the lead that owns the matte
 | Finance, billing, expense categorization, invoicing, time aggregation | Create or update a child issue for `finance-lead` |
 | Marketing, intake forms, content drafting, pitch material | Create or update a child issue for `marketing-lead` |
 | Administrative coordination, scheduling, calendar conflicts, meeting prep | Create or update a child issue for `admin-lead` |
+| Business development — pitches, proposals, RFP responses, CRM/contact updates | Create or update a child issue for `bd-lead` |
+| Internal operations — vendor onboarding, SOPs, internal HR coordination (onboarding/offboarding logistics) | Create or update a child issue for `ops-lead` |
 | Repeatable pattern spotted — the operator or an agent says "we do this every week", asks to automate a recurring workflow, proposes a new skill/agent/integration, or the same playbook has been applied three or more times | Create or update a child issue for `capability-builder` with the pattern evidence (which matters, how often, who asked) |
-| Ops or any unrecognized domain | Comment that no runtime agent exists in this slice, mark the issue blocked or escalated to the operator, and state the required owner/action |
+| Any unrecognized domain | Comment that no runtime agent exists in this slice, mark the issue blocked or escalated to the operator, and state the required owner/action |
 
 When a matter is blocked pending operator input, use the `missing-info-gate` skill to format the BLOCKED comment and the `notify-slack` (or `notify-teams`) skill to surface the gate to the operator. Slack/Teams notifications are best-effort: if the webhook env is unconfigured, fall back to the gate comment only and proceed.
 

@@ -988,6 +988,409 @@ agents:
       possiblaw:
         modelLane: extractive
         adapterDecision: codex-local-default-2026-06-09
+  research-lead:
+    role: practice-lead
+    icon: book-open
+    capabilities: Legal-research triage; routes research memos and citation checks to specialists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-09
+  legal-research-analyst:
+    role: specialist
+    icon: library
+    capabilities: Connector-backed legal research memos with exact citations and coverage notes.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-09
+  legal-citation-checker:
+    role: specialist
+    icon: check-check
+    capabilities: Citation and quotation verification against supplied sources; currency flagged to operator.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-09
+  bd-lead:
+    role: practice-lead
+    icon: handshake
+    capabilities: Business-development triage; routes proposals and CRM hygiene to specialists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-09
+  bd-proposal-drafter:
+    role: specialist
+    icon: file-text
+    capabilities: Pitch, proposal, and RFP-response drafting from supplied facts; never sends to prospects.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
+  bd-crm-coordinator:
+    role: specialist
+    icon: contact
+    capabilities: CRM record structuring via the HubSpot connector with dedup and completeness checks.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-09
+  ops-lead:
+    role: practice-lead
+    icon: settings
+    capabilities: Internal-ops triage; routes vendor intake, SOPs, and HR coordination to specialists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-09
+  ops-vendor-intake:
+    role: specialist
+    icon: package
+    capabilities: Vendor-onboarding fact intake with legal/security review flags; never approves vendors.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-09
+  ops-sop-curator:
+    role: specialist
+    icon: notebook
+    capabilities: Internal SOP drafting and revision with versioning; never invents process steps.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
+  hr-internal-coordinator:
+    role: specialist
+    icon: user-check
+    capabilities: Internal onboarding/offboarding coordination; employment-law questions route to the employment practice.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
+  clause-extractor:
+    role: specialist
+    icon: list
+    capabilities: Verbatim clause inventories with location cites; no interpretation or risk rating.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-09
+  risk-spotter:
+    role: specialist
+    icon: alert-triangle
+    capabilities: Second-pass additive risk registers over other specialists' work products.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-09
+  debate-judge:
+    role: specialist
+    icon: git-compare
+    capabilities: Structured adjudication of conflicting specialist positions; the operator decides.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-09
+  reconciler:
+    role: specialist
+    icon: merge
+    capabilities: Merges resolved positions into one consolidated work product with a change log.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
+  expense-categorizer:
+    role: specialist
+    icon: tags
+    capabilities: Expense categorization against the firm scheme; ambiguous items flagged for operator.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-09
+  pitch-polisher:
+    role: specialist
+    icon: sparkles
+    capabilities: Polishes supplied pitch and marketing copy; never invents claims, never sends.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
 sidebar:
   agents:
     - chief-of-staff
@@ -1026,6 +1429,22 @@ sidebar:
     - regulatory-filing-drafter
     - compliance-policy-reviewer
     - regulatory-change-monitor
+    - research-lead
+    - legal-research-analyst
+    - legal-citation-checker
+    - bd-lead
+    - bd-proposal-drafter
+    - bd-crm-coordinator
+    - ops-lead
+    - ops-vendor-intake
+    - ops-sop-curator
+    - hr-internal-coordinator
+    - clause-extractor
+    - risk-spotter
+    - debate-judge
+    - reconciler
+    - expense-categorizer
+    - pitch-polisher
   projects:
     - nda-matters
     - commercial-reviews

@@ -36,7 +36,8 @@ This vertical slice has one finance specialist: Billing Prep.
 | Incoming finance matter | Paperclip action |
 |---|---|
 | Invoice drafting, billing statement, matter invoice, fee summary | Create or update a child issue for `billing-prep` |
-| Expense list categorization, spend classification, deductibility analysis, or any other finance work not covered by Billing Prep | Comment that no specialist exists in this slice for that sub-domain, mark the issue blocked or escalated to the operator, and state the required owner/action |
+| Expense list categorization, spend classification | Create or update a child issue for `expense-categorizer` |
+| Deductibility analysis or any other finance work without a matching specialist | Comment that no specialist exists in this slice for that sub-domain, mark the issue blocked or escalated to the operator, and state the required owner/action |
 
 Do not emit a legacy routing directive as the only output. Routing is complete only when the issue state contains a durable comment, child issue, or work product that another agent or the operator can act on.
 
