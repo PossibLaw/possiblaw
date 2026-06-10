@@ -7,6 +7,29 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.9.0] — 2026-06-09 — Expansion batches 2–3: privacy, litigation, corporate, regulatory teams (36 agents / 57 skills)
+
+### Added
+
+- **Privacy/data-protection team** (reports to Chief Counsel): `privacy-lead` (routing) + `privacy-dpa-drafter` (drafting, SCC/IDTA placeholder rules, privacy-encoder gated), `privacy-policy-reviewer` (review), `privacy-incident-triage` (extractive; notification regimes and deadlines framed only as operator follow-ups). Skills: `privacy-dpa-playbook`, `privacy-policy-review-checklist`, `privacy-incident-intake-checklist`.
+- **Litigation team** (reports to Chief Counsel): `litigation-lead` (routing; team-wide standing rule — never files, serves, or transmits to courts or opposing parties) + `litigation-hold-drafter` (drafting), `litigation-docket-monitor` (extractive, `connector-courtlistener`), `litigation-demand-response-drafter` (drafting; settlement-authority gate). Skills: `litigation-hold-playbook`, `litigation-demand-response-playbook`.
+- **Corporate team** (reports to Chief Counsel): `corporate-lead` (routing) + `corporate-entity-drafter` (drafting; official-form preparation sheets, never files with any government office), `corporate-governance-reviewer` (review), `corporate-diligence-extractor` (extractive; privileged-document stop rule). Skills: `corporate-formation-playbook`, `corporate-governance-review-checklist`, `corporate-diligence-intake-checklist`.
+- **Regulatory/compliance team** (reports to Chief Counsel): `regulatory-lead` (routing) + `regulatory-filing-drafter` (drafting; never submits to any regulator; enforcement/examination/subpoena → immediate chief-counsel escalation), `compliance-policy-reviewer` (review), `regulatory-change-monitor` (extractive; operator-supplied inputs only, dates flagged for confirm-and-calendar). Skills: `regulatory-filing-playbook`, `compliance-policy-review-checklist`, `regulatory-change-intake-checklist`.
+- Chief Counsel routing: privacy, litigation, corporate, and regulatory rows now delegate to the new leads; the no-specialist catch-all narrows to real estate, tax, and other unstaffed practices.
+
+### Changed
+
+- `.paperclip.yaml`: 16 new agent blocks with per-lane adapter config and date-stamped adapter decisions; sidebar lists 36 agents.
+- README / CLAUDE.md / operator walkthrough counts updated to 36 agents / 57 skills.
+
+### Validation
+
+- Cross-check: 36 agents on disk == sidecar == sidebar; 57 skills; every frontmatter skill ref resolves; every agent has a model lane (3 primary / 11 drafting / 6 review / 9 routing / 7 extractive); whitespace clean.
+- Dry-run preview on a disposable server: `agents=36 skills=57 projects=3 issues=3 warnings=0 errors=0`.
+- Live import + API readback on a disposable server (`--skip-model-probe`): 36 agents created; lane spot-checks exact (drafting → high/900s, review → high/900s, routing/extractive → medium/600s); skill bindings match frontmatter counts.
+
+---
+
 ## [0.8.0] — 2026-06-09 — Expansion batch 1: employment + IP teams (20 agents / 46 skills)
 
 ### Added

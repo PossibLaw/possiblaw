@@ -539,6 +539,455 @@ agents:
       possiblaw:
         modelLane: review
         adapterDecision: codex-local-default-2026-06-09
+  privacy-lead:
+    role: practice-lead
+    icon: lock
+    capabilities: Privacy and data-protection triage; routes DPA, policy, and incident work to specialists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-09
+  privacy-dpa-drafter:
+    role: specialist
+    icon: file-lock
+    capabilities: DPA and processing-addendum drafting with SCC/IDTA placeholders and privacy-encoder gating.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_KEY_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_WORDLIST:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
+  privacy-policy-reviewer:
+    role: specialist
+    icon: eye
+    capabilities: Privacy notice and policy review with disclosure-completeness checks and risk ratings.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-09
+  privacy-incident-triage:
+    role: specialist
+    icon: siren
+    capabilities: Data-incident fact intake into structured records with operator follow-ups for regimes and deadlines.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_PRIVACY_KEY_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_WORDLIST:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-09
+  litigation-lead:
+    role: practice-lead
+    icon: scale
+    capabilities: Litigation-matter triage; routes hold, docket, and demand work; never files or serves anything.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-09
+  litigation-hold-drafter:
+    role: specialist
+    icon: archive
+    capabilities: Litigation-hold notice drafting with custodian scoping and acknowledgment tracking.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_KEY_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_WORDLIST:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
+  litigation-docket-monitor:
+    role: specialist
+    icon: gavel
+    capabilities: Docket monitoring via CourtListener with structured filing summaries; read-only posture.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-09
+  litigation-demand-response-drafter:
+    role: specialist
+    icon: mail-warning
+    capabilities: Demand letter and response drafting; internal work products only, operator gate before any use.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_KEY_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_WORDLIST:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
+  corporate-lead:
+    role: practice-lead
+    icon: building-2
+    capabilities: Corporate-matter triage; routes formation, governance-review, and diligence work to specialists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-09
+  corporate-entity-drafter:
+    role: specialist
+    icon: scroll-text
+    capabilities: Entity formation and governance drafting with official-form preparation sheets; never files anything.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_KEY_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_WORDLIST:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
+  corporate-governance-reviewer:
+    role: specialist
+    icon: clipboard-check
+    capabilities: Section-by-section governance-document review with risk ratings and proposed redlines.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-09
+  corporate-diligence-extractor:
+    role: specialist
+    icon: folder-search
+    capabilities: Due-diligence document intake into cited diligence records with red-flag signal logs.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_PRIVACY_KEY_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_WORDLIST:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-09
+  regulatory-lead:
+    role: practice-lead
+    icon: shield
+    capabilities: Regulatory and compliance triage; routes filing, policy-review, and change-intake work to specialists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-09
+  regulatory-filing-drafter:
+    role: specialist
+    icon: file-badge
+    capabilities: License, registration, and regulator-correspondence drafting; never submits to any regulator.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_KEY_DIR:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_PRIVACY_WORDLIST:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-09
+  compliance-policy-reviewer:
+    role: specialist
+    icon: list-checks
+    capabilities: Section-by-section compliance-policy review with risk ratings, regulator flags, and proposed redlines.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-09
+  regulatory-change-monitor:
+    role: specialist
+    icon: radar
+    capabilities: Regulatory-change intake into cited impact records with dates flagged as operator follow-ups.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-09
 sidebar:
   agents:
     - chief-of-staff
@@ -561,6 +1010,22 @@ sidebar:
     - ip-trademark-intake-triage
     - ip-licensing-drafter
     - ip-infringement-analyst
+    - privacy-lead
+    - privacy-dpa-drafter
+    - privacy-policy-reviewer
+    - privacy-incident-triage
+    - litigation-lead
+    - litigation-hold-drafter
+    - litigation-docket-monitor
+    - litigation-demand-response-drafter
+    - corporate-lead
+    - corporate-entity-drafter
+    - corporate-governance-reviewer
+    - corporate-diligence-extractor
+    - regulatory-lead
+    - regulatory-filing-drafter
+    - compliance-policy-reviewer
+    - regulatory-change-monitor
   projects:
     - nda-matters
     - commercial-reviews

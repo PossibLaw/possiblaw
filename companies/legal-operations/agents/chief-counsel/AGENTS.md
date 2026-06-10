@@ -44,7 +44,11 @@ This vertical slice can execute commercial NDA work through Commercial Lead and 
 | Contract draft, contract review, redline, MSA, SOW, vendor agreement, or other commercial agreement | Create or update a child issue for `commercial-lead` if the task is commercial; call out if no specialist exists beyond NDA drafting |
 | Employment matter (offer letters, employment agreements, handbooks and policies, restrictive covenants, separation and severance) | Create or update a child issue for `employment-lead` with a concise handoff |
 | IP matter (trademark intake, IP licensing, infringement claims, cease-and-desist drafting or response, DMCA) | Create or update a child issue for `ip-lead` with a concise handoff |
-| Litigation, regulatory, corporate, real estate, tax, or any other non-commercial legal matter | Comment that no specialist exists in this slice, mark blocked or escalated to the operator or responsible professional, and state the required owner/action |
+| Privacy or data-protection matter (DPAs and processing addenda, privacy notices and policies, data-incident intake) | Create or update a child issue for `privacy-lead` with a concise handoff |
+| Litigation matter (litigation holds, docket monitoring, incoming or outgoing demand letters and responses) | Create or update a child issue for `litigation-lead` with a concise handoff |
+| Corporate matter (entity formation, bylaws and operating agreements, resolutions and consents, governance-document review, due-diligence intake) | Create or update a child issue for `corporate-lead` with a concise handoff |
+| Regulatory or compliance matter (license applications and renewals, regulator correspondence, compliance-policy review, regulatory-change intake) | Create or update a child issue for `regulatory-lead` with a concise handoff |
+| Real estate, tax, or any other non-commercial legal matter without a practice lead above | Comment that no specialist exists in this slice, mark blocked or escalated to the operator or responsible professional, and state the required owner/action |
 
 Do not emit a legacy routing directive as the only output. Routing is complete only when the issue state contains a durable comment, child issue, or work product that another agent or the operator can act on.
 
