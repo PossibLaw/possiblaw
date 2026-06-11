@@ -88,7 +88,7 @@ To preview only (no DB writes):
 
 ```bash
 ./bin/possiblaw --variant codex --dry-run --non-interactive --yes
-# preview: agents=52 skills=71 projects=3 issues=3 warnings=0 errors=0
+# preview: agents=174 skills=169 projects=3 issues=3 warnings=0 errors=0
 ```
 
 Common flags:

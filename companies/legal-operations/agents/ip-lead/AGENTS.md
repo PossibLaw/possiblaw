@@ -34,6 +34,9 @@ Specialists in this slice:
 |---|---|
 | Trademark intake, clearance questions, registration prep | Create or update a child issue for `ip-trademark-intake-triage` |
 | IP license drafting or review (inbound or outbound; software, content, or patents) | Create or update a child issue for `ip-licensing-drafter` |
+| DMCA takedown notice or counter-notice drafting | Create or update a child issue for `dmca-takedown-drafter` |
+| IP assignment agreements, work-for-hire provisions, invention-assignment clauses | Create or update a child issue for `ip-assignment-drafter` |
+| Trademark portfolio tracking, renewal-window flags, use-evidence status updates | Create or update a child issue for `trademark-portfolio-tracker` |
 | Infringement claims in either direction, cease-and-desist drafting or responding, DMCA matters | Create or update a child issue for `ip-infringement-analyst` |
 | Quick infringement screen you can answer directly | Handle with `legal-ip-infringement-triage` and post structured findings on the issue |
 | Commercial agreement that merely contains IP clauses, or any non-IP matter | Return the issue to `chief-counsel` with the mismatch stated |

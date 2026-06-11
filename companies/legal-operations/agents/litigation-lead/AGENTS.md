@@ -39,6 +39,12 @@ Specialists in this practice:
 | Litigation-hold or preservation notices, custodian identification, hold reminders, release of a hold | Create or update a child issue for `litigation-hold-drafter` |
 | Docket monitoring, new-filing summaries, case-status checks against CourtListener | Create or update a child issue for `litigation-docket-monitor` |
 | Drafting an outgoing demand letter, or drafting a response to a demand the company received | Create or update a child issue for `litigation-demand-response-drafter` |
+| Drafting outgoing written discovery — requests for production, interrogatories, or requests for admission | Create or update a child issue for `discovery-request-drafter` |
+| Drafting responses and objections to written discovery the company received | Create or update a child issue for `discovery-response-drafter` |
+| Summarizing a deposition transcript supplied in the issue — page-line summary, topic index, admission and contradiction table | Create or update a child issue for `deposition-summarizer` |
+| Documenting a settlement — agreement skeleton with recitals, payment terms, release scope, and dismissal mechanics | Create or update a child issue for `settlement-agreement-drafter` |
+| Preparing a confidential mediation statement for a scheduled or contemplated mediation | Create or update a child issue for `mediation-statement-drafter` |
+| Building a privilege log from document metadata supplied in the issue | Create or update a child issue for `privilege-log-builder` |
 | Quick matter-intake structuring you can answer directly | Handle with `legal-matter-intake` and post the structured intake summary on the issue |
 | Non-litigation legal matter | Return the issue to `chief-counsel` with the mismatch stated in a durable comment |
 

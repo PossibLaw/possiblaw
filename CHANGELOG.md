@@ -7,6 +7,34 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.16.0] — 2026-06-11 — The catalog expansion: 174 agents / 169 skills across 34 teams
+
+### Added
+
+- **122 new atomic agents + 98 new skills** — the 100–200 expansion landed in one sprint.
+- **20 new legal practice teams** under chief-counsel (lead + specialists each): tax, real estate, M&A, banking & finance, securities, restructuring & bankruptcy, immigration, healthcare, antitrust, trade compliance (sanctions/export/tariff), insurance, construction, government contracts, environmental & ESG, trusts & estates, family law, investigations & white collar, AI governance, advertising & consumer protection, benefits & executive compensation.
+- **1 new business team** under chief-of-staff: legal operations (outside-counsel engagement, invoice audit, spend reporting).
+- **Extensions to all 13 existing teams**: litigation (+6: discovery request/response, deposition summaries, settlement agreements, mediation statements, privilege logs), commercial (+4: MSA, SOW, amendments, obligation extraction), privacy (+3: DSRs, DPIAs, breach notifications), IP (+3: DMCA, assignments, trademark portfolio), corporate (+3: board minutes, entity compliance, cap tables), employment (+3: contractor classification, investigation intake, CBAs), regulatory (+3: license renewals, AML/KYC intake, COI screening), research (+3: 50-state surveys, case summaries, plain-language), finance (+2: prebills, trust accounting), ops (+2: conflicts screening, engagement letters), admin (+2: CLE tracking, proofreading), marketing (+2: client alerts, newsletters), BD (+2: experience database, competitive intel).
+- `docs/agent-catalog.md` — generated full catalog (every team, agent, lane, and capability) for demos and orientation.
+- Sensitive-data teams (estates, family law, investigations, plus visa petitions, privilege logs, breach notifications, workplace-investigation intake, DSRs) attach `privacy-encoder`; every agent carries no-external-transmission and operator-approval-gate rules; screening agents (sanctions, FCPA, conflicts, HSR) are flag-only by construction — they never clear, conclude, or file.
+- Chief-counsel routing table now routes all 28 legal practices; chief-of-staff routes legal-ops; every new specialist has a routing row in its lead's table.
+- `.paperclip.yaml`: 122 new sidecar blocks (lane-correct adapter params copied from the package-standard template, `adapterDecision: codex-local-default-2026-06-11`) + sidebar entries. Lane census: 3 primary / 33 routing / 52 drafting / 40 review / 46 extractive.
+
+### Validation
+
+- Roster validator: all 122 new agents match the planned roster exactly (frontmatter field order, skills block lists, reportsTo, verbatim Execution Contract, whitespace); all 98 new skills have frontmatter + Boundaries; every `skills:` ref across all 174 agents resolves.
+- Cross-check: 174 disk == 174 sidecar == 174 sidebar; reportsTo graph fully resolves; chief-counsel/chief-of-staff routing targets all exist; zero lane-param violations.
+- Dry-run e2e (disposable port 3199, fresh data dir): `agents=174 skills=169 projects=3 issues=3 warnings=0 errors=0`.
+- Live import + readback on the same disposable server (`--skip-model-probe`, $0): 174 agents created; lane-inheritance spot checks exact (will-drafter drafting→high/900 with 4/4 skill bindings incl. privacy-encoder; lease-abstractor + privilege-log-builder extractive→medium/600; tax-lead routing→medium/600; legal-invoice-auditor + msa-drafter review/drafting→high/900); reportsTo resolved to live agent IDs (will-drafter→Trusts & Estates Lead, legal-ops-lead→Chief of Staff). Server killed, smoke dir removed, operator's port-3100 untouched.
+- Static battery: `bash -n bin/possiblaw`, both helper `--self-test`s green.
+
+### Notes
+
+- The known-limitations sidebar-scale caveat is now live (174 agents); docs updated.
+- Authored via 16 + 10 parallel subagents against a shared SPEC with a canonical roster JSON; integration (sidecar, sidebar, executive routing, docs, catalog) done centrally.
+
+---
+
 ## [0.15.0] — 2026-06-10 — PossibLaw circuit-tree favicon on themed launches
 
 ### Added

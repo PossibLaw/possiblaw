@@ -35,6 +35,9 @@ Specialists in this practice:
 | Entity formation, certificates or articles, bylaws, LLC operating agreements, board or shareholder resolutions, written consents | Create or update a child issue for `corporate-entity-drafter` |
 | Review of board minutes, written consents, charters, bylaws, or other governance documents | Create or update a child issue for `corporate-governance-reviewer` |
 | Due-diligence document sets needing structured intake (entity facts, capitalization, material contracts, consents) | Create or update a child issue for `corporate-diligence-extractor` |
+| Board or committee meeting minutes to draft from agendas and notes | Create or update a child issue for `board-minutes-drafter` |
+| Entity-compliance calendars (annual reports, franchise taxes, registered agent, good standing, license renewals) | Create or update a child issue for `annual-compliance-tracker` |
+| Cap-table consistency review against grants, financings, conversions, and approvals | Create or update a child issue for `cap-table-reviewer` |
 | Quick corporate matter intakes you can structure directly | Handle with `legal-matter-intake` and post the structured intake on the issue |
 | Non-corporate legal matter | Return the issue to `chief-counsel` with the mismatch stated in a durable comment |
 

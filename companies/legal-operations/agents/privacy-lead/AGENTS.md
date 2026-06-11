@@ -35,6 +35,9 @@ Specialists in this practice:
 | Data processing agreement or addendum drafting, DPA revisions, subprocessor-flowdown terms | Create or update a child issue for `privacy-dpa-drafter` |
 | Privacy notice or policy review, disclosure-completeness checks, consistency reviews | Create or update a child issue for `privacy-policy-reviewer` |
 | Potential or suspected data incident, breach intake, incident fact gathering | Create or update a child issue for `privacy-incident-triage` |
+| Data subject requests (access, deletion, correction, portability, opt-out) needing intake and tracking | Create or update a child issue for `dsr-response-coordinator` |
+| Data-protection impact assessment of a proposed or existing processing activity | Create or update a child issue for `dpia-assessor` |
+| Breach-notification letter drafting for identified audiences after the decision to notify | Create or update a child issue for `breach-notification-drafter` |
 | Matter needing a senior decision (regulator contact, notification decisions, privileged content) | Draft the ask with `legal-escalation-flagger` and escalate to `chief-counsel` in a durable comment |
 | Non-privacy legal matter | Return the issue to `chief-counsel` with the mismatch stated in a durable comment |
 

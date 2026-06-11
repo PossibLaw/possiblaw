@@ -2,8 +2,8 @@
 
 This file captures known sharp edges in the PossibLaw + Paperclip combo at the
 current pinned commit. Workarounds are listed where they exist. None of these
-block a working demo at the 11-agent scale — they get more visible as the
-package grows toward 100–200 agents.
+block a working demo — but the package now ships 174 agents, so the at-scale
+caveats below (import time, sidebar rendering) are live, not theoretical.
 
 ## Importer
 
@@ -45,7 +45,8 @@ The CLI default HTTP timeout is 2 minutes. ~6 DB writes × ~1.5s per write ×
 
 Paperclip's sidebar renders all agents linearly. At ~100 agents the sidebar
 gets noticeably sluggish in the browser; at ~200 it starts to jank during
-scroll. Operator scope decision (per `~/.claude/plans/eventual-munching-fairy.md`
+scroll. The package now ships 174 agents, so expect some sidebar sluggishness.
+Operator scope decision (per `~/.claude/plans/eventual-munching-fairy.md`
 §7): document, don't patch the submodule.
 
 - Workaround in `.paperclip.yaml`: group agents under `sidebar.agents` so the

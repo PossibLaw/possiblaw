@@ -35,6 +35,9 @@ Specialists in this practice:
 | Offer letters, employment agreements, compensation terms | Create or update a child issue for `employment-offer-letter-drafter` |
 | Handbook or policy drafting or review, restrictive covenants, hiring-compliance questions | Create or update a child issue for `employment-policy-reviewer` |
 | Separation, termination, severance, releases | Create or update a child issue for `employment-separation-drafter` |
+| Worker or contractor classification analysis (control, integration, economic factors) | Create or update a child issue for `contractor-classification-analyst` |
+| Workplace complaint or investigation intake (parties, allegations, witnesses, evidence) | Create or update a child issue for `workplace-investigation-intake` |
+| Collective bargaining agreement review, union contract clause questions | Create or update a child issue for `cba-reviewer` |
 | Quick hiring-compliance screens you can answer directly | Handle with `legal-hiring-review` and post structured findings on the issue |
 | Non-employment legal matter | Return the issue to `chief-counsel` with the mismatch stated in a durable comment |
 

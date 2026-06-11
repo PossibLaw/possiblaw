@@ -1391,6 +1391,2992 @@ agents:
       possiblaw:
         modelLane: drafting
         adapterDecision: codex-local-default-2026-06-09
+  tax-lead:
+    role: practice-lead
+    icon: route
+    capabilities: Tax-matter classification and delegation to tax specialists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  tax-research-memo-drafter:
+    role: specialist
+    icon: file-pen-line
+    capabilities: Issue-spotting tax research memo drafting with open questions flagged.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  tax-clause-reviewer:
+    role: specialist
+    icon: file-search
+    capabilities: Contract tax-provision review with risk-rated findings.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  tax-filing-calendar-tracker:
+    role: specialist
+    icon: calendar-days
+    capabilities: Entity tax-filing calendar tables with owners and due dates.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  real-estate-lead:
+    role: practice-lead
+    icon: building-2
+    capabilities: Real-estate matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  lease-abstractor:
+    role: specialist
+    icon: folder-search
+    capabilities: Commercial lease abstraction into key-terms tables.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  lease-reviewer:
+    role: specialist
+    icon: file-search
+    capabilities: Clause-by-clause commercial lease review with suggested rewrites.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  real-estate-purchase-drafter:
+    role: specialist
+    icon: file-signature
+    capabilities: Purchase-and-sale agreement skeleton drafting with ancillaries.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  ma-lead:
+    role: practice-lead
+    icon: handshake
+    capabilities: M&A matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  ma-diligence-request-drafter:
+    role: specialist
+    icon: clipboard-pen
+    capabilities: Tailored due-diligence request lists by deal type and industry.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  ma-diligence-summarizer:
+    role: specialist
+    icon: folder-search
+    capabilities: Data-room document summaries with red-flag tables.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  disclosure-schedule-drafter:
+    role: specialist
+    icon: file-text
+    capabilities: Disclosure-schedule skeletons keyed to representation sections.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  ma-closing-checklist-tracker:
+    role: specialist
+    icon: list-checks
+    capabilities: Signing and closing checklist tracking with dependencies.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  banking-finance-lead:
+    role: practice-lead
+    icon: coins
+    capabilities: Banking and finance matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  credit-agreement-reviewer:
+    role: specialist
+    icon: file-search
+    capabilities: Credit-agreement covenant and default review with risk ratings.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  loan-document-drafter:
+    role: specialist
+    icon: file-signature
+    capabilities: Promissory note, guarantee, and security-agreement skeletons.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  ucc-filing-tracker:
+    role: specialist
+    icon: calendar-days
+    capabilities: UCC-1/UCC-3 tracking tables with lapse-date flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  securities-lead:
+    role: practice-lead
+    icon: scale
+    capabilities: Securities matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  public-disclosure-reviewer:
+    role: specialist
+    icon: eye
+    capabilities: Periodic-report and press-release disclosure review with findings.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  equity-financing-drafter:
+    role: specialist
+    icon: file-signature
+    capabilities: SAFE, convertible note, and financing-consent skeletons.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  trading-window-tracker:
+    role: specialist
+    icon: calendar-days
+    capabilities: Insider-trading window and blackout calendar tracking.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  restructuring-lead:
+    role: practice-lead
+    icon: merge
+    capabilities: Restructuring and bankruptcy matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  proof-of-claim-drafter:
+    role: specialist
+    icon: file-badge
+    capabilities: Proof-of-claim package assembly with bar dates flagged.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  claims-register-analyst:
+    role: specialist
+    icon: list
+    capabilities: Claims-register organization into priority and class tables.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  restructuring-agreement-reviewer:
+    role: specialist
+    icon: file-search
+    capabilities: Forbearance, standstill, and RSA review with risk ratings.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  immigration-lead:
+    role: practice-lead
+    icon: route
+    capabilities: Immigration matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  visa-petition-organizer:
+    role: specialist
+    icon: file-badge
+    capabilities: Petition support-letter skeletons and evidence checklists.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  i9-compliance-auditor:
+    role: specialist
+    icon: user-check
+    capabilities: Internal I-9/E-Verify audit findings with remediation flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  immigration-deadline-tracker:
+    role: specialist
+    icon: calendar-days
+    capabilities: Case-status and immigration-deadline tracking tables.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  healthcare-lead:
+    role: practice-lead
+    icon: route
+    capabilities: Healthcare matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  hipaa-baa-drafter:
+    role: specialist
+    icon: file-lock
+    capabilities: Business associate agreement and subcontractor BAA drafting.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  healthcare-compliance-reviewer:
+    role: specialist
+    icon: shield-check
+    capabilities: Stark, AKS, and fee-splitting flag-only arrangement review.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  clinical-trial-agreement-reviewer:
+    role: specialist
+    icon: file-search
+    capabilities: Clinical trial agreement clause-by-clause review.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  antitrust-lead:
+    role: practice-lead
+    icon: scale
+    capabilities: Antitrust matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  hsr-threshold-analyst:
+    role: specialist
+    icon: clipboard-list
+    capabilities: HSR transaction-fact intake tables for counsel determination.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  competition-policy-reviewer:
+    role: specialist
+    icon: eye
+    capabilities: Competitor-contact and pricing-policy review with risk ratings.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  trade-compliance-lead:
+    role: practice-lead
+    icon: route
+    capabilities: Trade-compliance matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  sanctions-screening-analyst:
+    role: specialist
+    icon: radar
+    capabilities: Party-screening intake tables with potential matches flagged, never cleared.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  export-control-classifier:
+    role: specialist
+    icon: lock
+    capabilities: ECCN/USML classification rationales pending counsel sign-off.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  tariff-classification-analyst:
+    role: specialist
+    icon: package
+    capabilities: HTS classification rationales and duty-exposure summaries.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  insurance-lead:
+    role: practice-lead
+    icon: shield
+    capabilities: Insurance matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  coverage-position-analyst:
+    role: specialist
+    icon: file-search
+    capabilities: Claim-to-policy mapping into draft coverage-position memos.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  claim-notice-drafter:
+    role: specialist
+    icon: mail-warning
+    capabilities: Notice-of-claim drafting with deadlines flagged, never sent.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  policy-renewal-summarizer:
+    role: specialist
+    icon: git-compare
+    capabilities: Year-over-year policy renewal comparison tables.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  construction-lead:
+    role: practice-lead
+    icon: hammer
+    capabilities: Construction matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  construction-contract-reviewer:
+    role: specialist
+    icon: file-search
+    capabilities: Construction-contract clause-by-clause review with risk ratings.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  lien-notice-drafter:
+    role: specialist
+    icon: file-pen-line
+    capabilities: Preliminary-notice and lien-claim skeletons, deadlines flagged.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  change-order-tracker:
+    role: specialist
+    icon: list-checks
+    capabilities: Change-order logs with cumulative impact flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  govcon-lead:
+    role: practice-lead
+    icon: briefcase-business
+    capabilities: Government-contracts matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  far-flowdown-analyzer:
+    role: specialist
+    icon: list-checks
+    capabilities: FAR/DFARS flowdown clause presence review with risk notes.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  govcon-proposal-reviewer:
+    role: specialist
+    icon: clipboard-check
+    capabilities: Proposal compliance matrices against solicitation requirements.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  govcon-certification-tracker:
+    role: specialist
+    icon: calendar-days
+    capabilities: Reps-and-certs and registration tracking with renewal flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  environmental-lead:
+    role: practice-lead
+    icon: route
+    capabilities: Environmental and ESG matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  permit-obligation-tracker:
+    role: specialist
+    icon: calendar-days
+    capabilities: Environmental permit obligation and renewal tracking tables.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  esg-disclosure-reviewer:
+    role: specialist
+    icon: eye
+    capabilities: ESG claim substantiation and greenwashing-risk review.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  environmental-diligence-summarizer:
+    role: specialist
+    icon: folder-search
+    capabilities: Phase I/II report summaries with findings tables.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  estates-lead:
+    role: practice-lead
+    icon: scroll-text
+    capabilities: Trusts-and-estates matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  will-drafter:
+    role: specialist
+    icon: file-signature
+    capabilities: Simple-will skeleton drafting with execution formalities flagged.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  trust-drafter:
+    role: specialist
+    icon: file-key
+    capabilities: Revocable-living-trust skeleton drafting with elections flagged.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  estate-inventory-organizer:
+    role: specialist
+    icon: archive
+    capabilities: Estate asset and liability inventory tables with gap flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  family-law-lead:
+    role: practice-lead
+    icon: users
+    capabilities: Family-law matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  parenting-plan-drafter:
+    role: specialist
+    icon: file-pen-line
+    capabilities: Parenting-plan skeleton drafting with standards flagged.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  marital-settlement-drafter:
+    role: specialist
+    icon: file-signature
+    capabilities: Marital-settlement-agreement skeletons, support formulas flagged.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  financial-disclosure-organizer:
+    role: specialist
+    icon: clipboard-list
+    capabilities: Financial-disclosure organization into structured tables.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  investigations-lead:
+    role: practice-lead
+    icon: siren
+    capabilities: Investigation matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  witness-interview-memo-drafter:
+    role: specialist
+    icon: notebook
+    capabilities: Interview memoranda drafting with Upjohn and work-product labeling.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  investigation-chronology-builder:
+    role: specialist
+    icon: list
+    capabilities: Source-cited investigation chronologies with conflict flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  fcpa-risk-screener:
+    role: specialist
+    icon: shield-alert
+    capabilities: Third-party corruption red-flag screening, flag-only findings.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  ai-governance-lead:
+    role: practice-lead
+    icon: sparkles
+    capabilities: AI-governance matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  ai-use-policy-drafter:
+    role: specialist
+    icon: file-pen-line
+    capabilities: Internal AI acceptable-use and governance policy skeletons.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  ai-vendor-assessment-reviewer:
+    role: specialist
+    icon: eye
+    capabilities: AI vendor terms review covering training-data and output rights.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  ai-incident-intake-triage:
+    role: specialist
+    icon: alert-triangle
+    capabilities: Structured AI-incident intake with escalation-path flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  advertising-lead:
+    role: practice-lead
+    icon: megaphone
+    capabilities: Advertising and consumer-protection matter classification.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  ad-claims-reviewer:
+    role: specialist
+    icon: check-check
+    capabilities: Claim-by-claim ad-copy substantiation review.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  promotions-rules-drafter:
+    role: specialist
+    icon: clipboard-pen
+    capabilities: Sweepstakes and contest official-rules skeletons.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  influencer-disclosure-reviewer:
+    role: specialist
+    icon: contact
+    capabilities: Endorsement material-connection disclosure review.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  benefits-lead:
+    role: practice-lead
+    icon: route
+    capabilities: Benefits and executive-compensation matter classification.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  erisa-plan-reviewer:
+    role: specialist
+    icon: file-search
+    capabilities: Plan-document and SPD consistency review with findings.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  equity-comp-grant-drafter:
+    role: specialist
+    icon: file-signature
+    capabilities: Option and RSU grant paperwork skeletons, elections flagged.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  benefits-notice-tracker:
+    role: specialist
+    icon: calendar-days
+    capabilities: Required benefits-notice calendars with delivery status.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  legal-ops-lead:
+    role: practice-lead
+    icon: settings
+    capabilities: Legal-operations matter classification and delegation.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: routing
+        adapterDecision: codex-local-default-2026-06-11
+  outside-counsel-engagement-drafter:
+    role: specialist
+    icon: handshake
+    capabilities: Outside-counsel engagement letters and billing guidelines.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  legal-invoice-auditor:
+    role: specialist
+    icon: receipt
+    capabilities: Line-by-line invoice review against billing guidelines.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  legal-spend-reporter:
+    role: specialist
+    icon: coins
+    capabilities: Legal-spend summaries and accrual tables with anomaly flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  discovery-request-drafter:
+    role: specialist
+    icon: clipboard-pen
+    capabilities: RFP, interrogatory, and RFA drafting, never served.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  discovery-response-drafter:
+    role: specialist
+    icon: file-pen-line
+    capabilities: Discovery responses and objections drafting with privilege flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  deposition-summarizer:
+    role: specialist
+    icon: notebook
+    capabilities: Page-line deposition summaries and admission tables.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  settlement-agreement-drafter:
+    role: specialist
+    icon: handshake
+    capabilities: Settlement-agreement skeletons with release scope flagged.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  mediation-statement-drafter:
+    role: specialist
+    icon: file-text
+    capabilities: Confidential mediation statement drafting, never transmitted.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  privilege-log-builder:
+    role: specialist
+    icon: file-lock
+    capabilities: Privilege-log tables with waiver-risk flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  msa-drafter:
+    role: specialist
+    icon: file-signature
+    capabilities: Master services agreement skeleton drafting.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  sow-drafter:
+    role: specialist
+    icon: clipboard-pen
+    capabilities: Statement-of-work drafting with MSA conflict flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  contract-amendment-drafter:
+    role: specialist
+    icon: file-pen-line
+    capabilities: Amendment and change-order drafting tied to the original contract.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  contract-obligation-extractor:
+    role: specialist
+    icon: list-checks
+    capabilities: Obligation, deadline, and notice-window extraction tables.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  dsr-response-coordinator:
+    role: specialist
+    icon: clipboard-list
+    capabilities: Data-subject-request intake and response-clock tracking.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  dpia-assessor:
+    role: specialist
+    icon: shield-check
+    capabilities: Data-protection impact assessments with residual-risk flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  breach-notification-drafter:
+    role: specialist
+    icon: mail-warning
+    capabilities: Per-audience breach-notification letter drafting, never sent.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  dmca-takedown-drafter:
+    role: specialist
+    icon: file-minus
+    capabilities: DMCA takedown and counter-notice drafting, never submitted.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  ip-assignment-drafter:
+    role: specialist
+    icon: file-signature
+    capabilities: IP assignment and invention-assignment drafting.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  trademark-portfolio-tracker:
+    role: specialist
+    icon: tags
+    capabilities: Trademark portfolio tables with renewal-deadline flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  board-minutes-drafter:
+    role: specialist
+    icon: notebook
+    capabilities: Board and committee minutes drafting pending secretary review.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  annual-compliance-tracker:
+    role: specialist
+    icon: calendar-days
+    capabilities: Entity annual-report and franchise-tax compliance calendars.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  cap-table-reviewer:
+    role: specialist
+    icon: git-compare
+    capabilities: Cap-table consistency review against source documents.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  contractor-classification-analyst:
+    role: specialist
+    icon: user-check
+    capabilities: Worker-classification factor analysis, flag-only findings.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  workplace-investigation-intake:
+    role: specialist
+    icon: clipboard-list
+    capabilities: Structured workplace-complaint intake with escalation flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  cba-reviewer:
+    role: specialist
+    icon: file-search
+    capabilities: Collective-bargaining-agreement clause-by-clause review.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  license-renewal-tracker:
+    role: specialist
+    icon: calendar-days
+    capabilities: Business and professional license renewal calendars.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  aml-kyc-intake-screener:
+    role: specialist
+    icon: radar
+    capabilities: KYC intake completeness tables with risk-indicator flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  conflict-of-interest-screener:
+    role: specialist
+    icon: eye
+    capabilities: COI disclosure screening with suggested mitigations.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  fifty-state-surveyor:
+    role: specialist
+    icon: library
+    capabilities: 50-state survey skeletons with verification gates per state.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  case-law-summarizer:
+    role: specialist
+    icon: book-open
+    capabilities: Structured case briefs from provided opinions.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  plain-language-summarizer:
+    role: specialist
+    icon: lightbulb
+    capabilities: Client-friendly plain-language document summaries.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  prebill-reviewer:
+    role: specialist
+    icon: receipt
+    capabilities: Prebill narrative and guideline review with edit recommendations.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  trust-accounting-reconciler:
+    role: specialist
+    icon: scale
+    capabilities: Three-way trust reconciliation review, flag-only.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  new-matter-conflicts-screener:
+    role: specialist
+    icon: git-compare
+    capabilities: Structured conflicts screening with hits flagged, never cleared.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  engagement-letter-drafter:
+    role: specialist
+    icon: file-signature
+    capabilities: Engagement-letter skeleton drafting, never sent to clients.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  cle-compliance-tracker:
+    role: specialist
+    icon: calendar-days
+    capabilities: Attorney CLE compliance tables with deadline flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  legal-proofreader:
+    role: specialist
+    icon: check-check
+    capabilities: Defined-term, cross-reference, and numbering proofreading.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: review
+        adapterDecision: codex-local-default-2026-06-11
+  client-alert-drafter:
+    role: specialist
+    icon: megaphone
+    capabilities: Client-alert drafting with facts marked for attorney verification.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  newsletter-curator:
+    role: specialist
+    icon: mail-warning
+    capabilities: Newsletter assembly from provided items, never sent.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-11
+  experience-database-curator:
+    role: specialist
+    icon: library
+    capabilities: Matter-experience records for pitches with confidentiality flags.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
+  competitive-intel-monitor:
+    role: specialist
+    icon: radar
+    capabilities: Public-source competitive-intel briefing tables with citations.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
 sidebar:
   agents:
     - chief-of-staff
@@ -1445,6 +4431,128 @@ sidebar:
     - reconciler
     - expense-categorizer
     - pitch-polisher
+    - tax-lead
+    - tax-research-memo-drafter
+    - tax-clause-reviewer
+    - tax-filing-calendar-tracker
+    - real-estate-lead
+    - lease-abstractor
+    - lease-reviewer
+    - real-estate-purchase-drafter
+    - ma-lead
+    - ma-diligence-request-drafter
+    - ma-diligence-summarizer
+    - disclosure-schedule-drafter
+    - ma-closing-checklist-tracker
+    - banking-finance-lead
+    - credit-agreement-reviewer
+    - loan-document-drafter
+    - ucc-filing-tracker
+    - securities-lead
+    - public-disclosure-reviewer
+    - equity-financing-drafter
+    - trading-window-tracker
+    - restructuring-lead
+    - proof-of-claim-drafter
+    - claims-register-analyst
+    - restructuring-agreement-reviewer
+    - immigration-lead
+    - visa-petition-organizer
+    - i9-compliance-auditor
+    - immigration-deadline-tracker
+    - healthcare-lead
+    - hipaa-baa-drafter
+    - healthcare-compliance-reviewer
+    - clinical-trial-agreement-reviewer
+    - antitrust-lead
+    - hsr-threshold-analyst
+    - competition-policy-reviewer
+    - trade-compliance-lead
+    - sanctions-screening-analyst
+    - export-control-classifier
+    - tariff-classification-analyst
+    - insurance-lead
+    - coverage-position-analyst
+    - claim-notice-drafter
+    - policy-renewal-summarizer
+    - construction-lead
+    - construction-contract-reviewer
+    - lien-notice-drafter
+    - change-order-tracker
+    - govcon-lead
+    - far-flowdown-analyzer
+    - govcon-proposal-reviewer
+    - govcon-certification-tracker
+    - environmental-lead
+    - permit-obligation-tracker
+    - esg-disclosure-reviewer
+    - environmental-diligence-summarizer
+    - estates-lead
+    - will-drafter
+    - trust-drafter
+    - estate-inventory-organizer
+    - family-law-lead
+    - parenting-plan-drafter
+    - marital-settlement-drafter
+    - financial-disclosure-organizer
+    - investigations-lead
+    - witness-interview-memo-drafter
+    - investigation-chronology-builder
+    - fcpa-risk-screener
+    - ai-governance-lead
+    - ai-use-policy-drafter
+    - ai-vendor-assessment-reviewer
+    - ai-incident-intake-triage
+    - advertising-lead
+    - ad-claims-reviewer
+    - promotions-rules-drafter
+    - influencer-disclosure-reviewer
+    - benefits-lead
+    - erisa-plan-reviewer
+    - equity-comp-grant-drafter
+    - benefits-notice-tracker
+    - legal-ops-lead
+    - outside-counsel-engagement-drafter
+    - legal-invoice-auditor
+    - legal-spend-reporter
+    - discovery-request-drafter
+    - discovery-response-drafter
+    - deposition-summarizer
+    - settlement-agreement-drafter
+    - mediation-statement-drafter
+    - privilege-log-builder
+    - msa-drafter
+    - sow-drafter
+    - contract-amendment-drafter
+    - contract-obligation-extractor
+    - dsr-response-coordinator
+    - dpia-assessor
+    - breach-notification-drafter
+    - dmca-takedown-drafter
+    - ip-assignment-drafter
+    - trademark-portfolio-tracker
+    - board-minutes-drafter
+    - annual-compliance-tracker
+    - cap-table-reviewer
+    - contractor-classification-analyst
+    - workplace-investigation-intake
+    - cba-reviewer
+    - license-renewal-tracker
+    - aml-kyc-intake-screener
+    - conflict-of-interest-screener
+    - fifty-state-surveyor
+    - case-law-summarizer
+    - plain-language-summarizer
+    - prebill-reviewer
+    - trust-accounting-reconciler
+    - new-matter-conflicts-screener
+    - engagement-letter-drafter
+    - cle-compliance-tracker
+    - legal-proofreader
+    - client-alert-drafter
+    - newsletter-curator
+    - experience-database-curator
+    - competitive-intel-monitor
   projects:
     - nda-matters
     - commercial-reviews

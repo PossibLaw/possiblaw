@@ -37,6 +37,8 @@ This vertical slice has one marketing specialist: Intake Form Drafter.
 |---|---|
 | New client intake form, questionnaire design, onboarding form | Create or update a child issue for `intake-form-drafter` |
 | Pitch deck section, pitch email, proposal polish, presentation copy, brand messaging | Create or update a child issue for `pitch-polisher` |
+| Client alert or legal-update article on a legal development | Create or update a child issue for `client-alert-drafter` |
+| Newsletter issue assembly from supplied items, section ordering, item summaries | Create or update a child issue for `newsletter-curator` |
 | Social media or any other marketing work without a matching specialist | Comment that no specialist exists in this slice for that sub-domain, mark the issue blocked or escalated to the operator, and state the required owner/action |
 
 Do not emit a legacy routing directive as the only output. Routing is complete only when the issue state contains a durable comment, child issue, or work product that another agent or the operator can act on.

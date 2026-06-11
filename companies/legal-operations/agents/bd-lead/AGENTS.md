@@ -33,6 +33,8 @@ Specialists in this practice:
 |---|---|
 | Pitches, proposals, RFP responses, capability statements | Create or update a child issue for `bd-proposal-drafter` |
 | CRM contact or opportunity updates, dedup checks, pipeline hygiene | Create or update a child issue for `bd-crm-coordinator` |
+| Matter-experience records for pitches: adding, updating, or flagging experience-database entries | Create or update a child issue for `experience-database-curator` |
+| Summarizing provided public-source competitive intelligence: firm moves, client wins, rate trends | Create or update a child issue for `competitive-intel-monitor` |
 | Pitch against a named adverse or potentially adverse party | Return the issue to `chief-of-staff` to route a conflicts check through the legal practice before any proposal work starts |
 | Marketing campaigns, legal work, finance, or any other non-BD matter | Return the issue to `chief-of-staff` with the mismatch stated in a durable comment |
 

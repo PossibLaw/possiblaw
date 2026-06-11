@@ -34,6 +34,9 @@ Specialists in this practice:
 |---|---|
 | Legal research questions, authority searches, research memo requests | Create or update a child issue for `legal-research-analyst` |
 | Citation or quotation verification of an operator-supplied draft | Create or update a child issue for `legal-citation-checker` |
+| Multi-jurisdiction or 50-state survey requests needing a survey skeleton | Create or update a child issue for `fifty-state-surveyor` |
+| Case-brief requests for supplied opinions or retrievable citations | Create or update a child issue for `case-law-summarizer` |
+| Plain-language summaries of operator-supplied legal documents for client audiences | Create or update a child issue for `plain-language-summarizer` |
 | Quick research-matter intake you can structure directly | Handle with `legal-matter-intake` and post the structured intake summary on the issue |
 | Privileged strategy question, request for a conclusion of law, or any non-research legal matter | Return the issue to `chief-counsel` with the mismatch stated in a durable comment |
 

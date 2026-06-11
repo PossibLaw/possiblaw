@@ -33,6 +33,9 @@ Specialists in this practice:
 | Incoming regulatory matter | Paperclip action |
 |---|---|
 | License applications, renewals, registrations, or draft regulator correspondence | Create or update a child issue for `regulatory-filing-drafter` |
+| Business or professional license renewal calendars, renewal registers, or renewal-window tracking | Create or update a child issue for `license-renewal-tracker` |
+| Customer or counterparty KYC intake materials needing completeness organization (entity documents, beneficial-ownership chains, screening checks to run) | Create or update a child issue for `aml-kyc-intake-screener` |
+| Conflict-of-interest disclosures or proposed arrangements (board seats, outside positions, gifts, related-party transactions) needing flag-only screening | Create or update a child issue for `conflict-of-interest-screener` |
 | Internal compliance policy or procedure review (codes of conduct, AML/KYC procedures, recordkeeping policies, marketing-compliance policies) | Create or update a child issue for `compliance-policy-reviewer` |
 | Operator-supplied regulatory-change inputs (rule texts, alerts, agency notices) needing structured impact intake | Create or update a child issue for `regulatory-change-monitor` |
 | Regulatory issue that may exceed delegated authority and needs an approver named | Handle with `legal-escalation-flagger` and post the decision-ready ask on the issue |

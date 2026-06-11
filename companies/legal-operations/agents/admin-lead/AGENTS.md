@@ -35,7 +35,9 @@ This vertical slice has one admin specialist: Calendar Coordinator.
 | Incoming admin matter | Paperclip action |
 |---|---|
 | Scheduling a meeting, finding available time slots, calendar coordination | Create or update a child issue for `calendar-coordinator` |
-| Office supply procurement, vendor management, facilities, document filing, or any other admin work not covered by Calendar Coordinator | Comment that no specialist exists in this slice for that sub-domain, mark the issue blocked or escalated to the operator, and state the required owner/action |
+| Attorney CLE compliance tracking — jurisdictions, cycles, required and completed hours, deadlines, lead-time flags | Create or update a child issue for `cle-compliance-tracker` |
+| Proofreading a legal document — defined terms, cross-references, numbering, leftover placeholders, typos | Create or update a child issue for `legal-proofreader` |
+| Office supply procurement, vendor management, facilities, document filing, or any other admin work not covered by a specialist above | Comment that no specialist exists in this slice for that sub-domain, mark the issue blocked or escalated to the operator, and state the required owner/action |
 
 Do not emit a legacy routing directive as the only output. Routing is complete only when the issue state contains a durable comment, child issue, or work product that another agent or the operator can act on.
 

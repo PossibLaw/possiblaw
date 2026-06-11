@@ -37,6 +37,8 @@ This vertical slice has one finance specialist: Billing Prep.
 |---|---|
 | Invoice drafting, billing statement, matter invoice, fee summary | Create or update a child issue for `billing-prep` |
 | Expense list categorization, spend classification | Create or update a child issue for `expense-categorizer` |
+| Prebill review before client invoicing — narrative hygiene, privilege leakage in narratives, billing-guideline compliance, duplicates, write-down candidates | Create or update a child issue for `prebill-reviewer` |
+| Trust or IOLTA three-way reconciliation review, trust-ledger discrepancy flags | Create or update a child issue for `trust-accounting-reconciler` |
 | Deductibility analysis or any other finance work without a matching specialist | Comment that no specialist exists in this slice for that sub-domain, mark the issue blocked or escalated to the operator, and state the required owner/action |
 
 Do not emit a legacy routing directive as the only output. Routing is complete only when the issue state contains a durable comment, child issue, or work product that another agent or the operator can act on.
