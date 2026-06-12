@@ -5,9 +5,17 @@
 // Never resolves id./supra; never judges validity.
 //
 // Normalization: NFKC (folds fullwidth/compatibility chars incl. fullwidth digits)
-// followed by \p{Cf} strip (removes zero-width spaces, soft hyphens, ZWJ, etc.)
-// and whitespace collapse. Compatibility-equivalent texts intentionally share a
-// documentSha256 — the gate treats them as the same document.
+// followed by whitespace collapse, then a combined strip of: \p{Cf} (format chars:
+// ZWSP, soft-hyphen, ZWJ, etc.), \p{Mn} (non-spacing combining marks, e.g. U+0332
+// combining low-line), \p{Me} (enclosing combining marks), \p{Cc} non-whitespace
+// controls (e.g. NUL U+0000 — whitespace Cc are already collapsed to space earlier),
+// and \p{Default_Ignorable_Code_Point} (variation selectors, Hangul fillers, etc.).
+// Whitespace collapse runs FIRST so \t/\n/\r (Cc) become plain spaces before the Cc
+// strip; NFKC runs before the Mn strip so precomposed accents (á) survive.
+// Known residual NOT stripped: visually-blank but non-ignorable code points such as
+// U+2800 BRAILLE PATTERN BLANK — tracked in docs/known-limitations.md.
+// Compatibility-equivalent texts intentionally share a documentSha256 — the gate
+// treats them as the same document.
 //
 // §-less U.S.C. is IN (e.g. "28 U.S.C. 1331") because under-extraction is the
 // dangerous direction (ZERO citations = gate passes fail-open). §-less C.F.R. is
@@ -40,9 +48,13 @@ const REPORTERS = [
   "So.", "A.", "P.", "F.",
 ].sort((a, b) => b.length - a.length);
 
-/** S1: NFKC folds fullwidth digits; \p{Cf} strips format characters (ZWSP, soft-hyphen, ZWJ, etc.) */
+/** S1: NFKC → whitespace-collapse → strip Cf/Mn/Me/Cc(non-WS)/Default_Ignorable → trim */
 export function normalizeText(s: string): string {
-  return s.normalize("NFKC").replace(/\p{Cf}/gu, "").replace(/\s+/g, " ").trim();
+  return s
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .replace(/[\p{Cf}\p{Mn}\p{Me}\p{Cc}]|\p{Default_Ignorable_Code_Point}/gu, "")
+    .trim();
 }
 
 export function documentSha256(text: string): string {
