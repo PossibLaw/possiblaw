@@ -528,6 +528,7 @@ describe("gate server", () => {
     const blockPolicy: Policy = {
       version: 1,
       boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "block" },
+      citationGate: { boundaries: [...DEFAULT_POLICY.citationGate.boundaries] },
     };
 
     const { baseUrl, close } = await startServer({
@@ -812,6 +813,7 @@ describe("gate server", () => {
     const badPolicy: Policy = {
       version: 1,
       boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "bogus_decision" as unknown as "allow" },
+      citationGate: { boundaries: [...DEFAULT_POLICY.citationGate.boundaries] },
     };
 
     const { baseUrl, close } = await startServer({

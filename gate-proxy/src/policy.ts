@@ -20,6 +20,7 @@ export class PolicyError extends Error {
 export interface Policy {
   version: 1;
   boundaries: Record<BoundaryType, Decision>;
+  citationGate: { boundaries: BoundaryType[] };
 }
 
 // ---------------------------------------------------------------------------
@@ -43,7 +44,7 @@ const VALID_DECISIONS: ReadonlySet<string> = new Set<Decision>([
 ]);
 
 /** The only top-level keys permitted in a policy file. */
-const VALID_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(["version", "boundaries"]);
+const VALID_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(["version", "boundaries", "citationGate"]);
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -59,12 +60,16 @@ export const DEFAULT_POLICY: Policy = Object.freeze({
     MONEY_MOVEMENT: "human" as const,
     IRREVERSIBLE_EXTERNAL_OP: "human" as const,
   }),
+  citationGate: Object.freeze({
+    boundaries: Object.freeze(["COURT_FILING", "THIRD_PARTY_EGRESS"]) as unknown as BoundaryType[],
+  }),
 });
 
 function freshDefaults(): Policy {
   return {
     version: 1,
     boundaries: { ...DEFAULT_POLICY.boundaries },
+    citationGate: { boundaries: [...DEFAULT_POLICY.citationGate.boundaries] },
   };
 }
 
@@ -94,6 +99,30 @@ function validateBoundariesObject(raw: unknown): Record<BoundaryType, Decision> 
   }
 
   return obj as Record<BoundaryType, Decision>;
+}
+
+function validateCitationGate(raw: unknown): { boundaries: BoundaryType[] } {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new PolicyError("citationGate must be a mapping with a 'boundaries' list");
+  }
+  const obj = raw as Record<string, unknown>;
+  for (const key of Object.keys(obj)) {
+    if (key !== "boundaries") {
+      throw new PolicyError(`Unknown citationGate key "${key}". Only "boundaries" is allowed.`);
+    }
+  }
+  const list = obj["boundaries"];
+  if (!Array.isArray(list)) {
+    throw new PolicyError("citationGate.boundaries must be a list");
+  }
+  for (const b of list) {
+    if (!VALID_BOUNDARIES.has(b as string)) {
+      throw new PolicyError(
+        `Unknown boundary "${String(b)}" in citationGate.boundaries. Valid keys are: ${[...VALID_BOUNDARIES].join(", ")}`,
+      );
+    }
+  }
+  return { boundaries: list as BoundaryType[] };
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +197,11 @@ export function loadPolicy(filePath?: string): Policy {
     for (const [key, value] of Object.entries(overrides)) {
       merged.boundaries[key as BoundaryType] = value;
     }
+  }
+
+  // Merge citationGate over defaults
+  if ("citationGate" in doc && doc["citationGate"] !== undefined) {
+    merged.citationGate = validateCitationGate(doc["citationGate"]);
   }
 
   return merged;

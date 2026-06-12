@@ -18,6 +18,16 @@ function writeTmp(dir: string, name: string, content: string): string {
   return p;
 }
 
+/** Write content to a uniquely-named file in a shared tmp dir and return the path. */
+let _sharedTmpDir: string | undefined;
+function writeTmpYaml(content: string): string {
+  if (!_sharedTmpDir) {
+    _sharedTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-policy-cg-test-"));
+  }
+  const name = `policy-${Math.random().toString(36).slice(2)}.yaml`;
+  return writeTmp(_sharedTmpDir, name, content);
+}
+
 // ---------------------------------------------------------------------------
 // Test 1: Defaults — each of the 6 boundaries maps to exact default decision
 // ---------------------------------------------------------------------------
@@ -249,6 +259,7 @@ describe("shipped gate-policy.yaml", () => {
     const expected: Policy = {
       version: 1,
       boundaries: { ...DEFAULT_POLICY.boundaries },
+      citationGate: { boundaries: [...DEFAULT_POLICY.citationGate.boundaries] },
     };
     assert.deepEqual(policy, expected);
   });
@@ -324,6 +335,59 @@ describe("loadPolicy unknown top-level key", () => {
         );
         return true;
       },
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 12: citationGate — defaults, narrowing, disabling, fail-closed validation
+// ---------------------------------------------------------------------------
+
+describe("citationGate defaults", () => {
+  it("default citationGate covers COURT_FILING + THIRD_PARTY_EGRESS", () => {
+    const p = loadPolicy(undefined);
+    assert.deepEqual(p.citationGate.boundaries, ["COURT_FILING", "THIRD_PARTY_EGRESS"]);
+  });
+});
+
+describe("citationGate narrow and disable", () => {
+  it("firm can narrow citationGate to COURT_FILING only", () => {
+    const p = loadPolicy(writeTmpYaml("version: 1\ncitationGate:\n  boundaries: [COURT_FILING]\n"));
+    assert.deepEqual(p.citationGate.boundaries, ["COURT_FILING"]);
+  });
+
+  it("empty citationGate boundaries list disables the gate", () => {
+    const p = loadPolicy(writeTmpYaml("version: 1\ncitationGate:\n  boundaries: []\n"));
+    assert.deepEqual(p.citationGate.boundaries, []);
+  });
+});
+
+describe("citationGate fail-closed validation", () => {
+  it("unknown boundary inside citationGate → PolicyError (fail-closed)", () => {
+    assert.throws(
+      () => loadPolicy(writeTmpYaml("version: 1\ncitationGate:\n  boundaries: [NOT_A_BOUNDARY]\n")),
+      PolicyError,
+    );
+  });
+
+  it("citationGate must be a mapping with only 'boundaries' — bogus key throws", () => {
+    assert.throws(
+      () => loadPolicy(writeTmpYaml("version: 1\ncitationGate:\n  bogus: true\n")),
+      PolicyError,
+    );
+  });
+
+  it("citationGate must be a mapping — scalar value throws", () => {
+    assert.throws(
+      () => loadPolicy(writeTmpYaml("version: 1\ncitationGate: yes\n")),
+      PolicyError,
+    );
+  });
+
+  it("citationGate boundaries entries must be a list, not a bare string", () => {
+    assert.throws(
+      () => loadPolicy(writeTmpYaml("version: 1\ncitationGate:\n  boundaries: COURT_FILING\n")),
+      PolicyError,
     );
   });
 });
