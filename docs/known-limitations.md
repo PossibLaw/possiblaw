@@ -141,6 +141,29 @@ Westlaw, midpage, iManage (upload), and NetDocuments (upload) are flagged
 `UNCONFIRMED` and need operator verification against current vendor docs
 before live use.
 
+## Gate proxy
+
+### local_trusted accepts unauthenticated local board calls
+
+On a dev machine, paperclip runs as a `local_trusted` instance and accepts
+unauthenticated loopback board calls — that is why the launcher can skip
+`PAPERCLIP_GATE_API_KEY`. The flip side: the human-approval gate is
+enforceable only against the agents' *missing credentials* (egress tokens
+exist solely in the gate-proxy process, so agents have no direct path to a
+vendor). An arbitrary local process outside the agent sandbox could still
+call the board or a vendor directly. Production deployments with auth
+enabled (export `PAPERCLIP_GATE_API_KEY`, minted via `paperclipai auth
+login`) get the structural gate as well.
+
+### Receipt chain assumes a single writer
+
+The hash-chained receipts file (`receipts.jsonl`) is append-only under a
+single-writer assumption: one gate-proxy process per file. Two proxies
+pointed at the same `GATE_RECEIPTS_PATH` will interleave appends and break
+the chain. The launcher derives the path from the data-dir name
+(`~/.possiblaw/gate-receipts/<data-dir-name>/`), so parallel disposable
+launches stay isolated as long as their `--data-dir` values differ.
+
 ## Hybrid variant
 
 Not shipped. Paperclip's `assigneeAdapterOverrides` only merges config

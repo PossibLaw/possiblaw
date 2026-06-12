@@ -15,9 +15,11 @@ Extra modes:
                         variant's secret_env block (dual-auth variants)
   --list-models         print the variant's distinct effective models
                         (consumed by the launcher's preflight model probe)
-  --build-env-patches   given --overrides-json and --secret-ids-json, emit
-                        per-agent { adapterConfig } patch bodies that bind
-                        each secret into adapterConfig.env as a secret_ref
+  --build-env-patches   given --overrides-json plus --secret-ids-json and/or
+                        --plain-env-json, emit per-agent { adapterConfig }
+                        patch bodies that bind each secret into
+                        adapterConfig.env as a secret_ref and each plain
+                        entry (e.g. GATE_PROXY_URL) as a literal string
   --lint                structurally validate the variants doc (adapterType,
                         models present, opencode provider/model format) and
                         exit non-zero on problems
@@ -169,17 +171,24 @@ def list_models(
 
 
 def build_env_patches(
-    overrides: dict, secret_ids: dict[str, str]
+    overrides: dict,
+    secret_ids: dict[str, str],
+    plain_env: dict[str, str] | None = None,
 ) -> dict[str, dict]:
-    """Build PATCH /api/agents/:id bodies binding secrets into adapter env.
+    """Build PATCH /api/agents/:id bodies binding env into adapter config.
 
-    Input: the adapterOverrides map already produced by build_overrides, and
-    a map of ENV_KEY -> paperclip secretId (created post-import via
-    POST /api/companies/:id/secrets). Output per agent slug:
-    { "adapterConfig": <override config + env secret_ref bindings> }.
-    Inputs are not mutated; existing env bindings are preserved.
+    Input: the adapterOverrides map already produced by build_overrides, a
+    map of ENV_KEY -> paperclip secretId (created post-import via
+    POST /api/companies/:id/secrets), and an optional map of ENV_KEY ->
+    plain string value (e.g. GATE_PROXY_URL — addresses, not credentials).
+    Output per agent slug:
+    { "adapterConfig": <override config + env bindings> }.
+    Inputs are not mutated; existing env bindings are preserved, except
+    that a plain_env key replaces an existing binding of the same name.
+    Both maps empty -> no patches.
     """
-    if not secret_ids:
+    plain_env = plain_env or {}
+    if not secret_ids and not plain_env:
         return {}
     patches: dict[str, dict] = {}
     for slug, entry in overrides.items():
@@ -187,6 +196,8 @@ def build_env_patches(
         env = dict(config.get("env") or {})
         for key, secret_id in secret_ids.items():
             env[key] = {"type": "secret_ref", "secretId": secret_id}
+        for key, value in plain_env.items():
+            env[key] = value
         config["env"] = env
         patches[slug] = {"adapterConfig": config}
     return patches
@@ -395,6 +406,45 @@ def _self_test() -> int:
     # no secrets → no patches
     assert build_env_patches(overrides_for_patch, {}) == {}
 
+    # --- build_env_patches: plain env values (e.g. GATE_PROXY_URL) ---
+    # plain string value rides alongside secret_ref bindings on every agent
+    patches_plain = build_env_patches(
+        overrides_for_patch,
+        {"OPENAI_API_KEY": "sec-123"},
+        {"GATE_PROXY_URL": "http://127.0.0.1:3801"},
+    )
+    assert (
+        patches_plain["nda-drafter"]["adapterConfig"]["env"]["GATE_PROXY_URL"]
+        == "http://127.0.0.1:3801"
+    )
+    assert patches_plain["nda-drafter"]["adapterConfig"]["env"]["OPENAI_API_KEY"] == {
+        "type": "secret_ref",
+        "secretId": "sec-123",
+    }
+    # plain values alone (no secrets) still patch every agent
+    patches_plain_only = build_env_patches(
+        overrides_for_patch, {}, {"GATE_PROXY_URL": "http://127.0.0.1:3899"}
+    )
+    assert set(patches_plain_only) == {"chief-of-staff", "nda-drafter"}
+    assert patches_plain_only["chief-of-staff"]["adapterConfig"]["env"] == {
+        "EXISTING": "keep",
+        "GATE_PROXY_URL": "http://127.0.0.1:3899",
+    }
+    assert patches_plain_only["chief-of-staff"]["adapterConfig"]["model"] == "gpt-5.3-codex"
+    # a plain value replaces an existing env key of the same name
+    assert (
+        build_env_patches(overrides_for_patch, {}, {"EXISTING": "replaced"})[
+            "chief-of-staff"
+        ]["adapterConfig"]["env"]["EXISTING"]
+        == "replaced"
+    )
+    # originals must not be mutated by plain-env merging either
+    assert overrides_for_patch["chief-of-staff"]["adapterConfig"]["env"] == {
+        "EXISTING": "keep"
+    }
+    # both maps empty → no patches
+    assert build_env_patches(overrides_for_patch, {}, {}) == {}
+
     # --- lint_variants: structural validation of a variants doc ---
     lint_doc = {
         "schema": "possiblaw/variants/v1",
@@ -476,17 +526,25 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--overrides-json", help="path to a previously generated overrides map (for --build-env-patches)")
     parser.add_argument("--secret-ids-json", help="path to {ENV_KEY: secretId} map (for --build-env-patches)")
+    parser.add_argument("--plain-env-json", help="path to {ENV_KEY: plain string value} map (for --build-env-patches)")
     args = parser.parse_args(argv)
 
     if args.self_test:
         return _self_test()
 
     if args.build_env_patches:
-        if not (args.overrides_json and args.secret_ids_json):
-            parser.error("--build-env-patches requires --overrides-json and --secret-ids-json")
+        if not args.overrides_json or not (args.secret_ids_json or args.plain_env_json):
+            parser.error(
+                "--build-env-patches requires --overrides-json and at least "
+                "one of --secret-ids-json / --plain-env-json"
+            )
         overrides = _read_json(args.overrides_json)
-        secret_ids = _read_json(args.secret_ids_json)
-        json.dump(build_env_patches(overrides, secret_ids), sys.stdout, indent=2, sort_keys=True)
+        secret_ids = _read_json(args.secret_ids_json) if args.secret_ids_json else {}
+        plain_env = _read_json(args.plain_env_json) if args.plain_env_json else {}
+        json.dump(
+            build_env_patches(overrides, secret_ids, plain_env),
+            sys.stdout, indent=2, sort_keys=True,
+        )
         sys.stdout.write("\n")
         return 0
 

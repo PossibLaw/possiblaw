@@ -31,15 +31,26 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 DEFAULT_DATA_DIR="$HOME/.possiblaw/paperclip-data"
 DEFAULT_PORT="3100"
+DEFAULT_GATE_PORT="3801"
 DEFAULT_PACKAGE="$REPO_ROOT/companies/legal-operations"
 DEFAULT_VARIANTS_FILE="$DEFAULT_PACKAGE/variants.yaml"
 DEFAULT_PAPERCLIP_YAML="$DEFAULT_PACKAGE/.paperclip.yaml"
 PACKAGE_DEFAULT_ORG_NAME="PossibLaw Legal Operations"
 HEALTH_TIMEOUT_SECS=60
 HEALTH_POLL_INTERVAL_SECS=1
+GATE_HEALTH_TIMEOUT_SECS=15
 IMPORT_HEARTBEAT_SECS=10
 IMPORT_PARTIAL_CHECK_AFTER_SECS=90
 IMPORT_MAX_TIME_SECS=600
+
+# Egress credentials live ONLY in the gate-proxy process. They are scrubbed
+# from the env the paperclip server starts with (adapter-spawned agents
+# inherit the SERVER's process env wholesale — codex-local execute.ts merges
+# process.env into the spawned CLI env — so a token here would reach every
+# agent and let it bypass the gate). LOCAL_MODEL_URL / EXTERNAL_MODEL_URL are
+# endpoints, not credentials: they pass through to the proxy by inheritance
+# and are harmless elsewhere.
+EGRESS_CRED_VARS="MS_GRAPH_TOKEN GDRIVE_ACCESS_TOKEN NOTION_API_KEY GMAIL_TOKEN EXTERNAL_MODEL_API_KEY"
 
 VARIANTS_PY="$SCRIPT_DIR/_possiblaw_variants.py"
 INLINE_PY="$SCRIPT_DIR/_possiblaw_inline_source.py"
@@ -81,6 +92,18 @@ OPTIONS:
   --org-name <name>     Company name. Default: "$PACKAGE_DEFAULT_ORG_NAME".
   --data-dir <path>     Paperclip data directory.  Default: $DEFAULT_DATA_DIR
   --port <port>         Paperclip HTTP port.       Default: $DEFAULT_PORT
+  --gate-port <port>    Gate-proxy HTTP port.      Default: $DEFAULT_GATE_PORT
+  --no-gate-proxy       Demo-only: don't start the gate proxy and don't
+                        inject GATE_PROXY_URL into agents. Live runs
+                        normally start the proxy after import; egress
+                        credentials (MS_GRAPH_TOKEN, GDRIVE_ACCESS_TOKEN,
+                        NOTION_API_KEY, GMAIL_TOKEN, EXTERNAL_MODEL_API_KEY)
+                        are ALWAYS scrubbed from the paperclip server env,
+                        so agents reach vendors only through the proxy.
+                        local_trusted instances accept unauthenticated board
+                        calls; for any non-local-trusted deployment, export
+                        PAPERCLIP_GATE_API_KEY (minted via 'paperclipai auth
+                        login') before launching.
   --package <path>      Path to package source.    Default: $DEFAULT_PACKAGE
   --variants-file <path> variants.yaml path.       Default: <package>/variants.yaml
   --reset               Wipe the data directory before starting.
@@ -250,6 +273,8 @@ MISSION=""
 ORG_NAME="$PACKAGE_DEFAULT_ORG_NAME"
 DATA_DIR="$DEFAULT_DATA_DIR"
 PORT="$DEFAULT_PORT"
+GATE_PORT="$DEFAULT_GATE_PORT"
+NO_GATE_PROXY="false"
 PACKAGE="$DEFAULT_PACKAGE"
 VARIANTS_FILE="$DEFAULT_VARIANTS_FILE"
 PAPERCLIP_YAML=""
@@ -272,6 +297,8 @@ while [ "$#" -gt 0 ]; do
         --org-name) [ "$#" -ge 2 ] || { err "--org-name requires a value"; exit 2; }; ORG_NAME="$2"; shift 2 ;;
         --data-dir) [ "$#" -ge 2 ] || { err "--data-dir requires a value"; exit 2; }; DATA_DIR="$2"; shift 2 ;;
         --port) [ "$#" -ge 2 ] || { err "--port requires a value"; exit 2; }; PORT="$2"; shift 2 ;;
+        --gate-port) [ "$#" -ge 2 ] || { err "--gate-port requires a value"; exit 2; }; GATE_PORT="$2"; shift 2 ;;
+        --no-gate-proxy) NO_GATE_PROXY="true"; shift ;;
         --package) [ "$#" -ge 2 ] || { err "--package requires a value"; exit 2; }; PACKAGE="$2"; shift 2 ;;
         --variants-file) [ "$#" -ge 2 ] || { err "--variants-file requires a value"; exit 2; }; VARIANTS_FILE="$2"; shift 2 ;;
         --reset) RESET="true"; shift ;;
@@ -354,6 +381,11 @@ log "port:          $PORT"
 log "package:       $PACKAGE"
 log "variants file: $VARIANTS_FILE"
 log "dry run:       $DRY_RUN"
+if [ "$NO_GATE_PROXY" = "true" ]; then
+    log "gate proxy:    disabled (--no-gate-proxy, demo-only)"
+else
+    log "gate proxy:    port $GATE_PORT (live runs only)"
+fi
 log ""
 log "Pre-flight checks:"
 
@@ -928,6 +960,10 @@ mkdir -p "$DATA_DIR"
 
 LAUNCHER_LOG="$DATA_DIR/possiblaw.log"
 LAUNCHER_PID_FILE="$DATA_DIR/possiblaw.pid"
+GATE_PID_FILE="$DATA_DIR/gate-proxy.pid"
+GATE_LOG="$DATA_DIR/gate-proxy.log"
+GATE_PROXY_URL="http://127.0.0.1:$GATE_PORT"
+GATE_RECEIPTS_PATH="$HOME/.possiblaw/gate-receipts/$(basename "$DATA_DIR")/receipts.jsonl"
 : > "$LAUNCHER_LOG"
 
 # ---------------------------------------------------------------------------
@@ -935,10 +971,12 @@ LAUNCHER_PID_FILE="$DATA_DIR/possiblaw.pid"
 # ---------------------------------------------------------------------------
 
 PAPERCLIP_PID=""
+GATE_PROXY_PID=""
 
-kill_paperclip_tree() {
-    # Kill the subshell wrapper, all its descendants, and any process holding port $PORT.
+kill_subshell_tree() {
+    # Kill the subshell wrapper, all its descendants, and any process holding the given port.
     local subshell="$1"
+    local port="$2"
     if [ -n "$subshell" ] && kill -0 "$subshell" 2>/dev/null; then
         # Cascade descendants first (pgrep -P only goes one level; recurse).
         local stack=("$subshell")
@@ -965,7 +1003,7 @@ kill_paperclip_tree() {
     fi
     # Belt and suspenders: anything still on the port goes too.
     local port_pids
-    port_pids="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null || true)"
+    port_pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)"
     if [ -n "$port_pids" ]; then
         # shellcheck disable=SC2086
         kill $port_pids 2>/dev/null || true
@@ -975,9 +1013,20 @@ kill_paperclip_tree() {
     fi
 }
 
+kill_paperclip_tree() { kill_subshell_tree "$1" "$PORT"; }
+
+kill_gate_proxy_tree() {
+    # No-op until the gate proxy has started; mirrors possiblaw.pid handling.
+    [ -n "$GATE_PROXY_PID" ] || return 0
+    kill_subshell_tree "$GATE_PROXY_PID" "$GATE_PORT"
+    [ -f "$GATE_PID_FILE" ] && rm -f "$GATE_PID_FILE"
+    GATE_PROXY_PID=""
+}
+
 cleanup_on_signal() {
     local signal="$1"
-    warn "received $signal; stopping Paperclip"
+    warn "received $signal; stopping Paperclip and the gate proxy"
+    kill_gate_proxy_tree
     kill_paperclip_tree "$PAPERCLIP_PID"
     [ -f "$LAUNCHER_PID_FILE" ] && rm -f "$LAUNCHER_PID_FILE"
     exit 130
@@ -1087,6 +1136,15 @@ fi
 
 milestone "running: paperclipai onboard --yes (background; runs the server inline)"
 log "(log: $LAUNCHER_LOG)"
+# Egress-credential scrub: adapter-spawned agents inherit the paperclip
+# SERVER's process env (codex-local execute.ts merges process.env into the
+# spawned CLI env), so any egress token here would reach every agent and let
+# it bypass the gate proxy. Start the server with EGRESS_CRED_VARS unset;
+# only the gate-proxy process gets them.
+EGRESS_SCRUB_ARGS=()
+for cred_var in $EGRESS_CRED_VARS; do
+    EGRESS_SCRUB_ARGS+=(-u "$cred_var")
+done
 (
     cd "$PAPERCLIP_DIR"
     # onboard reads its port from $PORT (cli/src/commands/onboard.ts); without
@@ -1094,7 +1152,7 @@ log "(log: $LAUNCHER_LOG)"
     # $API_BASE never succeeds when a custom port was chosen.
     # shellcheck disable=SC2086 — ONBOARD_EXTRA_ENV holds zero or more
     # space-free KEY=VALUE assignments (e.g. the static-UI mode flag).
-    exec env PORT="$PORT" $ONBOARD_EXTRA_ENV pnpm paperclipai onboard --data-dir "$DATA_DIR" --bind loopback --yes
+    exec env "${EGRESS_SCRUB_ARGS[@]}" PORT="$PORT" $ONBOARD_EXTRA_ENV pnpm paperclipai onboard --data-dir "$DATA_DIR" --bind loopback --yes
 ) >>"$LAUNCHER_LOG" 2>&1 </dev/null &
 PAPERCLIP_PID=$!
 echo "$PAPERCLIP_PID" > "$LAUNCHER_PID_FILE"
@@ -1406,19 +1464,101 @@ if [ -n "$COMPANY_ID" ] && [ -n "$MISSION" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Bind API-key secrets (dual-auth variants)
+# Gate proxy (egress gates + receipts)
+# ---------------------------------------------------------------------------
+#
+# Egress credentials (EGRESS_CRED_VARS) exist ONLY in this process tree: the
+# paperclip server env was scrubbed at start because adapter-spawned agents
+# inherit it wholesale. The proxy enforces gate-policy.yaml per boundary and
+# appends a hash-chained receipt for every egress event. A proxy failure
+# never blocks the dashboard — gate-dependent skills fail visibly instead.
+#
+# PAPERCLIP_GATE_API_KEY is intentionally NOT set here: local_trusted
+# instances accept unauthenticated local board calls. Non-local-trusted
+# deployments must export PAPERCLIP_GATE_API_KEY (minted via
+# `paperclipai auth login`) before launching.
+
+if [ "$NO_GATE_PROXY" = "true" ]; then
+    warn "gate proxy disabled (--no-gate-proxy, demo-only): egress runs ungated and unreceipted"
+elif [ -z "$COMPANY_ID" ]; then
+    warn "no company id parsed from the import response; skipping the gate proxy"
+elif [ -n "$(lsof -nP -iTCP:"$GATE_PORT" -sTCP:LISTEN -t 2>/dev/null || true)" ]; then
+    warn "port $GATE_PORT is already in use; skipping gate-proxy start"
+    warn "(stop the other process or re-run with --gate-port <n>)"
+else
+    GATE_START_OK="true"
+    : > "$GATE_LOG"
+    if [ ! -d "$REPO_ROOT/gate-proxy/node_modules" ]; then
+        milestone "installing gate-proxy dependencies (first run)"
+        if ! pnpm -C "$REPO_ROOT/gate-proxy" install >>"$GATE_LOG" 2>&1; then
+            warn "gate-proxy dependency install failed (log: $GATE_LOG); continuing without the gate proxy"
+            GATE_START_OK="false"
+        fi
+    fi
+    if [ "$GATE_START_OK" = "true" ]; then
+        milestone "starting gate proxy on $GATE_PROXY_URL (log: $GATE_LOG)"
+        mkdir -p "$(dirname "$GATE_RECEIPTS_PATH")" "$HOME/.possiblaw/action-packages"
+        # Operator-exported egress creds (EGRESS_CRED_VARS) plus
+        # LOCAL_MODEL_URL / EXTERNAL_MODEL_URL pass through by inheritance —
+        # this is the ONLY child process the launcher starts without the scrub.
+        (
+            exec env \
+                GATE_PROXY_PORT="$GATE_PORT" \
+                GATE_POLICY_PATH="$REPO_ROOT/companies/legal-operations/gate-policy.yaml" \
+                GATE_RECEIPTS_PATH="$GATE_RECEIPTS_PATH" \
+                PAPERCLIP_BASE_URL="$API_BASE" \
+                PAPERCLIP_COMPANY_ID="$COMPANY_ID" \
+                GATE_ACTION_PACKAGE_DIR="$HOME/.possiblaw/action-packages" \
+                pnpm -C "$REPO_ROOT/gate-proxy" start
+        ) >>"$GATE_LOG" 2>&1 </dev/null &
+        GATE_PROXY_PID=$!
+        echo "$GATE_PROXY_PID" > "$GATE_PID_FILE"
+
+        GATE_WAITED=0
+        GATE_HEALTHY="false"
+        while [ "$GATE_WAITED" -lt "$GATE_HEALTH_TIMEOUT_SECS" ]; do
+            if ! kill -0 "$GATE_PROXY_PID" 2>/dev/null; then break; fi
+            GATE_HTTP_CODE="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 "$GATE_PROXY_URL/health" || true)"
+            if [ "$GATE_HTTP_CODE" = "200" ]; then GATE_HEALTHY="true"; break; fi
+            sleep 1
+            GATE_WAITED=$(( GATE_WAITED + 1 ))
+        done
+        if [ "$GATE_HEALTHY" = "true" ]; then
+            # Replace the subshell PID with the actual listener PID so
+            # `kill $(cat gate-proxy.pid)` does the right thing.
+            GATE_LISTEN_PID="$(lsof -nP -iTCP:"$GATE_PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
+            if [ -n "$GATE_LISTEN_PID" ]; then
+                echo "$GATE_LISTEN_PID" > "$GATE_PID_FILE"
+            fi
+            milestone "gate proxy healthy at $GATE_PROXY_URL (receipts: $GATE_RECEIPTS_PATH)"
+        elif kill -0 "$GATE_PROXY_PID" 2>/dev/null; then
+            warn "gate proxy not healthy after ${GATE_HEALTH_TIMEOUT_SECS}s — continuing; gate-dependent"
+            warn "skills will fail visibly until it comes up (log: $GATE_LOG)"
+        else
+            warn "gate proxy exited during startup — continuing; gate-dependent skills will fail visibly"
+            tail -n 20 "$GATE_LOG" >&2 || true
+            rm -f "$GATE_PID_FILE"
+            GATE_PROXY_PID=""
+        fi
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Bind per-agent env: API-key secret_refs (dual-auth) + GATE_PROXY_URL
 # ---------------------------------------------------------------------------
 #
 # For *-api variants: store each declared key ONCE as a paperclip company
 # secret, then PATCH every imported agent so its adapterConfig.env references
 # the secret (type: secret_ref). The raw key is passed to helpers via child
 # process env and to curl via stdin — never argv, never a file on disk.
+# Unless --no-gate-proxy, the same PATCH binds GATE_PROXY_URL (a plain
+# loopback address, not a credential) so every agent egresses via the proxy.
 
+SECRET_BIND_FAILED="false"
+SECRET_IDS_FILE="$(mktemp -t possiblaw-secret-ids.XXXXXX.json)"
+printf '{}' > "$SECRET_IDS_FILE"
 if [ -n "$SECRET_ENV_TSV" ] && [ -n "$COMPANY_ID" ]; then
-    milestone "binding API-key secret(s) to agents"
-    SECRET_IDS_FILE="$(mktemp -t possiblaw-secret-ids.XXXXXX.json)"
-    printf '{}' > "$SECRET_IDS_FILE"
-    SECRET_BIND_FAILED="false"
+    milestone "creating company secret(s) for the API key(s)"
     while IFS=$'\t' read -r env_key env_name; do
         [ -n "$env_key" ] || continue
         if [ -z "${!env_key:-}" ]; then
@@ -1461,12 +1601,23 @@ d[key] = sid
 json.dump(d, open(path, "w"))
 PY
     done <<< "$SECRET_ENV_TSV"
+fi
 
+PLAIN_ENV_FILE="$(mktemp -t possiblaw-plain-env.XXXXXX.json)"
+if [ "$NO_GATE_PROXY" = "true" ]; then
+    printf '{}' > "$PLAIN_ENV_FILE"
+else
+    printf '{"GATE_PROXY_URL": "%s"}' "$GATE_PROXY_URL" > "$PLAIN_ENV_FILE"
+fi
+
+if [ -n "$COMPANY_ID" ] && { [ -n "$SECRET_ENV_TSV" ] || [ "$NO_GATE_PROXY" != "true" ]; }; then
+    milestone "binding adapter env to agents (API-key secret_refs + GATE_PROXY_URL)"
     PATCHES_FILE="$(mktemp -t possiblaw-env-patches.XXXXXX.json)"
     if ! python3 "$VARIANTS_PY" --build-env-patches \
             --overrides-json "$OVERRIDES_FILE" \
-            --secret-ids-json "$SECRET_IDS_FILE" > "$PATCHES_FILE"; then
-        warn "env patch generation failed; agents keep subscription auth until configured in the UI"
+            --secret-ids-json "$SECRET_IDS_FILE" \
+            --plain-env-json "$PLAIN_ENV_FILE" > "$PATCHES_FILE"; then
+        warn "env patch generation failed; agents keep their import-time adapter config"
         SECRET_BIND_FAILED="true"
     else
         PATCHED=0; PATCH_FAILED=0
@@ -1501,18 +1652,19 @@ for a in (d.get("agents") or []):
         print(f"{slug}\t{aid}")
 PY
 )
-        log "  API key bound to $PATCHED agent(s) via secret_ref"
+        log "  adapter env bound on $PATCHED agent(s)"
         if [ "$PATCH_FAILED" -gt 0 ]; then
-            warn "  $PATCH_FAILED agent(s) could not be patched; bind the secret in the"
+            warn "  $PATCH_FAILED agent(s) could not be patched; set the env in the"
             warn "  Paperclip UI instead (agent settings → adapter config → env)."
             SECRET_BIND_FAILED="true"
         fi
     fi
-    rm -f "$SECRET_IDS_FILE" "$PATCHES_FILE"
+    rm -f "$PATCHES_FILE"
     if [ "$SECRET_BIND_FAILED" = "true" ]; then
-        warn "API-key binding incomplete — affected agents fall back to subscription auth."
+        warn "env binding incomplete — affected agents keep their import-time adapter config."
     fi
 fi
+rm -f "$SECRET_IDS_FILE" "$PLAIN_ENV_FILE"
 
 # ---------------------------------------------------------------------------
 # Final banner + browser open
@@ -1535,9 +1687,16 @@ printf '  Dashboard:  %s\n' "$DASHBOARD_URL"
 printf '  Data dir:   %s\n' "$DATA_DIR"
 printf '  Server log: %s\n' "$LAUNCHER_LOG"
 printf '  Server pid: %s (saved to %s)\n' "${SERVER_PID:-$PAPERCLIP_PID}" "$LAUNCHER_PID_FILE"
+if [ -n "$GATE_PROXY_PID" ]; then
+    printf '  Gate proxy: %s (pid saved to %s)\n' "$GATE_PROXY_URL" "$GATE_PID_FILE"
+    printf '  Receipts:   %s\n' "$GATE_RECEIPTS_PATH"
+fi
 printf '\n'
 printf '  Tail the log:    tail -f %s\n' "$LAUNCHER_LOG"
 printf '  Stop the server: kill $(cat %s)\n' "$LAUNCHER_PID_FILE"
+if [ -n "$GATE_PROXY_PID" ]; then
+    printf '  Stop the proxy:  kill $(cat %s)\n' "$GATE_PID_FILE"
+fi
 printf '\n'
 printf '  Operator walkthrough: %s/docs/operator-walkthrough.md\n' "$REPO_ROOT"
 printf '======================================================================\n'

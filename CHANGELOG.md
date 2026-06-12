@@ -7,6 +7,62 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.20.0] — 2026-06-12 — Gate proxy wired into the launcher: scrubbed server env, gated egress by default
+
+### Added
+
+- `gate-proxy/` joins the launch flow: a loopback-only egress gate (152
+  tests) enforcing `companies/legal-operations/gate-policy.yaml` per trust
+  boundary (allow / anonymize / human / block) with a hash-chained receipt
+  per egress event. Live launches start it right after import +
+  company-id parse, health-wait ~15s, write
+  `<data-dir>/gate-proxy.pid` / `gate-proxy.log`, and point
+  `PAPERCLIP_BASE_URL`/`PAPERCLIP_COMPANY_ID` at the fresh company.
+  Receipts: `~/.possiblaw/gate-receipts/<data-dir-name>/receipts.jsonl`.
+  A proxy failure warns and continues — gate-dependent skills fail
+  visibly instead of blocking the dashboard. The same traps and echoed
+  stop instructions that cover `possiblaw.pid` cover the proxy.
+- Egress-credential scrub: the paperclip server now starts with
+  `MS_GRAPH_TOKEN`, `GDRIVE_ACCESS_TOKEN`, `NOTION_API_KEY`,
+  `GMAIL_TOKEN`, and `EXTERNAL_MODEL_API_KEY` unset (`env -u`), because
+  adapter-spawned agents inherit the server's process env wholesale
+  (codex-local execute.ts merges `process.env` into the spawned CLI env).
+  The tokens pass through to the gate-proxy process only — the proxy is
+  the only credentialed path out. `LOCAL_MODEL_URL` / `EXTERNAL_MODEL_URL`
+  (endpoints, not credentials) also pass through to the proxy.
+- `GATE_PROXY_URL` injected into every imported agent's
+  `adapterConfig.env` via the existing per-agent PATCH pass.
+  `bin/_possiblaw_variants.py --build-env-patches` gains
+  `--plain-env-json` — plain string values ride alongside the
+  `secret_ref` shape in one PATCH per agent (new self-test cases).
+- Flags: `--gate-port <n>` (default 3801) and `--no-gate-proxy`
+  (demo-only — egress runs ungated and unreceipted; the server-env scrub
+  stays on regardless). `PAPERCLIP_GATE_API_KEY` is intentionally not set
+  on local_trusted instances; non-local-trusted deployments export it
+  (minted via `paperclipai auth login`) before launching.
+- Docs: walkthrough "The Gate Proxy (egress gates + receipts)" (env
+  table — creds go to the proxy env, never agents; receipts path; flag
+  notes), known-limitations entries for unauthenticated local_trusted
+  board calls and the single-writer receipts assumption.
+
+### Validation
+
+- `bash -n` + both helper self-tests green (plain-env cases red→green);
+  dry-run regression exact `agents=175 skills=171 projects=3 issues=3
+  warnings=0 errors=0`, no proxy start on dry-run. Live disposable e2e
+  (ports 3199/3899, fake `MS_GRAPH_TOKEN=dummy-sentinel-123`): 175 agents
+  / 0 warnings, `/health` `{"ok":true}`, `GATE_PROXY_URL` present on
+  175/175 agent readbacks, sentinel absent from every agent config and
+  from the server process env (`ps eww` → 0 hits) while present in the
+  proxy env; egress smoke `POST /egress/send_email` → 502
+  `credential_missing` + `/receipts/verify` ok, length 1.
+  `--no-gate-proxy` live run: no 3899 listener, no pid file, no env
+  injection, adapter config otherwise intact. Both runs killed via their
+  own stop instructions; ports verified free; operator's 3100 instance
+  untouched.
+
+---
+
 ## [0.19.0] — 2026-06-11 — Delivery layer: work products reach OneDrive / Google Drive / Notion
 
 ### Added

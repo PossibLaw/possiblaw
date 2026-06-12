@@ -104,6 +104,8 @@ Common flags:
 --no-browser          Don't auto-open the dashboard URL
 --data-dir <path>     Override the Paperclip data dir (default ~/.possiblaw/paperclip-data)
 --port <n>            Override the Paperclip port (default 3100)
+--gate-port <n>       Override the gate-proxy port (default 3801)
+--no-gate-proxy       Demo-only: skip the gate proxy (egress runs ungated)
 ```
 
 ## Variant setup
@@ -274,6 +276,51 @@ Per-vendor tokens (set the ones you use):
 | `MS_GRAPH_TOKEN` | OneDrive for Business / SharePoint | Your Entra ID app or Graph Explorer; scopes per `skills/connector-onedrive/SKILL.md` |
 | `GDRIVE_ACCESS_TOKEN` | Google Drive | OAuth flow per `skills/connector-google-drive/SKILL.md` |
 | `NOTION_API_KEY` | Notion | notion.so/my-integrations; share the target page/database with the integration |
+
+### The Gate Proxy (egress gates + receipts)
+
+Live launches start a local gate proxy (`gate-proxy/`, loopback-only,
+default `http://127.0.0.1:3801`) right after import. Every imported agent
+gets `GATE_PROXY_URL` in its adapter env; egress skills route outbound
+actions (email, file delivery, external-model calls) through the proxy,
+which enforces `companies/legal-operations/gate-policy.yaml` per trust
+boundary (allow / anonymize / human / block) and appends a hash-chained
+receipt for every egress event.
+
+The security property: **egress credentials exist only in the proxy
+process.** Adapter-spawned agents inherit the paperclip server's process
+env wholesale, so the launcher scrubs these variables from the server env
+and passes them to the proxy only:
+
+| Env | Goes to | Purpose |
+|---|---|---|
+| `MS_GRAPH_TOKEN` | proxy only | OneDrive / SharePoint delivery |
+| `GDRIVE_ACCESS_TOKEN` | proxy only | Google Drive delivery |
+| `NOTION_API_KEY` | proxy only | Notion page/database writes |
+| `GMAIL_TOKEN` | proxy only | Gmail send |
+| `EXTERNAL_MODEL_API_KEY` | proxy only | External model endpoint auth |
+| `LOCAL_MODEL_URL` / `EXTERNAL_MODEL_URL` | proxy (endpoints, not credentials) | Anonymizer / external-model routing |
+
+An agent that tries to call a vendor directly simply has no token — the
+proxy is the only credentialed path out.
+
+Operational notes:
+
+- `--gate-port <n>` picks the proxy port (default 3801); `--no-gate-proxy`
+  skips the proxy entirely (demo-only — egress runs ungated and
+  unreceipted).
+- Receipts land in
+  `~/.possiblaw/gate-receipts/<data-dir-name>/receipts.jsonl`; verify the
+  chain any time with `curl http://127.0.0.1:3801/receipts/verify`.
+- A proxy failure never blocks the dashboard: the launcher warns and
+  continues, and gate-dependent skills fail visibly until it comes up.
+  Log: `<data-dir>/gate-proxy.log`; stop it with
+  `kill $(cat <data-dir>/gate-proxy.pid)`.
+- `PAPERCLIP_GATE_API_KEY` is not set by the launcher: local_trusted
+  instances accept unauthenticated local board calls. Any
+  non-local-trusted deployment must export it (minted via
+  `paperclipai auth login`) before launching.
+- Dry-runs never start the proxy.
 
 ### Preflight model probe (codex / codex-api / claude / claude-api)
 
