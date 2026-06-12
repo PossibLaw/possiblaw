@@ -1,46 +1,56 @@
 # Connector Inventory
 
-Complete inventory of all PossibLaw MCP connectors — operational and planned.
+Complete inventory of all PossibLaw connectors — operational and planned.
+
+All egress writes go through the Gate Proxy (`POST $GATE_PROXY_URL/egress/<tool>`). The proxy holds every egress credential, writes a receipt for each call, and enforces the firm's `gate-policy.yaml`. Agents hold no egress credentials. Read-only operations go directly to the vendor API using agent-scoped tokens. If a `502 credential_missing` response arrives from the proxy, the operator must export the named credential in the launcher environment and restart; never set it in an agent environment.
 
 ---
 
-## Live (operational with credentials)
+## Egress-via-gate (writes route through the Gate Proxy)
 
-Connectors that self-register and respond to `possiblaw connectors list`.
-14 connectors total as of Sprint 6B: 3 stand-ins + 11 live.
-
-### Stand-ins (no credentials — always available)
-
-| ID | Name | Category | Tier | Capabilities |
-|---|---|---|---|---|
-| `local-fs-doc-store` | Local FS Doc Store | stand-in | open-access | documents.list, documents.get, documents.put |
-| `no-op-signature` | No-Op Signature | stand-in | open-access | signature.request, signature.status |
-| `courtlistener` | CourtListener | stand-in | open-access | cases.search, cases.get |
-
-Stand-ins are iManage/NetDocuments, DocuSign, and Westlaw/Lexis equivalents respectively.
-They require zero credentials and are the default for offline demos and development without
-enterprise contracts.
-
-### Legal — live connectors (paid tier)
-
-| ID | Name | Tier | Stand-in | Auth Pattern |
-|---|---|---|---|---|
-| `midpage` | midpage | paid | — | HTTP Bearer (UNCONFIRMED schema) |
-| `docusign` | DocuSign | paid | no-op-signature | OAuth/JWT (docusign-esign SDK) |
-| `imanage` | iManage | paid | local-fs-doc-store | HTTP Bearer (OAuth documented) |
-| `netdocuments` | NetDocuments | paid | local-fs-doc-store | HTTP OAuth Bearer |
-| `westlaw` | Westlaw | paid | courtlistener | HTTP key (UNCONFIRMED endpoint) |
-| `lexis` | Lexis | paid | courtlistener | HTTP key (UNCONFIRMED endpoint) |
-
-### Business — live connectors (open-access tier)
-
-| ID | Name | Tier | Auth Pattern |
+| Connector | Gate tool | Destination key | v1 status |
 |---|---|---|---|
-| `stripe` | Stripe | open-access | Official SDK (stripe npm) |
-| `quickbooks` | QuickBooks | open-access | Official SDK (node-quickbooks) |
-| `hubspot` | HubSpot | open-access | Official SDK (@hubspot/api-client) |
-| `notion` | Notion | open-access | Official SDK (@notionhq/client) |
-| `linear` | Linear | open-access | Official SDK (@linear/sdk) |
+| `connector-gmail` | `send_email` | `to` / `subject` / `body` | Human-gated or receipted per `THIRD_PARTY_EGRESS` policy |
+| `connector-outlook` | `send_email` | `to` / `subject` / `body` | Human-gated or receipted per `THIRD_PARTY_EGRESS` policy |
+| `connector-google-drive` | `upload_document` | `destination: "gdrive"` | Receipted; 202 on pending approval |
+| `connector-onedrive` | `upload_document` | `destination: "onedrive"`, `driveId`, `parentItemId` | Receipted; 202 on pending approval |
+| `connector-notion` | `upload_document` | `destination: "notion"`, `parentPageId` | Receipted; 202 on pending approval |
+| `connector-docusign` | `sign_document` | action package (v1: human executes) | `SIGNATURE: human` in policy |
+| `connector-no-op-signature` | `sign_document` | action package (v1: local stub) | `SIGNATURE: human` in policy |
+| `connector-stripe` | `send_payment` | action package (v1: human executes) | `MONEY_MOVEMENT: human` in policy |
+| `connector-quickbooks` | `send_payment` | action package (v1: human executes) | `MONEY_MOVEMENT: human` in policy |
+| `connector-hubspot` | `share_external` | v1: `not_implemented` — writes visibly blocked | Future gate work |
+| `connector-linear` | `share_external` | v1: `not_implemented` — writes visibly blocked | Future gate work |
+| `connector-clio` | `share_external` | v1: `not_implemented` — writes visibly blocked | Future gate work |
+| `connector-imanage` | `share_external` | v1: `not_implemented` — writes visibly blocked | Future gate work |
+| `connector-netdocuments` | `share_external` | v1: `not_implemented` — writes visibly blocked | Future gate work |
+
+**Note on `share_external` connectors:** The gate returns `502 not_implemented` for all `share_external` calls in v1. This is a deliberate posture — writes are visibly refused rather than silently credentialed. Operator must execute writes manually until gate v2 adds per-vendor support.
+
+**Note on notify-slack / notify-teams webhooks:** These remain direct in v1. They are operator-configured, low-payload notification surfaces (no matter content) and are listed as future gate candidates when the gate adds webhook egress support.
+
+---
+
+## Read-only direct (reads go directly to vendor API)
+
+Agents use their own scoped tokens for these connectors. No egress credential lives in the gate proxy for read paths.
+
+| Connector | What it reads | Query privacy caveat |
+|---|---|---|
+| `connector-courtlistener` | U.S. federal and state opinions, dockets | Keep queries to neutral terms for confidential/privileged matters; avoid embedding client names or matter identifiers in search strings |
+| `connector-westlaw` | Case law, KeyCite, secondary sources (enterprise contract required) | Keep queries to neutral terms; Westlaw queries transmit to Thomson Reuters infrastructure |
+| `connector-lexis` | Case law, Shepard's, secondary sources (enterprise contract required) | Keep queries to neutral terms; Lexis queries transmit to LexisNexis infrastructure |
+| `connector-midpage` | Brief summarization, citation extraction (API access required) | Keep prompts minimal; strip client-identifying content before sending to midpage AI |
+
+Firms wanting all research queries gated and receipted can promote research connectors behind the gate via policy — see the comments in `companies/legal-operations/gate-policy.yaml`.
+
+---
+
+## Local (no network egress)
+
+| Connector | What it does |
+|---|---|
+| `connector-local-fs-doc-store` | Read/write documents to a local filesystem path; no credentials, no network |
 
 ---
 

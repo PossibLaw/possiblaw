@@ -30,6 +30,10 @@ CourtListener is a free, public legal-research database maintained by the Free L
 
 Do not invoke for non-U.S. jurisdictions, secondary sources (treatises, ALR), or KeyCite/Shepard-style negative-treatment checks — CourtListener does not provide those.
 
+## Query Privacy Caveat
+
+Queries themselves can carry privileged facts — a search string like `"Acme Holdings v. Smith arbitration clause 2025"` may identify a matter, client, or litigation strategy. Keep queries to neutral legal terms for confidential or privileged matters (e.g. `indemnification software license` rather than the client's name). Firms that need all research queries gated and receipted can promote research connectors behind the gate via policy — see the comments in `companies/legal-operations/gate-policy.yaml` for the pattern.
+
 ## Authentication
 
 Token auth via the `Authorization` HTTP header (Django REST framework style). Anonymous calls are accepted on `/search/` at limited throughput. Official docs: https://www.courtlistener.com/help/api/rest/

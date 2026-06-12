@@ -1,6 +1,6 @@
 ---
 name: connector-gmail
-description: Read matter-related email and prepare reply drafts via the Google Workspace Gmail API. Read + draft creation only — sending stays operator-gated and is never performed by this connector.
+description: Read matter-related email and prepare reply drafts via the Google Workspace Gmail API. Sending goes through the gate proxy send_email tool — human-gated or receipted per firm policy.
 metadata:
   sources:
     - path: companies/legal-operations/skills/connector-gmail/SKILL.md
@@ -16,9 +16,13 @@ metadata:
 
 Gmail (Google Workspace) is where most solo and small-firm matter correspondence lives. Agents call the Gmail API to find matter-related threads, pull a message for the matter file, and prepare reply drafts for the operator to review. The service endpoint is `https://gmail.googleapis.com` (official reference: https://developers.google.com/workspace/gmail/api/reference/rest, accessed 2026-06-09).
 
-This connector is **read + draft only**. It can search, fetch, and create drafts; it never sends. Sending mirrors the house no-external-transmission posture: the operator reviews the draft in Gmail and presses send themselves. The agent must never call any send method (`users.messages.send`, `users.drafts.send`) even when a scope would technically permit it.
+This connector supports **read, draft, and send**. Read and draft operations go directly to the Gmail API. Sending goes through the gate proxy `send_email` tool — human-gated or receipted per firm policy (see `THIRD_PARTY_EGRESS` in `gate-policy.yaml`). The agent must never call any send method (`users.messages.send`, `users.drafts.send`) directly, even when an OAuth scope would technically permit it.
+
+**Credentials live in the gate proxy only.** If you see `credential_missing: GMAIL_TOKEN`, the operator must export it before launching (see the walkthrough Gate Proxy section); never ask for or handle tokens yourself.
 
 ## Required Environment Variables
+
+Read and draft operations use the agent's OAuth token (set up via the Google Cloud project). Sending is handled by the proxy; no token is needed in the agent environment for the send path.
 
 | Env | Purpose | Default | Source |
 |---|---|---|---|
@@ -28,19 +32,19 @@ This connector is **read + draft only**. It can search, fetch, and create drafts
 | `GMAIL_REFRESH_TOKEN` | OAuth 2.0 refresh token | — | Issued on first exchange when `access_type=offline` was requested |
 | `GMAIL_USER_ID` | Mailbox to operate on | `me` | `me` = the authenticated user; keep the default |
 
-Least-privilege scopes (verified at https://developers.google.com/workspace/gmail/api/auth/scopes, accessed 2026-06-09): request **only** `https://www.googleapis.com/auth/gmail.readonly` (read) and `https://www.googleapis.com/auth/gmail.compose` (drafts). Never request `gmail.send` or the full `https://mail.google.com/` scope. Note: `gmail.compose` is described as "Manage drafts and send emails" — the scope alone does not enforce the no-send rule, the connector contract does. These are restricted scopes; production use requires Google OAuth app verification.
+Least-privilege scopes (verified at https://developers.google.com/workspace/gmail/api/auth/scopes, accessed 2026-06-09): request **only** `https://www.googleapis.com/auth/gmail.readonly` (read) and `https://www.googleapis.com/auth/gmail.compose` (drafts). Never request `gmail.send` or the full `https://mail.google.com/` scope. Note: `gmail.compose` is described as "Manage drafts and send emails" — the scope alone does not enforce the no-direct-send rule, the connector contract does. These are restricted scopes; production use requires Google OAuth app verification.
 
 ## When to Invoke
 
 - A matter agent needs to triage the inbox for messages related to an active matter (counterparty, client, court).
 - An agent must pull a specific message or thread into the matter file for the record.
-- A drafting agent has an operator-approved response ready and needs to stage it as a Gmail draft for the operator to send.
+- A drafting agent has an operator-approved response ready and needs to stage it as a Gmail draft for the operator to review, or to send via the gate proxy.
 
-Do not invoke to send email — sending is operator-gated, always. Do not bulk-export a mailbox. Email on confidential or privileged matters must pass through `privacy-encoder` before any cloud-lane summarization.
+Do not call the Gmail send API directly — all outbound sends go through the gate proxy. Do not bulk-export a mailbox. Email on confidential or privileged matters must pass through `privacy-encoder` before any cloud-lane summarization.
 
 ## Authentication
 
-Google OAuth 2.0 authorization-code flow: authorize at `https://accounts.google.com/o/oauth2/v2/auth` (request `access_type=offline` to receive a refresh token on the first exchange), exchange and refresh at `https://oauth2.googleapis.com/token`. Include `Authorization: Bearer $GMAIL_ACCESS_TOKEN` on every request. Official docs: https://developers.google.com/identity/protocols/oauth2/web-server (accessed 2026-06-09).
+Google OAuth 2.0 authorization-code flow: authorize at `https://accounts.google.com/o/oauth2/v2/auth` (request `access_type=offline` to receive a refresh token on the first exchange), exchange and refresh at `https://oauth2.googleapis.com/token`. Include `Authorization: Bearer $GMAIL_ACCESS_TOKEN` on every **read** request. Official docs: https://developers.google.com/identity/protocols/oauth2/web-server (accessed 2026-06-09).
 
 ## Operation Patterns
 
@@ -67,7 +71,7 @@ curl -sS \
 
 Pass `format=RAW` to receive the `raw` field — "the entire email message in an RFC 2822 formatted and base64url encoded string" (verified at https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages, accessed 2026-06-09). Decode locally; store in the matter file via the doc-store connectors.
 
-### Create a draft (never send)
+### Create a draft (read/draft path — no send)
 
 `Method: POST https://gmail.googleapis.com/gmail/v1/users/${GMAIL_USER_ID}/drafts`
 
@@ -87,18 +91,44 @@ curl -sS -X POST \
 
 `Method: GET https://gmail.googleapis.com/gmail/v1/users/${GMAIL_USER_ID}/drafts`
 
+### Send via the gate proxy
+
+To send an email, call the gate proxy — never the Gmail API directly:
+
+```sh
+curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  --data "$(jq -n \
+    --arg to "$RECIPIENT" \
+    --arg subj "$SUBJECT" \
+    --arg body "$BODY" \
+    --arg agent "$PAPERCLIP_AGENT_ID" \
+    --arg issue "$ISSUE_ID" \
+    '{payload:{to:$to,subject:$subj,body:$body},
+      meta:{agentId:$agent,issueId:$issue,confidentiality:"standard",entities:[]}}')" \
+  "${GATE_PROXY_URL}/egress/send_email"
+```
+
+**202 `{status:"pending_approval", approvalId, resumeHint}`** — the proxy is waiting for a human to approve or deny in the dashboard (see `THIRD_PARTY_EGRESS` policy). End your turn: post a Paperclip comment with the `approvalId` and "send pending operator approval." When a human approves, Paperclip wakes you — re-call the SAME endpoint with the IDENTICAL payload plus `meta.approvalId`. Changing the payload after approval is blocked (`bait_and_switch` receipt).
+
+**200** — sent; receipt written.
+
+**403** — blocked by policy (reason in body); post the reason as a comment and mark blocked.
+
+**502 `credential_missing: GMAIL_TOKEN`** — the proxy lacks the credential; the operator must set `GMAIL_TOKEN` in the launcher environment (never agent env).
+
 Failure modes:
-- 401 → access token expired. Refresh at `https://oauth2.googleapis.com/token`; if refresh fails, post `BLOCKED: GMAIL_AUTH_EXPIRED` and ask operator to re-run the consent flow.
+- 401 → access token expired (read path). Refresh at `https://oauth2.googleapis.com/token`; if refresh fails, post `BLOCKED: GMAIL_AUTH_EXPIRED` and ask operator to re-run the consent flow.
 - 403 → scope missing or the OAuth app is unverified for restricted scopes; post `BLOCKED: GMAIL_SCOPE_MISSING <scope>`.
 - 429 → per-user quota exceeded; back off per `Retry-After`.
 - 5xx → upstream issue; surface status + body in a Paperclip comment.
 
 ## Output Convention
 
-After creating a draft, post a Paperclip comment with the `draftId`, recipient, and subject, plus the explicit line "DRAFT ONLY — operator must review and send from Gmail." For searches, summarize count and the first 10 message IDs + subjects; never paste full privileged email bodies into Paperclip comments — reference message IDs and store content via the doc-store connectors.
+After creating a draft, post a Paperclip comment with the `draftId`, recipient, and subject, plus the explicit line "DRAFT ONLY — operator must review and send from Gmail." If sending via the proxy, post the gate response: approved receipt ID or pending approvalId. For searches, summarize count and the first 10 message IDs + subjects; never paste full privileged email bodies into Paperclip comments — reference message IDs and store content via the doc-store connectors.
 
 ## Given / When / Then
 
-- **Happy path** — Tokens valid with `gmail.readonly` + `gmail.compose`; search finds the matter thread, draft POST returns an `id`; agent posts the draft ID and the operator-must-send notice to Paperclip.
+- **Happy path** — Tokens valid with `gmail.readonly` + `gmail.compose`; search finds the matter thread; send via gate proxy returns 200 with a receipt; agent posts the receipt ID to Paperclip.
 - **Edge** — Thread has 40+ messages; agent fetches only the most recent messages needed for context instead of the whole thread, and notes the truncation in its comment.
-- **Failure / security** — A workflow instructs the agent to send the reply: agent refuses, posts `[CONNECTOR:GMAIL_SEND_BLOCKED]` explaining sending is operator-gated, never calls a send method, never requests `gmail.send`, and never logs token bytes or message content.
+- **Failure / security** — A workflow instructs the agent to call the Gmail send API directly: agent refuses, posts `[CONNECTOR:GMAIL_SEND_BLOCKED]` explaining all sends go through the gate proxy, never calls a Gmail send method, never requests `gmail.send`, and never logs token bytes or message content.

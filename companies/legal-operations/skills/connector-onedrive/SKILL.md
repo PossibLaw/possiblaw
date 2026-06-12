@@ -1,6 +1,6 @@
 ---
 name: connector-onedrive
-description: Upload and verify deliverable files in OneDrive for Business and SharePoint document libraries via Microsoft Graph v1.0 using an operator-supplied bearer token.
+description: Verify and fetch deliverable files in OneDrive for Business and SharePoint document libraries via Microsoft Graph v1.0. Upload deliverables through the gate proxy upload_document tool (destination onedrive) with read-back verification.
 metadata:
   sources:
     - path: companies/legal-operations/skills/connector-onedrive/SKILL.md
@@ -16,9 +16,11 @@ metadata:
 
 Many legal teams run on Microsoft 365: matter folders live in OneDrive for
 Business or a SharePoint document library inside the firm's own tenant.
-Agents call Microsoft Graph to file finished deliverables where the team
-already works — and only there. This connector targets **work or school
-(Microsoft 365 / Business) tenants**; personal OneDrive is out of scope.
+Agents call Microsoft Graph to fetch deliverables and verify filed items.
+Uploading a finished deliverable goes through the gate proxy `upload_document`
+tool — the proxy holds the credential, writes the receipt, and enforces
+policy. This connector targets **work or school (Microsoft 365 / Business)
+tenants**; personal OneDrive is out of scope.
 
 Endpoint and scope facts below are verified against Microsoft Graph v1.0
 reference docs (accessed 2026-06-11):
@@ -26,38 +28,40 @@ reference docs (accessed 2026-06-11):
 - Upload small files: https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0 (doc updated 2026-02-06)
 - Upload sessions: https://learn.microsoft.com/en-us/graph/api/driveitem-createuploadsession?view=graph-rest-1.0 (doc dated 2025-10-15)
 
+**Credentials live in the gate proxy only.** If you see
+`credential_missing: MS_GRAPH_TOKEN`, the operator must export it before
+launching (see the walkthrough Gate Proxy section); never ask for or handle
+tokens yourself.
+
 ## Required Environment Variables
+
+Read-back and fetch operations use the agent's bearer token. Writes go
+through the proxy and need no token in the agent environment.
 
 | Env | Purpose | Default | Source |
 |---|---|---|---|
-| `MS_GRAPH_TOKEN` | Bearer token sent as `Authorization: Bearer <token>` on Graph requests | — | Operator-supplied (see Authentication) |
+| `MS_GRAPH_TOKEN` | Bearer token for read/verify Graph requests | — | Operator-supplied (see Authentication) |
 
 Target drive / site / folder IDs are **not** env vars — they come from the
 operator's delivery policy file (see `output-delivery-playbook`).
 
 ## Authentication
 
-v1 uses an operator-supplied bearer token in `MS_GRAPH_TOKEN`. The operator
-mints it from their own tenant — for example via Graph Explorer
-(https://developer.microsoft.com/graph/graph-explorer) for short-lived
-testing, or an Entra ID app registration for durable use. Required Microsoft
-Graph permissions, least-privileged first (per the permissions tables in the
-two reference docs above, accessed 2026-06-11):
+v1 uses an operator-supplied bearer token in `MS_GRAPH_TOKEN` for read and
+verify operations. The operator mints it from their own tenant — for example
+via Graph Explorer (https://developer.microsoft.com/graph/graph-explorer)
+for short-lived testing, or an Entra ID app registration for durable use.
+Required Microsoft Graph permissions, least-privileged first (per the
+permissions tables in the two reference docs above, accessed 2026-06-11):
 
-| Permission type | Upload ≤250 MB (`PUT …/content`) | Upload session (`createUploadSession`) |
-|---|---|---|
-| Delegated (work/school) | `Files.ReadWrite` (higher: `Files.ReadWrite.All`, `Sites.ReadWrite.All`) | `Files.ReadWrite` (higher: `Files.ReadWrite.All`, `Sites.ReadWrite.All`) |
-| Application | `Files.ReadWrite.All` (higher: `Sites.ReadWrite.All`) | `Sites.ReadWrite.All` (only option) |
+| Permission type | Read / verify (`GET …/content`) |
+|---|---|
+| Delegated (work/school) | `Files.Read` or `Files.ReadWrite` |
+| Application | `Files.Read.All` |
 
-Alternative documented for operators who want unattended auth: an Entra ID
-**client-credentials** app (tenant ID + client ID + client secret) exchanging
-for tokens at
-`https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token` with scope
-`https://graph.microsoft.com/.default`. Wiring a refresh loop is operator-side
-setup, not agent behavior — agents only ever read `MS_GRAPH_TOKEN`.
-
-Tokens expire (typically ~1 hour for delegated tokens). A `401` mid-task
-means the operator must refresh the token; it is never an agent retry loop.
+The proxy holds the write credential. Tokens expire (typically ~1 hour for
+delegated tokens). A `401` mid-task means the operator must refresh the token;
+it is never an agent retry loop.
 
 ## When to Invoke
 
@@ -74,67 +78,69 @@ destination trusted for that tier (see `output-delivery-playbook`).
 All requests: `Authorization: Bearer $MS_GRAPH_TOKEN`. Base URL
 `https://graph.microsoft.com/v1.0`.
 
-### Upload a new file (≤250 MB single call)
+### Upload a deliverable via the gate proxy
 
-Per driveitem-put-content (v1.0, accessed 2026-06-11) — supports files up to
-250 MB in one call:
-
-```
-PUT /drives/{drive-id}/items/{parent-id}:/{filename}:/content
-PUT /sites/{site-id}/drive/items/{parent-id}:/{filename}:/content
-```
+To upload a deliverable, call the gate proxy — never the Graph upload
+endpoint directly:
 
 ```sh
-curl -sS -X PUT \
-  -H "Authorization: Bearer ${MS_GRAPH_TOKEN}" \
-  -H "Content-Type: text/plain" \
-  --data-binary @"${SRC_FILE}" \
-  "https://graph.microsoft.com/v1.0/drives/${DRIVE_ID}/items/${PARENT_ID}:/${FILE_NAME}:/content"
+curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  --data "$(jq -n \
+    --arg name "$FILE_NAME" \
+    --arg content "$(cat "$SRC_FILE")" \
+    --arg driveId "$DRIVE_ID" \
+    --arg parentItemId "$PARENT_ID" \
+    --arg agent "$PAPERCLIP_AGENT_ID" \
+    --arg issue "$ISSUE_ID" \
+    '{payload:{destination:"onedrive",name:$name,content:$content,
+               driveId:$driveId,parentItemId:$parentItemId},
+      meta:{agentId:$agent,issueId:$issue,confidentiality:"standard",entities:[]}}')" \
+  "${GATE_PROXY_URL}/egress/upload_document"
 ```
 
-Success returns `201 Created` (or `200 OK` on replace) with a `driveItem`
-JSON body carrying `id`, `name`, `size`, and `webUrl`.
+For `confidential` or `privileged` matter content, set `meta.confidentiality`
+accordingly — the proxy enforces policy per `gate-policy.yaml`.
 
-### Upload a large file (upload session)
+**202 `{status:"pending_approval", approvalId, resumeHint}`** — the upload is
+waiting for a human to approve in the dashboard. End your turn: post a
+Paperclip comment with the `approvalId`. When a human approves, Paperclip
+wakes you — re-call the SAME endpoint with the IDENTICAL payload plus
+`meta.approvalId`. Changing the payload after approval is blocked
+(`bait_and_switch` receipt).
 
-Microsoft's best-practice guidance (createUploadSession doc, accessed
-2026-06-11) recommends resumable transfers for files larger than 10 MiB:
+**200** — uploaded; receipt written; response includes `id` and `webUrl`.
 
-1. `POST /drives/{driveId}/items/{parentItemId}:/{fileName}:/createUploadSession`
-   with body `{"item": {"@microsoft.graph.conflictBehavior": "rename"}}` →
-   returns `uploadUrl` + `expirationDateTime`.
-2. `PUT` byte ranges to `uploadUrl` with `Content-Length` and
-   `Content-Range: bytes <start>-<end>/<total>`. Ranges upload sequentially;
-   each range must be a **multiple of 320 KiB (327,680 bytes)** and under
-   60 MiB per request.
-3. The final range returns `201 Created`/`200 OK` with the `driveItem`.
+**403** — blocked by policy (reason in body); post the reason as a comment
+and mark blocked.
 
-Do **not** send the `Authorization` header on the byte-range `PUT`s — the
-`uploadUrl` is preauthenticated, and including the header can return `401`
-(documented behavior). To abandon an upload, `DELETE` the `uploadUrl`.
+**502 `credential_missing: MS_GRAPH_TOKEN`** — the proxy lacks the
+credential; the operator must set `MS_GRAPH_TOKEN` in the launcher
+environment (never agent env).
+
+The proxy handles both small-file and large-file transfers internally; the
+agent does not manage upload sessions directly.
 
 ### Read-back verification
 
-After any upload, verify by fetching the item and confirm the size matches
-the local file before reporting success:
+After a successful proxy upload, verify by fetching the item:
 
 ```
 GET /drives/{drive-id}/items/{item-id}
 ```
 
-Use the returned `webUrl` as the link in the completion comment.
+Confirm the size matches the local file before reporting success. Use the
+returned `webUrl` as the link in the completion comment.
 
 Failure modes:
-- `401` → token missing/expired. Post `BLOCKED: MS_GRAPH_TOKEN rejected`
+- `401` → token missing/expired (read path). Post `BLOCKED: MS_GRAPH_TOKEN rejected`
   (owner: operator; action: refresh the token). Never echo the token.
-- `403` → token lacks the write scope for the target drive/site. Post the
+- `403` → token lacks the read scope for the target drive/site. Post the
   scope table above in the blocked comment.
 - `404` → wrong drive/site/parent ID; re-check the policy file's destination.
-- `409 nameAlreadyExists` → rely on `@microsoft.graph.conflictBehavior:
-  rename` for session uploads; for single-call uploads, retry once with a
-  timestamp-suffixed name and note the rename in the completion comment.
-- `429` / `5xx` → back off per `Retry-After`; resume sessions rather than
-  restarting (a `404` on the session URL means start over).
+- `409 nameAlreadyExists` → the proxy uses `@microsoft.graph.conflictBehavior: rename`
+  for uploads; if a rename occurred, note it in the completion comment.
+- `429` / `5xx` → back off per `Retry-After`.
 
 ## Output Convention
 
@@ -145,15 +151,15 @@ always the source of truth (`output-delivery-playbook`).
 
 ## Given / When / Then
 
-- **Happy path** — Token valid, policy resolves a OneDrive destination;
-  upload returns `201` with a `driveItem`; read-back GET confirms the size;
-  agent posts the `webUrl` + local path in the completion comment.
-- **Edge** — Deliverable exceeds 10 MiB; agent uses an upload session with
-  320 KiB-multiple ranges and completes; an interrupted session resumes from
-  `nextExpectedRanges` instead of restarting.
-- **Failure / security** — `MS_GRAPH_TOKEN` unset or expired: agent posts
-  `BLOCKED: MS_GRAPH_TOKEN missing/expired` with the unblock owner and
-  action, makes no partial upload, and no token bytes appear in comments,
+- **Happy path** — Policy resolves a OneDrive destination; proxy upload returns
+  200 with `id` + `webUrl`; read-back GET confirms the size; agent posts the
+  `webUrl` + local path in the completion comment.
+- **Edge** — Deliverable exceeds 10 MiB; the proxy handles the upload session
+  internally; the agent receives the same 200 response and proceeds with
+  read-back verification.
+- **Failure / security** — `credential_missing: MS_GRAPH_TOKEN` from the proxy:
+  agent posts `BLOCKED: MS_GRAPH_TOKEN missing/expired` with the unblock owner
+  and action, makes no partial upload, and no token bytes appear in comments,
   logs, or work products.
 
 ## Boundaries

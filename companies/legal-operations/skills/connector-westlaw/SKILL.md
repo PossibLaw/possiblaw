@@ -34,6 +34,10 @@ Westlaw (Thomson Reuters Westlaw Edge) is one of the two flagship paid legal-res
 
 Do not invoke Westlaw for routine searches that CourtListener can satisfy — the firm is billed per query/seat. Prefer the open-access stand-in unless the matter justifies the paid call.
 
+## Query Privacy Caveat
+
+Queries themselves can carry privileged facts — a search string containing client names, case identifiers, or litigation strategy exposes those facts to Thomson Reuters' infrastructure. Keep queries to neutral legal terms for confidential or privileged matters (e.g. `indemnification software license` rather than the client's name or matter number). Firms that need all research queries gated and receipted can promote research connectors behind the gate via policy — see the comments in `companies/legal-operations/gate-policy.yaml` for the pattern.
+
 ## Authentication
 
 UNCONFIRMED — operator must verify against current vendor docs at https://developer.thomsonreuters.com. Common Westlaw patterns use either an `Authorization: Bearer <token>` header obtained from an OAuth 2.0 client-credentials exchange, or a direct `X-API-Key: $WESTLAW_API_KEY` header on each request. Do not assume one pattern without confirming the spec for the specific Westlaw product (Westlaw Edge API vs. legacy WL APIs).

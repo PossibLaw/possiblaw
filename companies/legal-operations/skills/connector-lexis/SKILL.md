@@ -34,6 +34,10 @@ LexisNexis is one of the two flagship paid legal-research platforms (the other b
 
 Do not invoke Lexis for routine searches that CourtListener can satisfy — the firm is billed per query/seat. Prefer the open-access stand-in unless the matter justifies the paid call.
 
+## Query Privacy Caveat
+
+Queries themselves can carry privileged facts — a search string containing client names, case identifiers, or litigation strategy exposes those facts to LexisNexis' infrastructure. Keep queries to neutral legal terms for confidential or privileged matters (e.g. `indemnification software license` rather than the client's name or matter number). Firms that need all research queries gated and receipted can promote research connectors behind the gate via policy — see the comments in `companies/legal-operations/gate-policy.yaml` for the pattern.
+
 ## Authentication
 
 UNCONFIRMED — operator must verify against current vendor docs at https://developer.lexisnexis.com. Common LexisNexis API patterns use either an `Authorization: Bearer <token>` header obtained from an OAuth 2.0 client-credentials exchange, or a direct `X-API-Key: $LEXIS_API_KEY` header on each request. Do not assume one pattern without confirming the spec for the specific Lexis product (Lexis+ API vs. legacy Lexis Web Services).

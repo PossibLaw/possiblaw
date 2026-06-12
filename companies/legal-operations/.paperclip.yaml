@@ -4256,15 +4256,10 @@ agents:
         POSSIBLAW_DELIVERABLES_DIR:
           kind: plain
           requirement: optional
-        MS_GRAPH_TOKEN:
-          kind: secret
+        GATE_PROXY_URL:
+          kind: plain
           requirement: optional
-        GDRIVE_ACCESS_TOKEN:
-          kind: secret
-          requirement: optional
-        NOTION_API_KEY:
-          kind: secret
-          requirement: optional
+          default: "http://127.0.0.1:3199"
     metadata:
       possiblaw:
         modelLane: extractive

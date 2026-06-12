@@ -33,6 +33,10 @@ midpage is a legal-AI vendor that offers brief research and drafting tools. Poss
 
 Do not invoke for routine queries CourtListener can satisfy, and do not invoke without operator approval — midpage is a paid call.
 
+## Query Privacy Caveat
+
+Queries and prompts sent to midpage can carry privileged facts — document content, client identities, or litigation strategy embedded in a summarization prompt is transmitted to midpage's infrastructure. Keep prompts to the minimum context needed; strip or replace client-identifying information for confidential or privileged matters before sending. Firms that need all AI-research queries gated and receipted can promote research connectors behind the gate via policy — see the comments in `companies/legal-operations/gate-policy.yaml` for the pattern.
+
 ## Authentication
 
 UNCONFIRMED — operator must verify against current vendor docs at https://midpage.ai. Likely shape is `Authorization: Bearer $MIDPAGE_API_KEY` on every request, but this must be confirmed before any production call.

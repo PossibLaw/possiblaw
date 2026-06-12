@@ -1,6 +1,6 @@
 ---
 name: connector-docusign
-description: Send, track, and retrieve e-signature envelopes via the DocuSign eSignature REST API using JWT (RSA) auth.
+description: Request e-signatures and track envelopes via the gate proxy sign_document tool (action package v1). Tracking and completed-PDF download stay direct to DocuSign API.
 metadata:
   sources:
     - path: layer/connectors/docusign.yaml
@@ -14,9 +14,15 @@ metadata:
 
 ## What This Is
 
-DocuSign is the industry-standard e-signature service. Agents use it to send executable contracts (NDAs, MSAs, engagement letters), poll envelope status, and download signed PDFs. Sandbox lives at `demo.docusign.net`; production is region-specific (e.g. `na4.docusign.net`).
+DocuSign is the industry-standard e-signature service. Agents use it to request signatures on executable contracts (NDAs, MSAs, engagement letters), poll envelope status, and download signed PDFs. Sending a signature request goes through the gate proxy `sign_document` tool — the proxy writes an action package a human executes (no live DocuSign API in v1). Status polling and PDF download go directly to the DocuSign API.
+
+Sandbox lives at `demo.docusign.net`; production is region-specific (e.g. `na4.docusign.net`).
+
+**Credentials live in the gate proxy only.** If you see `credential_missing` from the proxy, the operator must export the credential before launching (see the walkthrough Gate Proxy section); never ask for or handle tokens yourself.
 
 ## Required Environment Variables
+
+Envelope-status and PDF-download operations use the agent's credentials. Signature requests go through the proxy.
 
 | Env | Purpose | Default | Source |
 |---|---|---|---|
@@ -43,41 +49,39 @@ Recommended: use the DocuSign CLI or the `docusign-esign` SDK for token minting;
 
 ## Operation Patterns
 
-### Create and send an envelope
+### Request a signature via the gate proxy
 
-`Method: POST https://${DOCUSIGN_BASE_PATH}/v2.1/accounts/${DOCUSIGN_ACCOUNT_ID}/envelopes`
+To request a signature, call the gate proxy — never the DocuSign envelope API directly:
 
-Headers:
-- `Authorization: Bearer $DS_ACCESS_TOKEN`
-- `Content-Type: application/json`
-
-Body sketch:
-```json
-{
-  "emailSubject": "Please sign: Mutual NDA",
-  "documents": [{"documentId":"1","name":"NDA.pdf","fileExtension":"pdf","documentBase64":"<base64>"}],
-  "recipients": {"signers":[{"email":"counterparty@example.com","name":"Jane Doe","recipientId":"1","tabs":{"signHereTabs":[{"anchorString":"/sig1/","anchorYOffset":"-10"}]}}]},
-  "status": "sent"
-}
-```
-
-Example:
 ```sh
 curl -sS -X POST \
-  -H "Authorization: Bearer ${DS_ACCESS_TOKEN}" \
   -H "Content-Type: application/json" \
-  --data @envelope.json \
-  "${DOCUSIGN_BASE_PATH}/v2.1/accounts/${DOCUSIGN_ACCOUNT_ID}/envelopes" \
-  | python3 -c "import json,sys; d=json.load(sys.stdin); print('envelopeId=', d['envelopeId'], 'status=', d['status'])"
+  --data "$(jq -n \
+    --arg docPath "$DOC_PATH" \
+    --arg recipient "$RECIPIENT_EMAIL" \
+    --arg subject "$EMAIL_SUBJECT" \
+    --arg agent "$PAPERCLIP_AGENT_ID" \
+    --arg issue "$ISSUE_ID" \
+    '{payload:{documentPath:$docPath,recipient:$recipient,subject:$subject},
+      meta:{agentId:$agent,issueId:$issue,confidentiality:"standard",entities:[$recipient]}}')" \
+  "${GATE_PROXY_URL}/egress/sign_document"
 ```
 
-### Get envelope status
+**v1 action-package contract:** The proxy does not call the live DocuSign API. It writes a local action package (JSON file) under `~/.possiblaw/action-packages/` with the tool, payload, agentId, and issueId. A human reviews the package and executes the DocuSign envelope request manually.
+
+**202 `{status:"pending_approval", approvalId, resumeHint}`** — a human must approve in the dashboard (policy: `SIGNATURE: human`). End your turn: post a Paperclip comment with the `approvalId` and "signature request pending operator approval." When a human approves, Paperclip wakes you — re-call the SAME endpoint with the IDENTICAL payload plus `meta.approvalId`. Changing the payload after approval is blocked (`bait_and_switch` receipt).
+
+**200 `{actionPackage: "<path>", note: "no external API in v1 — a human executes this package manually"}`** — the action package was written; post the path and note to Paperclip.
+
+**403** — blocked by policy; post reason as a comment.
+
+### Get envelope status (direct)
 
 `Method: GET https://${DOCUSIGN_BASE_PATH}/v2.1/accounts/${DOCUSIGN_ACCOUNT_ID}/envelopes/<envelopeId>`
 
 Returns `{envelopeId, status, statusChangedDateTime, sentDateTime, completedDateTime, ...}`.
 
-### Download signed PDF
+### Download signed PDF (direct)
 
 `Method: GET https://${DOCUSIGN_BASE_PATH}/v2.1/accounts/${DOCUSIGN_ACCOUNT_ID}/envelopes/<envelopeId>/documents/combined`
 
@@ -90,10 +94,10 @@ Failure modes:
 
 ## Output Convention
 
-On send: post a Paperclip comment with the `envelopeId`, recipient list, subject, and the demo or production base path. On completion: save the executed PDF to the matter deliverables directory via `output-local-docx` (or a raw write) and post a comment linking the final file path.
+On signature request: post a Paperclip comment with the action package path, recipient list, subject, and the v1 note that a human must execute the package. On completion: save the executed PDF to the matter deliverables directory via `output-local-docx` (or a raw write) and post a comment linking the final file path.
 
 ## Given / When / Then
 
-- **Happy path** — JWT token mints successfully, envelope POST returns `201` with `status=sent`; agent posts the envelope ID and proceeds to polling.
-- **Edge** — envelope sits at `sent` for >7 days; agent posts a reminder comment and notifies operator via the `notify-slack` skill rather than re-sending.
+- **Happy path** — Proxy receives the sign_document call, writes the action package, returns 200; agent posts the package path to Paperclip and notes "v1: human executes the package to send the DocuSign envelope."
+- **Edge** — Envelope sits at `sent` for >7 days; agent posts a reminder comment and notifies operator via the `notify-slack` skill rather than re-sending.
 - **Failure / security** — `DOCUSIGN_PRIVATE_KEY_PATH` points at a missing or world-readable file: agent posts `[CONNECTOR:DOCUSIGN_KEY_INVALID]`, refuses to mint a token, and never echoes the private-key path's contents to logs.
