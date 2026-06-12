@@ -303,6 +303,59 @@ describe("receipts", () => {
     );
   });
 
+  // anchorText: corrupt last line → ReceiptChainCorruptError instead of SyntaxError
+  it("anchorText() throws ReceiptChainCorruptError when last line is corrupt", () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "receipts.jsonl");
+    const chain = new ReceiptChain(filePath);
+    chain.append(mkBody());
+    fs.appendFileSync(filePath, "NOT_JSON_CORRUPT\n", "utf8");
+
+    assert.throws(
+      () => chain.anchorText(),
+      (err: unknown) => {
+        assert.ok(
+          err instanceof ReceiptChainCorruptError,
+          `expected ReceiptChainCorruptError, got ${String(err)}`,
+        );
+        return true;
+      },
+    );
+  });
+
+  // entries(): parses all lines into ReceiptEntry array
+  it("entries() returns all entries in the chain", () => {
+    const dir = tmpDir();
+    const chain = new ReceiptChain(path.join(dir, "receipts.jsonl"));
+    chain.append(mkBody({ outcome: "performed" }));
+    chain.append(mkBody({ outcome: "blocked" }));
+    chain.append(mkBody({ outcome: "pending", approvalId: "A1" }));
+
+    const all = chain.entries();
+    assert.equal(all.length, 3);
+    assert.equal(all[0].body.outcome, "performed");
+    assert.equal(all[1].body.outcome, "blocked");
+    assert.equal(all[2].body.outcome, "pending");
+    assert.equal(all[2].body.approvalId, "A1");
+  });
+
+  // entries(): corrupt line → ReceiptChainCorruptError
+  it("entries() throws ReceiptChainCorruptError on corrupt line", () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "receipts.jsonl");
+    const chain = new ReceiptChain(filePath);
+    chain.append(mkBody());
+    fs.appendFileSync(filePath, "CORRUPT_LINE\n", "utf8");
+
+    assert.throws(
+      () => chain.entries(),
+      (err: unknown) => {
+        assert.ok(err instanceof ReceiptChainCorruptError, `expected ReceiptChainCorruptError, got ${String(err)}`);
+        return true;
+      },
+    );
+  });
+
   // M2: verify() reports 1-based line index for a tampered entry claiming a wrong seq
   it("verify() reports 1-based line index for all failure kinds (not entry-claimed seq)", () => {
     const dir = tmpDir();

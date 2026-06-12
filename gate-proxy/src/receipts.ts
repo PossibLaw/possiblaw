@@ -318,16 +318,59 @@ export class ReceiptChain {
   /**
    * Human-readable anchor text for a paperclip comment.
    * Contains: head hash, chain length (as length=<n> token), ts of last entry, file path.
+   * Routes through the same validated last-entry path so a corrupt tail throws
+   * ReceiptChainCorruptError instead of an untyped SyntaxError.
    */
   anchorText(): string {
     const lines = readAllLines(this.filePath);
     if (lines.length === 0) {
       return `Receipt chain anchor: head=${GENESIS} length=0 file=${this.filePath}`;
     }
-    const last = JSON.parse(lines[lines.length - 1]) as ReceiptEntry;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(lines[lines.length - 1]);
+    } catch {
+      throw new ReceiptChainCorruptError(
+        `Receipt chain corrupt in ${this.filePath}: last line is not valid JSON. ` +
+          `Recovery: inspect the file, truncate the corrupt tail line, and re-anchor.`,
+      );
+    }
+    const last = validateLastEntry(parsed, this.filePath);
     return (
       `Receipt chain anchor: head=${last.hash} length=${lines.length} ` +
       `lastTs=${last.ts} file=${this.filePath}`
     );
+  }
+
+  /**
+   * Return all entries in the chain as an array, parsed and validated.
+   * Each line is JSON-parsed; a corrupt or malformed line throws ReceiptChainCorruptError.
+   */
+  entries(): ReceiptEntry[] {
+    const lines = readAllLines(this.filePath);
+    const result: ReceiptEntry[] = [];
+    for (const line of lines) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        throw new ReceiptChainCorruptError(
+          `Receipt chain corrupt in ${this.filePath}: a line is not valid JSON. ` +
+            `Recovery: inspect the file, truncate the corrupt line, and re-anchor.`,
+        );
+      }
+      if (
+        parsed === null ||
+        typeof parsed !== "object" ||
+        Array.isArray(parsed)
+      ) {
+        throw new ReceiptChainCorruptError(
+          `Receipt chain corrupt in ${this.filePath}: a line has invalid shape (not an object). ` +
+            `Recovery: inspect the file, truncate the corrupt line, and re-anchor.`,
+        );
+      }
+      result.push(parsed as ReceiptEntry);
+    }
+    return result;
   }
 }
