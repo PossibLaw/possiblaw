@@ -1,0 +1,54 @@
+# gate-policy.yaml — Per-firm gate policy for the PossibLaw Gate Proxy.
+#
+# Graded enforcement: allow = pass-through + receipt (SOFT);
+#   anonymize / human / block = hard gate (agent pauses until resolved).
+#
+# Receipts land in ~/.possiblaw/gate-receipts/ (one JSON file per egress event).
+#
+# Every value below is the firm's to tune. Edit this file in your clone.
+# Restart the proxy after edits; it reads this file at startup only.
+#
+# version is required to be 1 and is validated on load.
+version: 1
+
+boundaries:
+  # Data leaving the firm's environment to a third-party service (email, file
+  # shares, external uploads). SOFT by default — receipted but not blocked.
+  THIRD_PARTY_EGRESS: allow
+
+  # Confidential or privileged content sent to a cloud inference endpoint.
+  # Anonymize strips known entities before the payload leaves the perimeter.
+  CONFIDENTIAL_TO_CLOUD: anonymize
+
+  # Filing a document with a court or tribunal — irreversible once docketed.
+  # A human reviews and confirms before the agent proceeds.
+  COURT_FILING: human
+
+  # DocuSign / binding acceptance — a human signs, always.
+  SIGNATURE: human
+
+  # Wire transfers, ACH, or any cash movement — a human authorizes, always.
+  MONEY_MOVEMENT: human
+
+  # Any external write that cannot be undone (delete, publish, deploy).
+  # A human confirms before the agent proceeds.
+  IRREVERSIBLE_EXTERNAL_OP: human
+
+# ---------------------------------------------------------------------------
+# Tuning examples
+# ---------------------------------------------------------------------------
+
+# Recommended for opposing-counsel / court-adjacent correspondence:
+# promote THIRD_PARTY_EGRESS to hard so every outbound email requires approval.
+#
+# boundaries:
+#   THIRD_PARTY_EGRESS: human
+
+# ---------------------------------------------------------------------------
+# Out-of-scope in v1
+# ---------------------------------------------------------------------------
+#
+# Research connectors (Westlaw, Lexis, CourtListener) are NOT proxied in v1.
+# Queries sent to these services can carry privileged facts in the request.
+# Firms wanting those egress paths gated should raise the request and point to
+# docs/connectors-inventory.md for the current connector inventory.
