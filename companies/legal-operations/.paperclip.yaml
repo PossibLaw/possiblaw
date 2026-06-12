@@ -4259,7 +4259,7 @@ agents:
         GATE_PROXY_URL:
           kind: plain
           requirement: optional
-          default: "http://127.0.0.1:3199"
+          default: "http://127.0.0.1:3801"
     metadata:
       possiblaw:
         modelLane: extractive
