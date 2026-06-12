@@ -356,6 +356,25 @@ describe("receipts", () => {
     );
   });
 
+  // quality: quality receipts round-trip through append/entries/verify
+  it("quality receipts round-trip through append/entries/verify", () => {
+    const dir = tmpDir();
+    const chain = new ReceiptChain(path.join(dir, "receipts.jsonl"));
+    chain.append({
+      kind: "quality",
+      tool: "citation_verification",
+      boundary: null,
+      decision: null,
+      outcome: "performed",
+      payloadSha256: "a".repeat(64),
+      agentId: "agent-1",
+      meta: { citationCount: 3, rowCount: 3, quotedRowCount: 2 },
+    });
+    const entries = chain.entries();
+    assert.equal(entries[entries.length - 1].body.kind, "quality");
+    assert.equal(chain.verify().ok, true);
+  });
+
   // M2: verify() reports 1-based line index for a tampered entry claiming a wrong seq
   it("verify() reports 1-based line index for all failure kinds (not entry-claimed seq)", () => {
     const dir = tmpDir();

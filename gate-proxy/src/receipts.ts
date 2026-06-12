@@ -21,7 +21,7 @@ export type ReceiptOutcome =
   | "error";
 
 export interface ReceiptBody {
-  kind: "egress" | "anchor";
+  kind: "egress" | "anchor" | "quality";
   tool: string;
   boundary: BoundaryType | null;
   decision: Decision | null;
