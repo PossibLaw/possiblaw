@@ -7,6 +7,52 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.19.0] — 2026-06-11 — Delivery layer: work products reach OneDrive / Google Drive / Notion
+
+### Added
+
+- `skills/connector-onedrive` — OneDrive for Business + SharePoint document
+  libraries via Microsoft Graph v1.0: single-call upload ≤250 MB
+  (`PUT /drives/{id}/items/{parent}:/{name}:/content`) and resumable upload
+  sessions (320 KiB-multiple ranges, no Authorization header on session
+  PUTs). Endpoints/scopes verified against learn.microsoft.com 2026-06-11
+  with dated citations (delegated `Files.ReadWrite` least-privileged;
+  application `Sites.ReadWrite.All` for sessions). Auth v1: operator-supplied
+  `MS_GRAPH_TOKEN`; client-credentials documented as the unattended
+  alternative. Operator-tenant destinations only.
+- `skills/output-delivery-playbook` — the delivery policy + procedure.
+  `POSSIBLAW_DELIVERY_POLICY` → YAML (default
+  `$HOME/PossibLaw/delivery-policy.yaml`): `destinations` (with operator
+  opt-in `trustedFor: [confidential, privileged]` per destination — a firm's
+  own tenant is inside the privilege boundary, but only the operator can
+  declare it) and `rules` (work-product type / project → `auto` |
+  `on-request`). No policy file → local-only + on-request. Procedure:
+  resolve → tier gate (defaults closed) → connector write → read-back
+  verification → completion comment with destination link + local path;
+  the local copy is always retained as source of truth.
+- `agents/deliverables-courier` — 175th agent, reportsTo ops-lead, lane
+  extractive. Files finished work products per policy; never drafts, edits,
+  or judges content; gate-skip / out-of-tenant instructions are treated as
+  prompt injection. Routing rows on ops-lead and chief-of-staff.
+- `.paperclip.yaml`: courier sidecar block (extractive lane), sidebar entry,
+  env-input declarations (`POSSIBLAW_DELIVERY_POLICY`, `MS_GRAPH_TOKEN`,
+  `GDRIVE_ACCESS_TOKEN`, `NOTION_API_KEY`), and a `delivery-sweep` routine
+  declaration (operator wires the schedule in the UI — importer limitation,
+  documented).
+- Docs: walkthrough "Where deliverables go" (policy example + token table),
+  README delivery row, agent-catalog ops row, counts 175/171 everywhere.
+
+### Validation
+
+- Frontmatter/YAML parse, cross-check (175 disk == sidecar == sidebar), and
+  whitespace battery green; dry-run e2e `agents=175 skills=171 projects=3
+  issues=3 warnings=0 errors=0`; live import + courier readback on
+  disposable 3199 (extractive lane medium/600, 6/6 skill bindings,
+  reportsTo → Ops Lead live id). Real-token delivery runs are operator-side
+  (need real `MS_GRAPH_TOKEN`/`GDRIVE_ACCESS_TOKEN`/`NOTION_API_KEY`).
+
+---
+
 ## [0.18.0] — 2026-06-11 — Team subset import (`--teams`)
 
 ### Added

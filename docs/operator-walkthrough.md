@@ -88,7 +88,7 @@ To preview only (no DB writes):
 
 ```bash
 ./bin/possiblaw --variant codex --dry-run --non-interactive --yes
-# preview: agents=174 skills=169 projects=3 issues=3 warnings=0 errors=0
+# preview: agents=175 skills=171 projects=3 issues=3 warnings=0 errors=0
 ```
 
 Common flags:
@@ -196,7 +196,7 @@ the demo data is fictional.
 ### Team subset import (`--teams`)
 
 The catalog is the menu — import what your firm practices. By default the
-launcher imports all 174 agents; `--teams` imports only the named teams:
+launcher imports all 175 agents; `--teams` imports only the named teams:
 
 ```bash
 ./bin/possiblaw --teams litigation,commercial   # two practices
@@ -221,6 +221,59 @@ that the practice is not enabled in this deployment and escalate to the
 operator — re-import (or a second company) brings in more teams later.
 Subset imports also keep the sidebar short, which is the easiest fix for
 sidebar sluggishness at full-catalog scale (see `docs/known-limitations.md`).
+
+### Where deliverables go (delivery policy)
+
+Finished work products always land in the local deliverables tree
+(`POSSIBLAW_DELIVERABLES_DIR`, see the env table above). The
+`deliverables-courier` agent can ALSO file them where your team works —
+your own OneDrive/SharePoint, Google Drive, or Notion — driven by a policy
+file you control:
+
+```bash
+export POSSIBLAW_DELIVERY_POLICY="$HOME/PossibLaw/delivery-policy.yaml"
+```
+
+```yaml
+# delivery-policy.yaml
+destinations:
+  firm-onedrive:
+    kind: onedrive
+    driveId: "b!xxxxxxxx"
+    folderId: "01ABCDEF"
+    trustedFor: [confidential, privileged]   # YOUR tenant -> your call
+  kb-notion:
+    kind: notion
+    databaseId: "a1b2c3d4-..."
+
+rules:
+  - match: { workProductType: client-alert }
+    mode: auto                  # always file these
+    destination: kb-notion
+  - match: { projectSlug: commercial-reviews }
+    mode: on-request            # file only when you ask
+    destination: firm-onedrive
+```
+
+Some work-product types can auto-file (`mode: auto` — picked up by the
+declared `delivery-sweep` routine; wire its schedule in the paperclip UI
+after import), others only when you ask ("file this to OneDrive"). No
+policy file means local-only plus on-request delivery — nothing auto-files
+out of the box.
+
+Privacy gate: confidential/privileged work products only go to destinations
+you declare `trustedFor` that tier. Many legal teams connect their own
+Microsoft 365 tenant — inside the privilege boundary — and declare it
+trusted; without that declaration the courier keeps such files local and
+flags the decision to you.
+
+Per-vendor tokens (set the ones you use):
+
+| Env | Destination | Where to get it |
+|---|---|---|
+| `MS_GRAPH_TOKEN` | OneDrive for Business / SharePoint | Your Entra ID app or Graph Explorer; scopes per `skills/connector-onedrive/SKILL.md` |
+| `GDRIVE_ACCESS_TOKEN` | Google Drive | OAuth flow per `skills/connector-google-drive/SKILL.md` |
+| `NOTION_API_KEY` | Notion | notion.so/my-integrations; share the target page/database with the integration |
 
 ### Preflight model probe (codex / codex-api / claude / claude-api)
 

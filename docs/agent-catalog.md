@@ -1,6 +1,6 @@
 # PossibLaw Agent Catalog
 
-174 agents · 169 skills · 34 teams under two executives. Derived from `companies/legal-operations/` (agent frontmatter + `.paperclip.yaml` lanes); regenerate after package changes.
+175 agents · 171 skills · 34 teams under two executives. Derived from `companies/legal-operations/` (agent frontmatter + `.paperclip.yaml` lanes); regenerate after package changes.
 
 The catalog is the menu — import what your firm practices. `./bin/possiblaw --teams <names>` (e.g. `litigation,commercial`, or presets `boutique` / `inhouse`) imports just those teams plus the executives, meta-reviewers, capability builder, and the skills they reference. See the operator walkthrough.
 
@@ -317,7 +317,7 @@ Lanes: **routing** = classify + delegate · **drafting** = produces documents ·
 | `experience-database-curator` | extractive | Matter-experience records for pitches with confidentiality flags. |
 | `competitive-intel-monitor` | extractive | Public-source competitive-intel briefing tables with citations. |
 
-### Ops Lead (`ops-lead`) — 5 specialists
+### Ops Lead (`ops-lead`) — 6 specialists
 
 | Agent | Lane | What it does |
 |---|---|---|
@@ -326,6 +326,7 @@ Lanes: **routing** = classify + delegate · **drafting** = produces documents ·
 | `hr-internal-coordinator` | drafting | Internal onboarding/offboarding coordination; employment-law questions route to the employment practice. |
 | `new-matter-conflicts-screener` | review | Structured conflicts screening with hits flagged, never cleared. |
 | `engagement-letter-drafter` | drafting | Engagement-letter skeleton drafting, never sent to clients. |
+| `deliverables-courier` | extractive | Files finished work products to policy-declared OneDrive/Drive/Notion destinations with read-back verification; never alters content. |
 
 ### Legal Ops Lead (`legal-ops-lead`) — 3 specialists
 

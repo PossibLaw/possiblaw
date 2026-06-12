@@ -25,7 +25,7 @@ git submodule update --init --recursive
 pnpm -C paperclip install
 ./bin/possiblaw
 # answer three prompts (org name, mission, variant)
-# → browser opens to your Paperclip dashboard, 174 agents already loaded
+# → browser opens to your Paperclip dashboard, 175 agents already loaded
 ```
 
 The launcher picks the model-provider variant at import time. Ten are shipped:
@@ -54,13 +54,14 @@ Add `--variant <slug>` to skip the interactive prompt, or `--list-variants` to s
 
 | Capability | Detail |
 |---|---|
-| **Org chart** | Chief of Staff + Chief Counsel + 34 leads — 28 legal practices (commercial, employment, IP, privacy, litigation, corporate, regulatory, research, tax, real estate, M&A, banking & finance, securities, restructuring, immigration, healthcare, antitrust, trade compliance, insurance, construction, government contracts, environmental/ESG, trusts & estates, family law, investigations, AI governance, advertising, benefits) and 6 business functions (BD, ops, finance, marketing, admin, legal ops) — + 138 specialists (incl. meta-reviewers — risk-spotter, debate-judge, reconciler — and a Capability Builder, operator-review gated) — **174 agents total**; full roster in [docs/agent-catalog.md](docs/agent-catalog.md) |
+| **Org chart** | Chief of Staff + Chief Counsel + 34 leads — 28 legal practices (commercial, employment, IP, privacy, litigation, corporate, regulatory, research, tax, real estate, M&A, banking & finance, securities, restructuring, immigration, healthcare, antitrust, trade compliance, insurance, construction, government contracts, environmental/ESG, trusts & estates, family law, investigations, AI governance, advertising, benefits) and 6 business functions (BD, ops, finance, marketing, admin, legal ops) — + 139 specialists (incl. meta-reviewers — risk-spotter, debate-judge, reconciler — and a Capability Builder, operator-review gated) — **175 agents total**; full roster in [docs/agent-catalog.md](docs/agent-catalog.md) |
 | **Skills** | 169: contract drafting and review playbooks (NDA, MSA, SOW, amendments, SaaS, renewals, OSS compliance), per-practice playbooks and checklists across all 28 legal practices (discovery, settlements, M&A diligence, disclosure schedules, leases, credit agreements, visa petitions, BAAs, sanctions screening, lien notices, wills and trusts, parenting plans, interview memos, ad claims, ERISA, and more), firm-business skills (prebill review, trust accounting, conflicts screening, engagement letters, CLE tracking, client alerts, competitive intel), matter intake, missing-info gate, privacy encoder, Slack/Teams notifications, Markdown/DOCX output, capability authoring (skill/agent/plugin), 18 connector descriptors (research, doc stores, e-signature, CRM, billing, practice management, email, drive) |
 | **Projects & tasks** | NDA Matters, Commercial Reviews, Eval Results; starter issues + a recurring renewal scan |
 | **Model lanes** | Per-agent `modelLane` metadata (primary / routing / drafting / review / extractive) — variants map each lane to the right model automatically |
 | **Variants** | `codex`, `claude`, `gemini`, `ollama`, `llamacpp`, `opencode`, `openrouter` (+ `-api` twins) — selected at import time by the launcher |
 | **Demos** | `--demo law-firm` / `inhouse-legal` / `biglaw-practice-group` — synthetic demo matters for a boutique firm, an in-house department, and a BigLaw practice group |
 | **Team subsets** | `--teams litigation,commercial` (or presets `boutique` / `inhouse`) — import only the practices your firm runs; chiefs, meta-reviewers, and the skill closure come along automatically |
+| **Delivery** | `deliverables-courier` files finished work products to your own OneDrive/SharePoint, Google Drive, or Notion per an operator policy file — auto-file or on-request per work-product type, privacy-tier gated, local copy always retained |
 | **Theme** | `--theme possiblaw` (default) — light-first dashboard with a warm launch palette; `light` / `dark` also available |
 | **Privacy posture** | Privacy-encoder skill blocks confidential/privileged matters unless a local model (Ollama or llama.cpp) is reachable |
 
@@ -75,7 +76,7 @@ Add `--variant <slug>` to skip the interactive prompt, or `--list-variants` to s
 ├─────────────────────────────────────────────────────────┤
 │  companies/legal-operations/   (the PossibLaw package)   │
 │  ├── COMPANY.md + .paperclip.yaml + variants.yaml        │
-│  ├── agents/    (174 AGENTS.md — org chart + routing)    │
+│  ├── agents/    (175 AGENTS.md — org chart + routing)    │
 │  ├── skills/    (169 SKILL.md — playbooks, gates,        │
 │  │               outputs, notifications, connectors)     │
 │  ├── projects/  (NDA matters, commercial reviews,        │

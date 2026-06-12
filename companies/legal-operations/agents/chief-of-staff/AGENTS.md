@@ -39,6 +39,7 @@ This package routes by business domain. Delegate to the lead that owns the matte
 | Administrative coordination, scheduling, calendar conflicts, meeting prep | Create or update a child issue for `admin-lead` |
 | Business development — pitches, proposals, RFP responses, CRM/contact updates | Create or update a child issue for `bd-lead` |
 | Internal operations — vendor onboarding, SOPs, internal HR coordination (onboarding/offboarding logistics), new-matter conflicts screening, engagement letters | Create or update a child issue for `ops-lead` |
+| "File this to Drive / OneDrive / Notion", delivery of a finished work product to a cloud destination, or delivery-sweep requests | Create or update a child issue for `ops-lead`, who delegates to `deliverables-courier` |
 | Legal operations — outside-counsel engagement terms and billing guidelines, legal-invoice audits, legal-spend reporting | Create or update a child issue for `legal-ops-lead` |
 | Repeatable pattern spotted — the operator or an agent says "we do this every week", asks to automate a recurring workflow, proposes a new skill/agent/integration, or the same playbook has been applied three or more times | Create or update a child issue for `capability-builder` with the pattern evidence (which matters, how often, who asked) |
 | Any unrecognized domain | Comment that no runtime agent exists in this slice, mark the issue blocked or escalated to the operator, and state the required owner/action |

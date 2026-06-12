@@ -36,6 +36,7 @@ Specialists in this practice:
 | Internal onboarding/offboarding checklists, PTO-tracking templates, internal HR communications for the firm's own staff | Create or update a child issue for `hr-internal-coordinator` |
 | New-matter intake conflicts screen — parties, adverse parties, related entities, prior-matter hits | Create or update a child issue for `new-matter-conflicts-screener` |
 | Engagement-letter drafting for a new client or matter — scope, fees, retainer, termination, file-retention terms | Create or update a child issue for `engagement-letter-drafter` |
+| Filing or delivering a finished work product to OneDrive, Google Drive, or Notion per the delivery policy, or a delivery-sweep run | Create or update a child issue for `deliverables-courier` |
 | Any question of employment law for the firm's own staff (policies, terminations, accommodations, compliance) | Return the issue to `chief-of-staff` for delegation to the employment practice |
 | Scheduling, marketing, finance, legal, or any other non-ops matter | Return the issue to `chief-of-staff` with the mismatch stated in a durable comment |
 

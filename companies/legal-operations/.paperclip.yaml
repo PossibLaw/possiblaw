@@ -4229,6 +4229,46 @@ agents:
       possiblaw:
         modelLane: drafting
         adapterDecision: codex-local-default-2026-06-11
+  deliverables-courier:
+    role: specialist
+    icon: send
+    capabilities: Files finished work products to policy-declared OneDrive, Google Drive, or Notion destinations with read-back verification.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_DELIVERY_POLICY:
+          kind: plain
+          requirement: optional
+        POSSIBLAW_DELIVERABLES_DIR:
+          kind: plain
+          requirement: optional
+        MS_GRAPH_TOKEN:
+          kind: secret
+          requirement: optional
+        GDRIVE_ACCESS_TOKEN:
+          kind: secret
+          requirement: optional
+        NOTION_API_KEY:
+          kind: secret
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-11
   cle-compliance-tracker:
     role: specialist
     icon: calendar-days
@@ -4547,6 +4587,7 @@ sidebar:
     - trust-accounting-reconciler
     - new-matter-conflicts-screener
     - engagement-letter-drafter
+    - deliverables-courier
     - cle-compliance-tracker
     - legal-proofreader
     - client-alert-drafter
@@ -4618,6 +4659,17 @@ routines:
     triggers:
       - kind: schedule
         cronExpression: "0 2 * * *"
+        timezone: America/Chicago
+        enabled: true
+    concurrencyPolicy: coalesce_if_active
+    catchUpPolicy: skip_missed
+  delivery-sweep:
+    # Intent declaration: deliverables-courier scans recently completed work
+    # products and files `mode: auto` policy matches. The importer does not
+    # lift routine bindings; the operator wires the schedule in the UI.
+    triggers:
+      - kind: schedule
+        cronExpression: "0 18 * * 1-5"
         timezone: America/Chicago
         enabled: true
     concurrencyPolicy: coalesce_if_active
