@@ -488,6 +488,9 @@ async function handleEgress(
     boundary = classify(egressReq);
   } catch (err) {
     if (err instanceof UnknownToolError) {
+      // Deliberately NOT best-effort: if this append throws (corrupt chain), the
+      // outer handler returns 500 — the proxy refuses normal operation rather
+      // than serve an un-receipted decision. Receipt-on-every-path is strict.
       receipts.append({
         kind: "egress",
         tool,
