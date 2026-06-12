@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { ReceiptChain } from "../receipts.ts";
+import { ReceiptChain, ReceiptChainCorruptError } from "../receipts.ts";
 import { CitationRegistry } from "./citation-registry.ts";
 import { documentSha256 } from "../citations.ts";
 import { canonicalJson, sha256hex } from "../receipts.ts";
@@ -173,34 +173,53 @@ test("no-quote attestation registers with quotedRowCount 0 (documented honesty f
 // Hardening C — verify chain integrity at construction
 // ---------------------------------------------------------------------------
 
-test("Hardening C: constructor rejects a chain with a tampered middle entry", () => {
+test("Hardening C: corrupt chain — constructor succeeds, has() returns false, register() throws ReceiptChainCorruptError", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-receipts-c-"));
   const filePath = path.join(dir, "receipts.jsonl");
   const chain = new ReceiptChain(filePath);
 
-  // Build a valid 3-entry chain via a first registry
+  // Build a valid chain with a performed entry so reg1 adds a sha to the verified set
   const reg1 = new CitationRegistry(chain);
+  const testDoc = "See 410 U.S. 113.";
   reg1.register({
-    document: "See 410 U.S. 113.",
+    document: testDoc,
     rows: [{ citation: "Roe v. Wade, 410 U.S. 113 (1973)", match: "Yes" }],
     meta: {},
   });
+  const testSha = documentSha256(testDoc);
 
-  // Tamper the middle line (line 1, 0-indexed) body — leave hash intact
+  // Tamper the first line body — leave the stored hash intact, so verify() fails
   const lines = fs.readFileSync(filePath, "utf8").split("\n").filter(Boolean);
   if (lines.length >= 1) {
     const entry = JSON.parse(lines[0]) as import("../receipts.ts").ReceiptEntry;
-    entry.body.outcome = "performed"; // was "blocked" if it failed, or we just mutate
     entry.body.outcome = entry.body.outcome === "performed" ? "blocked" : "performed";
     lines[0] = JSON.stringify(entry);
     fs.writeFileSync(filePath, lines.join("\n") + "\n");
   }
 
-  // Constructing a new registry over the corrupt chain must throw
+  // Phase 1 posture: constructor must NOT throw — proxy stays bootable
+  const reg2 = new CitationRegistry(chain);
+
+  // has() must return false for the sha that was in the (pre-corruption) performed receipt
+  assert.equal(
+    reg2.has(testSha),
+    false,
+    "has() must return false over a corrupt chain (fail-closed)",
+  );
+
+  // register() must throw ReceiptChainCorruptError
   assert.throws(
-    () => new CitationRegistry(chain),
+    () =>
+      reg2.register({
+        document: testDoc,
+        rows: [{ citation: "Roe v. Wade, 410 U.S. 113 (1973)", match: "Yes" }],
+        meta: {},
+      }),
     (err: unknown) => {
-      assert.ok(err instanceof Error, `expected Error, got ${String(err)}`);
+      assert.ok(
+        err instanceof ReceiptChainCorruptError,
+        `expected ReceiptChainCorruptError, got ${String(err)}`,
+      );
       return true;
     },
   );

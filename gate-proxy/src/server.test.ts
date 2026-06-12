@@ -6,7 +6,6 @@ import os from "node:os";
 import path from "node:path";
 import {
   ReceiptChain,
-  ReceiptChainCorruptError,
   sha256hex,
   canonicalJson,
   GENESIS,
@@ -65,25 +64,13 @@ function makeFakeClient(
 
 /** Start the server on port 0, return {server, baseUrl, close}.
  * citationRegistry is optional: one is auto-constructed from deps.receipts when omitted.
- * If the receipt chain is corrupt (CitationRegistry constructor throws), a fresh
- * temporary chain is used so the server still starts — mirrors the server's own
- * fail-closed behaviour on corrupt chains. */
+ * CitationRegistry now fails closed on a corrupt chain (Phase 1 posture) rather than
+ * throwing, so no fallback or catch is needed here. */
 async function startServer(
   deps: Omit<GateServerDeps, "citationRegistry"> & { citationRegistry?: CitationRegistry },
 ): Promise<{ server: http.Server; baseUrl: string; close: () => Promise<void> }> {
-  let citationRegistry: CitationRegistry;
-  if (deps.citationRegistry) {
-    citationRegistry = deps.citationRegistry;
-  } else {
-    try {
-      citationRegistry = new CitationRegistry(deps.receipts);
-    } catch {
-      // Corrupt chain: fall back to a fresh empty chain so the server still starts.
-      // Tests for corrupt-chain resilience don't exercise the citation route.
-      const fallbackChain = new ReceiptChain(path.join(tmpDir(), "fallback.jsonl"));
-      citationRegistry = new CitationRegistry(fallbackChain);
-    }
-  }
+  const citationRegistry: CitationRegistry =
+    deps.citationRegistry ?? new CitationRegistry(deps.receipts);
   const fullDeps: GateServerDeps = { ...deps, citationRegistry };
   const server = createGateServer(fullDeps);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -1407,6 +1394,44 @@ describe("gate server", () => {
     });
 
     assert.equal(res.status, 413, `expected 413 for oversized body; got ${res.status}`);
+
+    await close();
+  });
+
+  // 2.5-8: corrupt chain → POST /quality/citation returns error status (not 200); server stays up
+  it("POST /quality/citation: corrupt chain → error status (not 200); GET /health → 503", async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "r.jsonl");
+    const receipts = new ReceiptChain(filePath);
+    // Write corrupt content — verify() will fail so CitationRegistry sets chainCorrupt=true
+    fs.writeFileSync(filePath, "NOT_JSON\n", "utf8");
+
+    // Phase 1 posture: CitationRegistry constructor must NOT throw; server must start cleanly
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    // POST /quality/citation with a valid body must return an error status — not 200
+    const { status } = await postCitation(baseUrl, {
+      document: "See 384 U.S. 436.",
+      rows: [{ citation: "384 U.S. 436", match: "Yes" }],
+      meta: { agentId: "agent-1" },
+    });
+    assert.ok(
+      status !== 200,
+      `expected a non-200 error status when chain is corrupt, got ${status}`,
+    );
+
+    // Server must still be up — /health returns 503 receipts_corrupt
+    const healthRes = await fetch(`${baseUrl}/health`);
+    assert.equal(healthRes.status, 503, "server must still respond with 503 after corrupt-chain citation refusal");
+    const h = await healthRes.json() as Record<string, unknown>;
+    assert.equal(h["ok"], false);
+    assert.ok(String(h["error"]).includes("receipts_corrupt"), `expected receipts_corrupt in error; got: ${JSON.stringify(h)}`);
 
     await close();
   });

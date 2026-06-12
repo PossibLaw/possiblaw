@@ -72,15 +72,22 @@ export class CitationRegistry {
   // on every construction so it survives restarts without a separate state file.
   private readonly verified = new Set<string>();
 
+  // Phase 1 posture: a corrupt chain does NOT crash the proxy at startup.
+  // The registry fails closed (nothing verified, registration refused) until
+  // the operator repairs the chain and restarts. The proxy stays bootable so
+  // /health can return 503 receipts_corrupt for diagnostics.
+  private chainCorrupt = false;
+
   constructor(private readonly receipts: ReceiptChain) {
-    // Hardening C: verify chain integrity before scanning entries.
-    // An edited chain must not silently rebuild a wrong verified set.
+    // Verify chain integrity before trusting it. A corrupt chain does NOT
+    // throw here (the proxy must stay bootable for /health diagnostics —
+    // Phase 1 posture); instead the registry fails closed: nothing is
+    // verified, and registration is refused until the operator repairs
+    // the chain.
     const chainResult = receipts.verify();
     if (!chainResult.ok) {
-      throw new ReceiptChainCorruptError(
-        `CitationRegistry: chain integrity check failed at line ${chainResult.badSeq}: ${chainResult.reason}. ` +
-          `Recovery: inspect the receipts file, truncate the corrupt entry, and re-anchor.`,
-      );
+      this.chainCorrupt = true;
+      return;
     }
 
     // Rebuild verified set from the chain: any quality/performed receipt records
@@ -94,6 +101,8 @@ export class CitationRegistry {
 
   /** Returns true if the document with the given sha has a passing registration. */
   has(docSha: string): boolean {
+    // Fail-closed: nothing is verified over a corrupt chain.
+    if (this.chainCorrupt) return false;
     return this.verified.has(docSha);
   }
 
@@ -115,6 +124,13 @@ export class CitationRegistry {
    * Throws synchronously (no receipt appended) if rows.length > MAX_ROWS.
    */
   register(input: RegisterInput): RegisterResult {
+    // Fail-closed: refuse registration over a corrupt chain. The route's
+    // existing catch converts this to a 400/500 — matches ops-fail-on-corrupt.
+    if (this.chainCorrupt) {
+      throw new ReceiptChainCorruptError(
+        "CitationRegistry: receipt chain failed integrity verification; repair the chain and restart the proxy",
+      );
+    }
     if (input.rows.length > MAX_ROWS) {
       throw new Error(`citation registration exceeds ${MAX_ROWS} rows`);
     }
