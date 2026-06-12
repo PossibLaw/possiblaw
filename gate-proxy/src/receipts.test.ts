@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   ReceiptChain,
+  ReceiptChainCorruptError,
   canonicalJson,
   sha256hex,
   GENESIS,
@@ -83,12 +84,13 @@ describe("receipts", () => {
     const result = chain.verify();
     assert.equal(result.ok, false);
     if (!result.ok) {
+      // badSeq is the 1-based LINE INDEX (3 = third line)
       assert.equal(result.badSeq, 3);
       assert.match(result.reason, /hash/i);
     }
   });
 
-  // 3. Linkage: change line 4's prevHash → verify fails at seq 4
+  // 3. Linkage: change line 4's prevHash → verify fails at line index 4
   it("detects broken prevHash linkage at seq 4", () => {
     const dir = tmpDir();
     const filePath = path.join(dir, "receipts.jsonl");
@@ -107,6 +109,7 @@ describe("receipts", () => {
     const result = chain.verify();
     assert.equal(result.ok, false);
     if (!result.ok) {
+      // badSeq is the 1-based LINE INDEX (4 = fourth line)
       assert.equal(result.badSeq, 4);
     }
   });
@@ -209,7 +212,7 @@ describe("receipts", () => {
     assert.equal(fs.existsSync(filePath), false);
   });
 
-  // 8. anchorText contains head hash and length
+  // 8. anchorText contains head hash and length=<n> token (M1)
   it("anchorText contains head hash and chain length", () => {
     const dir = tmpDir();
     const chain = new ReceiptChain(path.join(dir, "receipts.jsonl"));
@@ -219,6 +222,106 @@ describe("receipts", () => {
     const text = chain.anchorText();
     const h = chain.head();
     assert.ok(text.includes(h), "anchorText must contain the head hash");
-    assert.ok(text.includes("2"), "anchorText must contain the chain length");
+    assert.ok(text.includes("length=2"), "anchorText must contain the literal token length=2");
+  });
+
+  // C1(a): append with meta containing a Date value → verify ok (hash/persist parity)
+  it("append with meta: {when: new Date()} → verify ok", () => {
+    const dir = tmpDir();
+    const chain = new ReceiptChain(path.join(dir, "receipts.jsonl"));
+    const body = mkBody({ meta: { when: new Date("2025-01-01T00:00:00.000Z") } });
+    chain.append(body);
+    const result = chain.verify();
+    assert.equal(result.ok, true, `verify must pass but got: ${JSON.stringify(result)}`);
+  });
+
+  // C1(b): append with agentId: undefined → verify ok (undefined dropped by JSON normalize)
+  it("append with agentId: undefined → verify ok", () => {
+    const dir = tmpDir();
+    const chain = new ReceiptChain(path.join(dir, "receipts.jsonl"));
+    const body = mkBody({ agentId: undefined });
+    chain.append(body);
+    const result = chain.verify();
+    assert.equal(result.ok, true, `verify must pass but got: ${JSON.stringify(result)}`);
+  });
+
+  // I1(a): last line is {} → append throws ReceiptChainCorruptError and does NOT write
+  it("last line is {} → append throws ReceiptChainCorruptError and does not write", () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "receipts.jsonl");
+    // Seed one valid entry then append a corrupt tail line
+    const chain = new ReceiptChain(filePath);
+    chain.append(mkBody());
+    fs.appendFileSync(filePath, "{}\n", "utf8");
+
+    const linesBefore = fs.readFileSync(filePath, "utf8").split("\n").filter(Boolean).length;
+
+    assert.throws(
+      () => chain.append(mkBody()),
+      (err: unknown) => {
+        assert.ok(err instanceof ReceiptChainCorruptError, `expected ReceiptChainCorruptError, got ${err}`);
+        return true;
+      },
+    );
+
+    // File must NOT have grown (bad write was not performed)
+    const linesAfter = fs.readFileSync(filePath, "utf8").split("\n").filter(Boolean).length;
+    assert.equal(linesAfter, linesBefore, "file must not grow when append throws");
+  });
+
+  // I1(b): last line is a partial JSON fragment → append throws ReceiptChainCorruptError
+  it("last line is partial JSON fragment → append throws ReceiptChainCorruptError", () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "receipts.jsonl");
+    const chain = new ReceiptChain(filePath);
+    chain.append(mkBody());
+    fs.appendFileSync(filePath, '{"seq":2,"ts":"2025\n', "utf8"); // truncated mid-write
+
+    assert.throws(
+      () => chain.append(mkBody()),
+      (err: unknown) => {
+        assert.ok(err instanceof ReceiptChainCorruptError, `expected ReceiptChainCorruptError, got ${err}`);
+        return true;
+      },
+    );
+  });
+
+  // I2: head() throws ReceiptChainCorruptError on corrupt tail (not valid JSON)
+  it("head() throws ReceiptChainCorruptError when last line is unparseable", () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "receipts.jsonl");
+    const chain = new ReceiptChain(filePath);
+    chain.append(mkBody());
+    fs.appendFileSync(filePath, "NOT_JSON\n", "utf8");
+
+    assert.throws(
+      () => chain.head(),
+      (err: unknown) => {
+        assert.ok(err instanceof ReceiptChainCorruptError, `expected ReceiptChainCorruptError, got ${err}`);
+        return true;
+      },
+    );
+  });
+
+  // M2: verify() reports 1-based line index for a tampered entry claiming a wrong seq
+  it("verify() reports 1-based line index for all failure kinds (not entry-claimed seq)", () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "receipts.jsonl");
+    const chain = new ReceiptChain(filePath);
+    for (let i = 0; i < 3; i++) chain.append(mkBody());
+
+    // Tamper line 2: claim seq=999 (far from actual position)
+    const lines = fs.readFileSync(filePath, "utf8").split("\n").filter(Boolean);
+    const entry2 = JSON.parse(lines[1]) as ReceiptEntry;
+    entry2.seq = 999;
+    lines[1] = JSON.stringify(entry2);
+    fs.writeFileSync(filePath, lines.join("\n") + "\n");
+
+    const result = chain.verify();
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      // Must report line index 2 (actual position), not 999 (claimed seq)
+      assert.equal(result.badSeq, 2, `badSeq should be line index 2, got ${result.badSeq}`);
+    }
   });
 });

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadPolicy, decide, DEFAULT_POLICY, PolicyError } from "./policy.ts";
 import type { Policy } from "./policy.ts";
 import type { BoundaryType, Decision } from "./types.ts";
@@ -224,20 +225,105 @@ describe("loadPolicy version mismatch", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 9: Shipped gate-policy.yaml loads cleanly and equals defaults
+// Test 9: Shipped gate-policy.yaml loads cleanly and equals defaults (C2)
+//
+// Uses fileURLToPath (not .pathname) to handle spaces/special chars in paths.
+// The existsSync assertion fires FIRST so a silent ENOENT fallback can never
+// mask a missing file — if this assertion fails, the path is wrong, not the
+// policy content.
 // ---------------------------------------------------------------------------
 
 describe("shipped gate-policy.yaml", () => {
   it("loads and equals DEFAULT_POLICY boundaries", () => {
-    const shippedPath = new URL(
-      "../../../companies/legal-operations/gate-policy.yaml",
-      import.meta.url,
-    ).pathname;
+    // policy.test.ts lives at: gate-proxy/src/policy.test.ts
+    // gate-policy.yaml lives at: companies/legal-operations/gate-policy.yaml
+    // Relative from test file: ../../companies/legal-operations/gate-policy.yaml
+    const shippedPath = fileURLToPath(
+      new URL("../../companies/legal-operations/gate-policy.yaml", import.meta.url),
+    );
+    assert.ok(
+      fs.existsSync(shippedPath),
+      `Shipped gate-policy.yaml not found at resolved path: ${shippedPath}`,
+    );
     const policy = loadPolicy(shippedPath);
     const expected: Policy = {
       version: 1,
       boundaries: { ...DEFAULT_POLICY.boundaries },
     };
     assert.deepEqual(policy, expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 10: I3 — Only ENOENT falls back to defaults; permission errors throw PolicyError
+// ---------------------------------------------------------------------------
+
+describe("loadPolicy ENOENT-only fallback", () => {
+  let tmpDir: string;
+  before(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-policy-test-"));
+  });
+  after(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("permission error (chmod 000) throws PolicyError, not defaults", function () {
+    // Skip this test when running as root (chmod is ineffective for root)
+    if (process.getuid?.() === 0) {
+      // eslint-disable-next-line no-console
+      console.log("Skipping chmod test: running as root");
+      return;
+    }
+    const filePath = writeTmp(tmpDir, "no-perms.yaml", `version: 1\nboundaries: {}\n`);
+    fs.chmodSync(filePath, 0o000);
+    try {
+      assert.throws(
+        () => loadPolicy(filePath),
+        (err: unknown) => {
+          assert.ok(err instanceof PolicyError, `expected PolicyError, got ${err}`);
+          assert.ok(
+            (err as PolicyError).message.includes("Failed to read policy file"),
+            `message should mention failed read; got: ${(err as PolicyError).message}`,
+          );
+          return true;
+        },
+      );
+    } finally {
+      fs.chmodSync(filePath, 0o644);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 11: I4 — Unknown top-level keys throw PolicyError naming the key
+// ---------------------------------------------------------------------------
+
+describe("loadPolicy unknown top-level key", () => {
+  let tmpDir: string;
+  before(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-policy-test-"));
+  });
+  after(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("boundarys: typo throws PolicyError naming the unknown key", () => {
+    // A typo like "boundarys:" would silently fall back to defaults without this check
+    const filePath = writeTmp(
+      tmpDir,
+      "typo.yaml",
+      `version: 1\nboundarys:\n  THIRD_PARTY_EGRESS: block\n`,
+    );
+    assert.throws(
+      () => loadPolicy(filePath),
+      (err: unknown) => {
+        assert.ok(err instanceof PolicyError, `expected PolicyError, got ${err}`);
+        assert.ok(
+          (err as PolicyError).message.includes("boundarys"),
+          `message should name the unknown key "boundarys"; got: ${(err as PolicyError).message}`,
+        );
+        return true;
+      },
+    );
   });
 });

@@ -1,5 +1,4 @@
-import type { BoundaryType, EgressMeta } from "./types.ts";
-import type { EgressRequest } from "./types.ts";
+import type { BoundaryType, EgressMeta, EgressRequest } from "./types.ts";
 
 export class UnknownToolError extends Error {
   constructor(tool: string) {
@@ -10,7 +9,7 @@ export class UnknownToolError extends Error {
 
 type BoundaryRule = BoundaryType | ((meta: EgressMeta) => BoundaryType | null);
 
-export const TOOL_BOUNDARIES: Record<string, BoundaryRule> = {
+export const TOOL_BOUNDARIES: Readonly<Record<string, BoundaryRule>> = Object.freeze({
   send_email: "THIRD_PARTY_EGRESS",
   share_external: "THIRD_PARTY_EGRESS",
   upload_document: "THIRD_PARTY_EGRESS",
@@ -22,7 +21,7 @@ export const TOOL_BOUNDARIES: Record<string, BoundaryRule> = {
   sign_document: "SIGNATURE",
   send_payment: "MONEY_MOVEMENT",
   delete_external_resource: "IRREVERSIBLE_EXTERNAL_OP",
-};
+});
 
 export function classify(req: EgressRequest): BoundaryType | null {
   const rule = TOOL_BOUNDARIES[req.tool];

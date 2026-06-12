@@ -30,6 +30,12 @@ export interface ReceiptBody {
   issueId?: string;
   approvalId?: string;
   payloadSha256: string;
+  /**
+   * Caller-supplied audit metadata. Receipts persist meta verbatim via
+   * JSON round-trip normalization (Dates → ISO strings, undefined fields
+   * dropped). Callers MUST NOT place payload fragments or privileged text
+   * here; payload is represented by payloadSha256 only.
+   */
   meta?: Record<string, unknown>;
 }
 
@@ -46,6 +52,20 @@ export interface ReceiptEntry {
 // ---------------------------------------------------------------------------
 
 export const GENESIS = "GENESIS";
+
+// ---------------------------------------------------------------------------
+// ReceiptChainCorruptError: thrown when the persisted tail is unreadable or
+// has an invalid shape. Recovery procedure: inspect the file at the reported
+// path, truncate or remove the corrupt tail line, and re-anchor the chain
+// from the last valid entry (or from GENESIS if the file is empty).
+// ---------------------------------------------------------------------------
+
+export class ReceiptChainCorruptError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReceiptChainCorruptError";
+  }
+}
 
 // ---------------------------------------------------------------------------
 // canonicalJson: deterministic JSON with sorted keys (recursive); arrays keep order
@@ -101,9 +121,44 @@ function readAllLines(filePath: string): string[] {
   return raw.split("\n").filter((l) => l.trim() !== "");
 }
 
-/** Compute the hash for a receipt entry. */
-function computeHash(prevHash: string, seq: number, ts: string, body: ReceiptBody): string {
-  const content = canonicalJson({ seq, ts, body });
+/** Validate the shape of a parsed last-line entry. Throws ReceiptChainCorruptError on bad shape. */
+function validateLastEntry(entry: unknown, filePath: string): ReceiptEntry {
+  if (
+    entry === null ||
+    typeof entry !== "object" ||
+    Array.isArray(entry)
+  ) {
+    throw new ReceiptChainCorruptError(
+      `Receipt chain corrupt in ${filePath}: last line has invalid shape (not an object). ` +
+        `Recovery: inspect the file, truncate the corrupt tail line, and re-anchor.`,
+    );
+  }
+  const e = entry as Record<string, unknown>;
+  if (
+    typeof e["seq"] !== "number" ||
+    !Number.isInteger(e["seq"]) ||
+    (e["seq"] as number) < 1
+  ) {
+    throw new ReceiptChainCorruptError(
+      `Receipt chain corrupt in ${filePath}: last line has invalid seq (must be positive integer, got ${String(e["seq"])}). ` +
+        `Recovery: inspect the file, truncate the corrupt tail line, and re-anchor.`,
+    );
+  }
+  if (
+    typeof e["hash"] !== "string" ||
+    !/^[0-9a-f]{64}$/.test(e["hash"] as string)
+  ) {
+    throw new ReceiptChainCorruptError(
+      `Receipt chain corrupt in ${filePath}: last line has invalid hash (must be 64-char lowercase hex, got ${String(e["hash"])}). ` +
+        `Recovery: inspect the file, truncate the corrupt tail line, and re-anchor.`,
+    );
+  }
+  return e as unknown as ReceiptEntry;
+}
+
+/** Compute the hash for a receipt entry over the JSON-normalized body. */
+function computeHash(prevHash: string, seq: number, ts: string, normalizedBody: ReceiptBody): string {
+  const content = canonicalJson({ seq, ts, body: normalizedBody });
   return sha256hex(prevHash + content);
 }
 
@@ -124,6 +179,16 @@ export class ReceiptChain {
   /**
    * Append a new receipt. Derives seq and prevHash from the LAST LINE OF THE FILE
    * so the chain survives restarts without any in-memory state.
+   *
+   * The body is JSON-round-tripped before hashing (Date values → ISO strings,
+   * undefined optional fields dropped) so the hash matches exactly what is
+   * persisted. This means append() followed by verify() is always consistent.
+   *
+   * Throws ReceiptChainCorruptError if the last line is unparseable or has an
+   * invalid shape (e.g. crash mid-write). Recovery: inspect the file, truncate
+   * the corrupt tail line, and re-anchor from the last valid entry.
+   *
+   * v1: re-reads file per append; fine at gate volumes.
    */
   append(body: ReceiptBody): ReceiptEntry {
     const lastLine = readLastLine(this.filePath);
@@ -135,15 +200,30 @@ export class ReceiptChain {
       seq = 1;
       prevHash = GENESIS;
     } else {
-      const last = JSON.parse(lastLine) as ReceiptEntry;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(lastLine);
+      } catch {
+        throw new ReceiptChainCorruptError(
+          `Receipt chain corrupt in ${this.filePath}: last line is not valid JSON. ` +
+            `Recovery: inspect the file, truncate the corrupt tail line, and re-anchor.`,
+        );
+      }
+      const last = validateLastEntry(parsed, this.filePath);
       seq = last.seq + 1;
       prevHash = last.hash;
     }
 
     const ts = new Date().toISOString();
-    const hash = computeHash(prevHash, seq, ts, body);
 
-    const entry: ReceiptEntry = { seq, ts, prevHash, hash, body };
+    // JSON-round-trip normalizes Date→ISO, drops undefined fields.
+    // Use this normalized body for BOTH the hash and the persisted entry
+    // so the two are always identical — one source of truth.
+    const normalizedBody = JSON.parse(JSON.stringify(body)) as ReceiptBody;
+
+    const hash = computeHash(prevHash, seq, ts, normalizedBody);
+
+    const entry: ReceiptEntry = { seq, ts, prevHash, hash, body: normalizedBody };
     fs.appendFileSync(this.filePath, JSON.stringify(entry) + "\n", "utf8");
     return entry;
   }
@@ -151,10 +231,14 @@ export class ReceiptChain {
   /**
    * Verify the full chain from genesis.
    * - Empty / missing file → { ok: true, length: 0, head: GENESIS }
-   * - Malformed line → { ok: false, badSeq: lineNumber, reason: "unparseable" }
-   * - Seq not monotonic from 1 → { ok: false, badSeq: <seq>, reason: "..." }
-   * - Hash mismatch → { ok: false, badSeq: <seq>, reason: "hash mismatch" }
-   * - prevHash linkage break → { ok: false, badSeq: <seq>, reason: "prevHash mismatch" }
+   * - Malformed line → { ok: false, badSeq: lineIndex (1-based), reason: "unparseable" }
+   * - Seq not monotonic from 1 → { ok: false, badSeq: lineIndex (1-based), reason: "..." }
+   * - Hash mismatch → { ok: false, badSeq: lineIndex (1-based), reason: "hash mismatch" }
+   * - prevHash linkage break → { ok: false, badSeq: lineIndex (1-based), reason: "prevHash mismatch" }
+   *
+   * Note: badSeq is the 1-based LINE INDEX, not the entry-claimed seq value,
+   * so corrupt entries claiming arbitrary seq numbers are always reported at
+   * their actual position in the file.
    */
   verify():
     | { ok: true; length: number; head: string }
@@ -169,17 +253,18 @@ export class ReceiptChain {
     let expectedSeq = 1;
 
     for (let i = 0; i < lines.length; i++) {
+      const lineIndex = i + 1; // 1-based line index, reported consistently for all failure kinds
       let entry: ReceiptEntry;
       try {
         entry = JSON.parse(lines[i]) as ReceiptEntry;
       } catch {
-        return { ok: false, badSeq: i + 1, reason: "unparseable" };
+        return { ok: false, badSeq: lineIndex, reason: "unparseable" };
       }
 
       if (entry.seq !== expectedSeq) {
         return {
           ok: false,
-          badSeq: entry.seq,
+          badSeq: lineIndex,
           reason: `seq out of order: expected ${expectedSeq}, got ${entry.seq}`,
         };
       }
@@ -187,7 +272,7 @@ export class ReceiptChain {
       if (entry.prevHash !== prevHash) {
         return {
           ok: false,
-          badSeq: entry.seq,
+          badSeq: lineIndex,
           reason: `prevHash mismatch at seq ${entry.seq}`,
         };
       }
@@ -196,7 +281,7 @@ export class ReceiptChain {
       if (entry.hash !== expected) {
         return {
           ok: false,
-          badSeq: entry.seq,
+          badSeq: lineIndex,
           reason: `hash mismatch at seq ${entry.seq}`,
         };
       }
@@ -208,21 +293,31 @@ export class ReceiptChain {
     return { ok: true, length: lines.length, head: prevHash };
   }
 
-  /** Returns the hash of the last entry, or GENESIS if the chain is empty. */
+  /**
+   * Returns the hash of the last entry, or GENESIS if the chain is empty.
+   * Throws ReceiptChainCorruptError if the last line is unparseable or has an
+   * invalid shape — corrupt tail must not silently masquerade as GENESIS and
+   * feed an incorrect anchor to external systems.
+   */
   head(): string {
     const lastLine = readLastLine(this.filePath);
     if (lastLine === null) return GENESIS;
+    let parsed: unknown;
     try {
-      const entry = JSON.parse(lastLine) as ReceiptEntry;
-      return entry.hash;
+      parsed = JSON.parse(lastLine);
     } catch {
-      return GENESIS;
+      throw new ReceiptChainCorruptError(
+        `Receipt chain corrupt in ${this.filePath}: last line is not valid JSON. ` +
+          `Recovery: inspect the file, truncate the corrupt tail line, and re-anchor.`,
+      );
     }
+    const entry = validateLastEntry(parsed, this.filePath);
+    return entry.hash;
   }
 
   /**
    * Human-readable anchor text for a paperclip comment.
-   * Contains: head hash, chain length, ts of last entry, file path.
+   * Contains: head hash, chain length (as length=<n> token), ts of last entry, file path.
    */
   anchorText(): string {
     const lines = readAllLines(this.filePath);

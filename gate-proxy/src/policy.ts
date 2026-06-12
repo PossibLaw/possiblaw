@@ -42,6 +42,9 @@ const VALID_DECISIONS: ReadonlySet<string> = new Set<Decision>([
   "block",
 ]);
 
+/** The only top-level keys permitted in a policy file. */
+const VALID_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(["version", "boundaries"]);
+
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
@@ -98,7 +101,7 @@ function validateBoundariesObject(raw: unknown): Record<BoundaryType, Decision> 
 // ---------------------------------------------------------------------------
 
 export function loadPolicy(filePath?: string): Policy {
-  // No path or file does not exist → conservative defaults
+  // No path → conservative defaults
   if (filePath === undefined) {
     return freshDefaults();
   }
@@ -106,9 +109,18 @@ export function loadPolicy(filePath?: string): Policy {
   let raw: string;
   try {
     raw = fs.readFileSync(filePath, "utf8");
-  } catch {
-    // File not found or unreadable → safe defaults
-    return freshDefaults();
+  } catch (err) {
+    // Only ENOENT (file not found) falls back to safe defaults.
+    // Any other read error (permissions, I/O) is re-thrown as PolicyError
+    // so a misconfigured environment fails loudly rather than silently
+    // downgrading enforcement.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return freshDefaults();
+    }
+    throw new PolicyError(
+      `Failed to read policy file "${filePath}": ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   // Parse — any YAML error becomes PolicyError
@@ -129,6 +141,16 @@ export function loadPolicy(filePath?: string): Policy {
   }
 
   const doc = parsed as Record<string, unknown>;
+
+  // Reject unknown top-level keys — a typo like "boundarys:" silently downgrades
+  // the firm to defaults without this check.
+  for (const key of Object.keys(doc)) {
+    if (!VALID_TOP_LEVEL_KEYS.has(key)) {
+      throw new PolicyError(
+        `Unknown top-level key "${key}" in policy file. Only "version" and "boundaries" are allowed.`,
+      );
+    }
+  }
 
   // Validate version if present
   if ("version" in doc) {
