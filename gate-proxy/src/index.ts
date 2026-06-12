@@ -15,6 +15,7 @@ import { PaperclipClient } from "./paperclip-client.ts";
 import { buildPerformers } from "./connectors.ts";
 import { createGateServer } from "./server.ts";
 import { pollOnce } from "./poller.ts";
+import { CitationRegistry } from "./quality/citation-registry.ts";
 
 // ---------------------------------------------------------------------------
 // Env
@@ -58,6 +59,8 @@ const client =
 
 const performers = buildPerformers(process.env as Record<string, string | undefined>);
 
+const citationRegistry = new CitationRegistry(receipts);
+
 const log = (line: string): void => {
   // Safety: never include payload text in log lines — sanitized by contract
   console.log(`[gate-proxy] ${new Date().toISOString()} ${line}`);
@@ -67,7 +70,7 @@ const log = (line: string): void => {
 // Start server
 // ---------------------------------------------------------------------------
 
-const server = createGateServer({ policy, receipts, client, performers, localModelAvailable, log });
+const server = createGateServer({ policy, receipts, client, performers, localModelAvailable, citationRegistry, log });
 
 server.listen(PORT, "127.0.0.1", () => {
   log(

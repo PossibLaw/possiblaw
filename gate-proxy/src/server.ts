@@ -23,6 +23,7 @@ import { evaluateTierFloor } from "./gates/tier-floor.ts";
 import { anonymize, deanonymize } from "./anonymize.ts";
 import { humanGate } from "./gates/human.ts";
 import type { EgressMeta, EgressRequest } from "./types.ts";
+import type { CitationRegistry } from "./quality/citation-registry.ts";
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -34,6 +35,7 @@ export interface GateServerDeps {
   client: PaperclipClient | null; // null = paperclip unconfigured → human gates FAIL CLOSED (503)
   performers: PerformerRegistry;
   localModelAvailable: boolean;
+  citationRegistry: CitationRegistry;
   log?: (line: string) => void; // NEVER log payload text
 }
 
@@ -276,6 +278,88 @@ export function createGateServer(deps: GateServerDeps): http.Server {
     }
 
     // ------------------------------------------------------------------
+    // POST /quality/citation — register a citation verification
+    // (deterministic re-checks happen in CitationRegistry; receipts carry
+    // counts + shas only — citation text goes back to the caller, never
+    // into receipts or logs)
+    // ------------------------------------------------------------------
+    if (method === "POST" && url === "/quality/citation") {
+      try {
+        const { body: rawBody, limitExceeded } = await readBody(req);
+        if (limitExceeded) {
+          sendJson(res, 413, { error: "request_too_large" });
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(rawBody);
+        } catch {
+          deps.receipts.append({
+            kind: "quality",
+            tool: "citation_verification",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_json" });
+          return;
+        }
+        const b = parsed as Record<string, unknown>;
+        const rawMeta = (b["meta"] ?? {}) as Record<string, unknown>;
+        const rows = b["rows"];
+        const rowsOk = Array.isArray(rows) && rows.length <= 500 && rows.every((r) =>
+          r !== null && typeof r === "object" && !Array.isArray(r) &&
+          typeof (r as Record<string, unknown>)["citation"] === "string" &&
+          typeof (r as Record<string, unknown>)["match"] === "string" &&
+          ["quoted", "sourcePassage"].every(
+            (k) => (r as Record<string, unknown>)[k] === undefined || typeof (r as Record<string, unknown>)[k] === "string",
+          ));
+        if (typeof b["document"] !== "string" || !rowsOk ||
+            rawMeta === null || typeof rawMeta !== "object" || Array.isArray(rawMeta) ||
+            !isValidId(rawMeta["agentId"]) || !isValidId(rawMeta["issueId"])) {
+          deps.receipts.append({
+            kind: "quality",
+            tool: "citation_verification",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_registration: requires string 'document', rows[] of {citation, match[, quoted, sourcePassage]} (max 500), valid meta ids" });
+          return;
+        }
+        let result;
+        try {
+          result = deps.citationRegistry.register({
+            document: b["document"] as string,
+            rows: rows as { citation: string; match: string; quoted?: string; sourcePassage?: string }[],
+            meta: { agentId: rawMeta["agentId"] as string | undefined, issueId: rawMeta["issueId"] as string | undefined },
+          });
+        } catch (err) {
+          deps.receipts.append({
+            kind: "quality",
+            tool: "citation_verification",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: `registration_rejected: ${err instanceof Error ? err.message : "invalid input"}` });
+          return;
+        }
+        if (result.ok) {
+          sendJson(res, 200, { registered: true, documentSha256: result.documentSha256, citationCount: result.citationCount });
+        } else {
+          sendJson(res, 422, { registered: false, reason: result.reason, details: result.details });
+        }
+      } catch {
+        if (!res.headersSent) sendJson(res, 500, { error: "internal_error" });
+      }
+      return;
+    }
+
+    // ------------------------------------------------------------------
     // POST /egress/{tool}
     // ------------------------------------------------------------------
     const egressMatch = url.match(/^\/egress\/([^/?#]+)(?:\?.*)?$/);
@@ -283,7 +367,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
       const tool = decodeURIComponent(egressMatch[1]);
       // C2 (a): entire egress handler wrapped in try/catch
       try {
-        await handleEgress(tool, req, res, { policy, receipts, client, performers, localModelAvailable, log });
+        await handleEgress(tool, req, res, { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, log });
       } catch (outerErr) {
         // Best-effort: try to append an error receipt; if the chain itself is
         // corrupt, log a no-payload line and continue — process stays alive.

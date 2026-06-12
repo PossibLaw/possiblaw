@@ -18,6 +18,7 @@ import type { Policy } from "./policy.ts";
 import type { PaperclipClient, ApprovalRecord } from "./paperclip-client.ts";
 import { PerformerError, type Performer, type PerformerRegistry } from "./connectors.ts";
 import { createGateServer, type GateServerDeps } from "./server.ts";
+import { CitationRegistry } from "./quality/citation-registry.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,11 +63,29 @@ function makeFakeClient(
   } as unknown as PaperclipClient;
 }
 
-/** Start the server on port 0, return {server, baseUrl, close}. */
+/** Start the server on port 0, return {server, baseUrl, close}.
+ * citationRegistry is optional: one is auto-constructed from deps.receipts when omitted.
+ * If the receipt chain is corrupt (CitationRegistry constructor throws), a fresh
+ * temporary chain is used so the server still starts — mirrors the server's own
+ * fail-closed behaviour on corrupt chains. */
 async function startServer(
-  deps: GateServerDeps,
+  deps: Omit<GateServerDeps, "citationRegistry"> & { citationRegistry?: CitationRegistry },
 ): Promise<{ server: http.Server; baseUrl: string; close: () => Promise<void> }> {
-  const server = createGateServer(deps);
+  let citationRegistry: CitationRegistry;
+  if (deps.citationRegistry) {
+    citationRegistry = deps.citationRegistry;
+  } else {
+    try {
+      citationRegistry = new CitationRegistry(deps.receipts);
+    } catch {
+      // Corrupt chain: fall back to a fresh empty chain so the server still starts.
+      // Tests for corrupt-chain resilience don't exercise the citation route.
+      const fallbackChain = new ReceiptChain(path.join(tmpDir(), "fallback.jsonl"));
+      citationRegistry = new CitationRegistry(fallbackChain);
+    }
+  }
+  const fullDeps: GateServerDeps = { ...deps, citationRegistry };
+  const server = createGateServer(fullDeps);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const addr = server.address() as { address: string; port: number };
   const baseUrl = `http://${addr.address}:${addr.port}`;
@@ -1160,6 +1179,234 @@ describe("gate server", () => {
     assert.equal(res.status, 400);
     const j = await res.json() as Record<string, unknown>;
     assert.ok(String(j["error"]).includes("meta"), `error must mention meta: ${JSON.stringify(j)}`);
+
+    await close();
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /quality/citation — Task 2.5 tests
+  // -------------------------------------------------------------------------
+
+  /** POST a JSON body to /quality/citation and return {status, json}. */
+  async function postCitation(
+    baseUrl: string,
+    body: unknown,
+  ): Promise<{ status: number; json: unknown }> {
+    const res = await fetch(`${baseUrl}/quality/citation`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    return { status: res.status, json };
+  }
+
+  // 2.5-1: happy registration → 200, registered:true, documentSha256 64-char hex, citationCount correct
+  it("POST /quality/citation: happy registration → 200, registered:true, sha256 + citationCount", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const document = "See Miranda v. Arizona, 384 U.S. 436 (1966).";
+    const body = {
+      document,
+      rows: [{ citation: "384 U.S. 436", match: "Yes" }],
+      meta: { agentId: "agent-1", issueId: "issue-1" },
+    };
+    const { status, json } = await postCitation(baseUrl, body);
+
+    assert.equal(status, 200);
+    const j = json as Record<string, unknown>;
+    assert.equal(j["registered"], true);
+    assert.ok(
+      typeof j["documentSha256"] === "string" && /^[0-9a-f]{64}$/.test(j["documentSha256"] as string),
+      `documentSha256 must be a 64-char hex string; got: ${j["documentSha256"]}`,
+    );
+    assert.equal(j["citationCount"], 1);
+
+    // Final chain entry must be kind=quality outcome=performed
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.kind, "quality");
+    assert.equal(last.body.outcome, "performed");
+
+    await close();
+  });
+
+  // 2.5-2: coverage_gap → 422, reason coverage_gap, details contains the missing citation
+  it("POST /quality/citation: coverage_gap → 422 with missing citation in details", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    // Document cites both Roe and Miranda; row covers only Roe
+    const document =
+      "This brief cites Roe v. Wade, 410 U.S. 113 (1973) and Miranda v. Arizona, 384 U.S. 436 (1966).";
+    const body = {
+      document,
+      rows: [{ citation: "410 U.S. 113", match: "Yes" }],
+      meta: {},
+    };
+    const { status, json } = await postCitation(baseUrl, body);
+
+    assert.equal(status, 422);
+    const j = json as Record<string, unknown>;
+    assert.equal(j["registered"], false);
+    assert.equal(j["reason"], "coverage_gap");
+    const details = j["details"] as string[];
+    assert.ok(
+      Array.isArray(details) && details.some((d) => d.includes("384 U.S. 436")),
+      `details must include the missing citation "384 U.S. 436"; got: ${JSON.stringify(details)}`,
+    );
+
+    await close();
+  });
+
+  // 2.5-3: malformed JSON body → 400 invalid_json + error-outcome quality receipt
+  it("POST /quality/citation: malformed JSON → 400 invalid_json + error receipt", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const res = await fetch(`${baseUrl}/quality/citation`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "NOT JSON {{{",
+    });
+
+    assert.equal(res.status, 400);
+    const j = await res.json() as Record<string, unknown>;
+    assert.ok(String(j["error"]).includes("invalid_json"), `must mention invalid_json; got: ${JSON.stringify(j)}`);
+
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.kind, "quality");
+    assert.equal(last.body.outcome, "error");
+
+    await close();
+  });
+
+  // 2.5-4: structurally invalid body (rows: "nope") → 400 invalid_registration + error receipt
+  it("POST /quality/citation: rows is a string → 400 invalid_registration + error receipt", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postCitation(baseUrl, {
+      document: "See 384 U.S. 436.",
+      rows: "nope",
+      meta: {},
+    });
+
+    assert.equal(status, 400);
+    assert.ok(
+      String((json as Record<string, unknown>)["error"]).includes("invalid_registration"),
+      `must mention invalid_registration; got: ${JSON.stringify(json)}`,
+    );
+
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.kind, "quality");
+    assert.equal(last.body.outcome, "error");
+
+    await close();
+  });
+
+  // 2.5-5: meta.agentId with invalid characters → 400
+  it("POST /quality/citation: meta.agentId with path traversal → 400", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status } = await postCitation(baseUrl, {
+      document: "See 384 U.S. 436.",
+      rows: [{ citation: "384 U.S. 436", match: "Yes" }],
+      meta: { agentId: "../../etc" },
+    });
+
+    assert.equal(status, 400, `expected 400 for invalid agentId; got ${status}`);
+
+    await close();
+  });
+
+  // 2.5-6: >500 rows → 400 (pre-validation, not a 500)
+  it("POST /quality/citation: 501 rows → 400 invalid_registration (pre-validation)", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const tooManyRows = Array.from({ length: 501 }, () => ({ citation: "384 U.S. 436", match: "Yes" }));
+    const { status, json } = await postCitation(baseUrl, {
+      document: "See 384 U.S. 436.",
+      rows: tooManyRows,
+      meta: {},
+    });
+
+    assert.equal(status, 400, `expected 400 for 501 rows; got ${status}`);
+    assert.ok(
+      String((json as Record<string, unknown>)["error"]).includes("invalid_registration"),
+      `must mention invalid_registration; got: ${JSON.stringify(json)}`,
+    );
+
+    await close();
+  });
+
+  // 2.5-7: body over 1MB → 413
+  it("POST /quality/citation: >1MB body → 413", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const bigBody = "x".repeat(1_100_000);
+    const res = await fetch(`${baseUrl}/quality/citation`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: bigBody,
+    });
+
+    assert.equal(res.status, 413, `expected 413 for oversized body; got ${res.status}`);
 
     await close();
   });
