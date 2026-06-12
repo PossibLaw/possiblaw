@@ -749,6 +749,102 @@ describe("gate server", () => {
     await close();
   });
 
+  // S1-4: humanGate blocked via rejected approval on re-entry → 403, reason mentions reject, blocked receipt with approvalId
+  it("human re-entry rejected → 403, reason mentions reject, blocked receipt with approvalId", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    let callCount = 0;
+    const fakePerformer: Performer = async () => { callCount++; return {}; };
+    const performers: PerformerRegistry = { file_court_document: fakePerformer };
+
+    const payload = { title: "Motion to Dismiss", content: "..." };
+    const sha = payloadSha(payload);
+
+    const approvalId = "approval-rejected-1";
+    const approvals = new Map<string, ApprovalRecord>([
+      [approvalId, {
+        id: approvalId,
+        status: "rejected",
+        payload: { payloadSha256: sha },
+      }],
+    ]);
+    const client = makeFakeClient(approvals);
+
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client,
+      performers,
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postEgress(baseUrl, "file_court_document", {
+      payload,
+      meta: { approvalId },
+    });
+
+    assert.equal(status, 403);
+    const j = json as Record<string, unknown>;
+    assert.equal(j["status"], "blocked");
+    assert.ok(
+      String(j["reason"]).toLowerCase().includes("reject"),
+      `response reason must mention reject; got: ${JSON.stringify(j)}`,
+    );
+    assert.equal(callCount, 0, "performer must NOT be called");
+
+    // Blocked receipt must be appended with the approvalId from the gate result
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.outcome, "blocked");
+    assert.equal(last.body.approvalId, approvalId, "blocked receipt must carry approvalId from gate result");
+
+    await close();
+  });
+
+  // S1-2: unhandled decision → 500 + error receipt
+  it("unhandled decision (type-cast invalid decision) → 500, error receipt appended", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const fakePerformer: Performer = async () => ({ done: true });
+    const performers: PerformerRegistry = { send_email: fakePerformer };
+
+    // Force an invalid decision via type cast — this bypasses TS exhaustiveness
+    const badPolicy: Policy = {
+      version: 1,
+      boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "bogus_decision" as unknown as "allow" },
+    };
+
+    const { baseUrl, close } = await startServer({
+      policy: badPolicy,
+      receipts,
+      client: null,
+      performers,
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postEgress(baseUrl, "send_email", {
+      payload: { to: "x@x.com", subject: "Hi", body: "Body" },
+    });
+
+    assert.equal(status, 500);
+    assert.ok(
+      String((json as Record<string, unknown>)["error"]).includes("internal_error"),
+      `response must mention internal_error, got: ${JSON.stringify(json)}`,
+    );
+
+    // A receipt must have been appended with outcome=error
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.outcome, "error", "unhandled decision must append error receipt");
+    const rMeta = last.body.meta as Record<string, unknown>;
+    assert.ok(
+      String(rMeta["error"]).includes("bogus_decision"),
+      `receipt meta.error must mention the unhandled value; got: ${JSON.stringify(rMeta)}`,
+    );
+
+    await close();
+  });
+
   // 404 on unknown routes
   it("unknown route → 404", async () => {
     const dir = tmpDir();

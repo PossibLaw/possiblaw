@@ -509,7 +509,7 @@ async function handleEgress(
               payloadSha256,
               agentId: meta.agentId,
               issueId: meta.issueId,
-              approvalId: meta.approvalId,
+              approvalId: gateResult.approvalId,
             });
             sendJson(res, 200, { decision: "human", result });
           } catch (err) {
@@ -523,7 +523,7 @@ async function handleEgress(
               payloadSha256,
               agentId: meta.agentId,
               issueId: meta.issueId,
-              approvalId: meta.approvalId,
+              approvalId: gateResult.approvalId,
               meta: { error: msg },
             });
             sendJson(res, 502, { error: msg });
@@ -541,7 +541,7 @@ async function handleEgress(
             payloadSha256,
             agentId: meta.agentId,
             issueId: meta.issueId,
-            approvalId: meta.approvalId ?? (gateResult as { reason: string; approvalId?: string }).approvalId,
+            approvalId: gateResult.approvalId,
             meta: { reason: gateResult.reason },
           });
           sendJson(res, 403, { status: "blocked", reason: gateResult.reason });
@@ -554,6 +554,18 @@ async function handleEgress(
     default: {
       // Should never reach here with a typed Decision
       const _exhaustive: never = decision;
+      receipts.append({
+        kind: "egress",
+        tool,
+        boundary,
+        decision: null,
+        outcome: "error",
+        payloadSha256,
+        agentId: meta.agentId,
+        issueId: meta.issueId,
+        approvalId: meta.approvalId,
+        meta: { error: `unhandled_decision: ${String(_exhaustive)}` },
+      });
       sendJson(res, 500, { error: "internal_error: unhandled decision" });
     }
   }

@@ -210,7 +210,7 @@ function makeUploadDocument(env: PerformerEnv, fetchImpl: typeof fetch): Perform
       return { id: data["id"] };
     }
 
-    throw new PerformerError(`invalid_payload: unknown destination ${String(destination)}`);
+    throw new PerformerError("invalid_payload: unknown destination");
   };
 }
 
@@ -297,6 +297,9 @@ function makeActionPackagePerformer(env: PerformerEnv): Performer {
     const fileName = `${safeTs}-${req.tool}.json`;
     const filePath = path.join(pkgDir, fileName);
 
+    // Intentional data minimization: approvalId, confidentiality, and entities are
+    // deliberately excluded from the action package meta — agentId + issueId are
+    // sufficient for a human executing the package offline.
     const pkg = {
       tool: req.tool,
       payload: req.payload,

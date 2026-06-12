@@ -258,7 +258,8 @@ describe("upload_document", () => {
       (err: unknown) => {
         assert.ok(err instanceof PerformerError);
         assert.ok(err.message.includes("invalid_payload"));
-        assert.ok(err.message.includes("dropbox"));
+        // Static message — payload value (destination) must NOT be echoed
+        assert.ok(!err.message.includes("dropbox"), `error must not echo payload value; got: ${(err as Error).message}`);
         return true;
       },
     );

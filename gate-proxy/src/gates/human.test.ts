@@ -136,7 +136,7 @@ describe("humanGate — first call without issueId", () => {
 // ---------------------------------------------------------------------------
 
 describe("humanGate — re-entry approved matching sha", () => {
-  it("returns approved when sha matches stored payload", async () => {
+  it("returns approved with approvalId when sha matches stored payload", async () => {
     const sha = "correct-sha-123";
     const { client } = makeClient({
       getApprovalResult: {
@@ -150,6 +150,8 @@ describe("humanGate — re-entry approved matching sha", () => {
     const result = await humanGate(client, req, "THIRD_PARTY_EGRESS", sha);
 
     assert.equal(result.status, "approved");
+    const r = result as Extract<HumanGateResult, { status: "approved" }>;
+    assert.equal(r.approvalId, "appr-reentry", "approved result must carry the approvalId from req.meta");
   });
 });
 
@@ -158,7 +160,7 @@ describe("humanGate — re-entry approved matching sha", () => {
 // ---------------------------------------------------------------------------
 
 describe("humanGate — re-entry approved mismatched sha", () => {
-  it("returns blocked with bait_and_switch_attempt when sha differs", async () => {
+  it("returns blocked with bait_and_switch_attempt when sha differs; approvalId carried on blocked result", async () => {
     const { client } = makeClient({
       getApprovalResult: {
         id: "appr-bait",
@@ -176,6 +178,7 @@ describe("humanGate — re-entry approved mismatched sha", () => {
       r.reason.includes("bait_and_switch_attempt"),
       `reason should include "bait_and_switch_attempt"; got: ${r.reason}`,
     );
+    assert.equal(r.approvalId, "appr-bait", "blocked result must carry approvalId from re-entry");
   });
 });
 
@@ -184,7 +187,7 @@ describe("humanGate — re-entry approved mismatched sha", () => {
 // ---------------------------------------------------------------------------
 
 describe("humanGate — re-entry rejected and revision_requested", () => {
-  it("rejected → blocked with human-rejected reason", async () => {
+  it("rejected → blocked with human-rejected reason; approvalId carried on blocked result", async () => {
     const { client } = makeClient({
       getApprovalResult: {
         id: "appr-rej",
@@ -199,9 +202,10 @@ describe("humanGate — re-entry rejected and revision_requested", () => {
     assert.equal(result.status, "blocked");
     const r = result as Extract<HumanGateResult, { status: "blocked" }>;
     assert.ok(r.reason.toLowerCase().includes("reject"), `reason should mention reject; got: ${r.reason}`);
+    assert.equal(r.approvalId, "appr-rej", "blocked result must carry approvalId from re-entry");
   });
 
-  it("revision_requested → blocked with revision reason distinct from rejected", async () => {
+  it("revision_requested → blocked with revision reason distinct from rejected; approvalId carried", async () => {
     const { client } = makeClient({
       getApprovalResult: {
         id: "appr-rev",
@@ -221,6 +225,7 @@ describe("humanGate — re-entry rejected and revision_requested", () => {
       !r.reason.toLowerCase().includes("reject"),
       `revision_requested reason must not say "reject"; got: ${r.reason}`,
     );
+    assert.equal(r.approvalId, "appr-rev", "blocked result must carry approvalId from re-entry");
   });
 });
 

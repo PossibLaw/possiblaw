@@ -18,8 +18,8 @@ import type { PaperclipClient } from "../paperclip-client.ts";
 
 export type HumanGateResult =
   | { status: "pending_approval"; approvalId: string; resumeHint: string }
-  | { status: "approved" }
-  | { status: "blocked"; reason: string };
+  | { status: "approved"; approvalId: string }
+  | { status: "blocked"; reason: string; approvalId?: string };
 
 const RESUME_HINT =
   "End your turn now. You will be woken when a human decides in the paperclip dashboard " +
@@ -44,23 +44,26 @@ export async function humanGate(
         if (storedSha !== payloadSha256) {
           return {
             status: "blocked",
+            approvalId: req.meta.approvalId,
             reason:
               `bait_and_switch_attempt: approval was granted for payload sha=${String(storedSha)} ` +
               `but re-entry presents sha=${payloadSha256}. These must be identical.`,
           };
         }
-        return { status: "approved" };
+        return { status: "approved", approvalId: req.meta.approvalId };
       }
 
       case "rejected":
         return {
           status: "blocked",
+          approvalId: req.meta.approvalId,
           reason: "A human rejected this egress request in the paperclip dashboard.",
         };
 
       case "revision_requested":
         return {
           status: "blocked",
+          approvalId: req.meta.approvalId,
           reason:
             "A human requested revision for this egress request. " +
             "Revise the payload and start a NEW gate pass (do not reuse this approvalId).",
