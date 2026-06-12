@@ -7,6 +7,44 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.21.0] — 2026-06-12 — Positioning reframe: lead with the trust pipeline
+
+### Changed
+
+- `README.md` rewritten to lead with the trust pipeline instead of the
+  catalog: agents do the work autonomously, six trust boundaries are gated
+  through the loopback Gate Proxy (the only credentialed egress path),
+  every gate decision lands in the hash-chained receipt log, and humans
+  decide at the boundaries — not on every step. Adds the "What's enforced
+  vs routed vs advisory" honesty table (structural egress gating /
+  gate-level privacy tier with measured-recall anonymizer / routed-not-
+  proxied primary-lane privacy / advisory citation verification with the
+  Phase 2 blocking roadmap) and the 2-minute "see the gates work" demo
+  (court-filing curl → 202 pending approval → dashboard approve →
+  re-entry 200 → `/receipts/verify`). Catalog numbers (175 agents /
+  171 skills / 34 teams) demoted to the supporting-cast section; stale
+  "169 skills" references corrected to 171; gate-proxy added to the
+  architecture diagram. Variants table, evals receipt, license, and
+  attribution preserved.
+- `docs/operator-walkthrough.md`: new intro frames the walkthrough
+  through the pipeline (launch → meet the gates → the catalog as parts);
+  the 2-minute gate demo added as the first hands-on step after launch,
+  including the payload-hash bait-and-switch property. The existing
+  "Gate Proxy (egress gates + receipts)" section stays as reference
+  detail.
+
+### Validation
+
+- Doc-only change. Every factual claim mapped to an in-repo source
+  (gate-proxy/src/server.ts, gates/human.ts, boundary.ts, connectors.ts,
+  receipts.ts, anonymize.test.ts — measured recall 100% on the 60-span
+  labeled fixture, 16/16 tests pass — gate-policy.yaml,
+  docs/known-limitations.md, docs/connectors-inventory.md). Counts
+  verified on disk: 175 AGENTS.md, 171 SKILL.md, 34 `-lead` agents,
+  3 projects. No servers started; no code paths touched.
+
+---
+
 ## [0.20.0] — 2026-06-12 — Gate proxy wired into the launcher: scrubbed server env, gated egress by default
 
 ### Added

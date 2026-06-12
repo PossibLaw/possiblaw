@@ -1,23 +1,55 @@
 # PossibLaw
 
-**Operating a legal business with AI — a proof-of-concept Agent Companies package for [paperclip](https://github.com/paperclipai/paperclip).**
+**A trust pipeline for operating a legal business with AI — built on the [paperclip](https://github.com/paperclipai/paperclip) control plane.**
 
 > **Regulated-work note:** The practice of law is regulated. To the extent an operator is practicing law with PossibLaw, the operator needs to involve a lawyer. PossibLaw is open-source tooling, not a legal-services provider.
-
-PossibLaw shows how legal-business agents, skills, projects, and starter matters can be packaged as a *layer* on top of paperclip, not a fork. The active implementation lives under `companies/legal-operations/`; the older `layer/` content remains historical source material for conversion. The upstream paperclip control plane is wired as a git submodule and is never modified.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![PoC](https://img.shields.io/badge/status-proof--of--concept-orange.svg)](#whats-not-in-this-poc)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
 [![paperclip layer](https://img.shields.io/badge/paperclip-layer%2C%20not%20a%20fork-lightgrey.svg)](FOUNDATION.md)
 
----
+Agents do the legal and business work autonomously. The product is the path that work travels: egress writes cross hard-gated trust boundaries, every gate decision lands in a tamper-evident receipt chain, and humans decide at the boundaries that matter — not on every step. PossibLaw ships this as a *layer* on the paperclip control plane (wired as a pinned git submodule, never modified), not a fork.
 
-## Current Direction
+## The trust pipeline
 
-Sprints 0-11 produced a standalone CLI runtime. That proved the content, but it duplicated Paperclip features that should stay in Paperclip: orchestration, UI, auth, audit trail, approvals, budgets, adapters, and task state.
+What a firm actually gets:
 
-The active path is now the Paperclip-native package under `companies/legal-operations/`. The branded one-command launcher is the only entrypoint operators need:
+- **Hard-gated egress (structural).** Every egress write — email send, document upload, e-signature, payment, court filing, external delete — routes through a loopback Gate Proxy (`gate-proxy/`, default `http://127.0.0.1:3801`). Egress credentials exist **only** in the proxy process; the launcher scrubs them from the agent runtime, so a misbehaving agent's direct vendor call fails for want of credentials. Policy is the firm's to tune, per trust boundary, in [`companies/legal-operations/gate-policy.yaml`](companies/legal-operations/gate-policy.yaml): `allow` is pass-through + receipt; `anonymize` / `human` / `block` are hard gates.
+- **Human gates are paperclip-native.** Six boundaries are classified (`THIRD_PARTY_EGRESS`, `CONFIDENTIAL_TO_CLOUD`, `COURT_FILING`, `SIGNATURE`, `MONEY_MOVEMENT`, `IRREVERSIBLE_EXTERNAL_OP`); court filings, signatures, payments, and irreversible external ops default to `human`. The gate opens an approval, the agent stands down, a human decides in the dashboard, and the agent is woken on approve. Approvals are payload-hash-bound — an approval for payload X never authorizes payload Y.
+- **Receipts for everything.** Every gate decision — performed, pending, blocked, error — appends to a SHA-256 hash-chained, append-only receipt log. `GET /receipts/verify` checks the chain; `POST /receipts/anchor` writes the chain head into a paperclip comment. Payloads never appear in receipts — only their sha256.
+- **The agents are the interchangeable parts.** 175 atomic agents / 171 skills across 34 teams do the work inside the pipeline, with ten model variants that swap providers per lane without touching the package. The catalog is the supporting cast; the pipeline is the product.
+
+## What's enforced vs routed vs advisory
+
+| Surface | Status today | Mechanism |
+|---|---|---|
+| Egress writes (email, upload, signature, payment, court filing, external delete) | **Enforced — structural** | Gate Proxy holds the only egress credentials; the launcher scrubs them from the server/agent env; per-boundary policy + hash-chained receipts on every path |
+| Privacy tier — confidential/privileged payloads sent through the gate | **Enforced at the gate** | Deterministic masker over caller-supplied matter entities + pattern classes, recall measured in the test suite (100% on its labeled fixture; gated at ≥95% with zero entity leaks; fail-closed to block when it cannot vouch, e.g. no entity list) — or routed to a local model when one is configured |
+| Privacy tier — agents' own primary-lane model calls | **Routed, not proxied** | A routing choice: local-model variants per lane (`ollama`, `llamacpp` in `variants.yaml`) plus the advisory `privacy-encoder` skill. Primary-lane calls do not pass the proxy. |
+| Citation verification | **Advisory today → blocking in Phase 2** | The dedicated `legal-citation-checker` agent executes `citation-verification-checklist`: character-by-character quote-fidelity comparison with side-by-side discrepancy tables. LLM-executed per those rules, not a deterministic diff, and not yet a gate. Phase 2 wires it as a blocking pre-condition on court/third-party egress. |
+
+Sharp edges are documented, not hidden — see [docs/known-limitations.md](docs/known-limitations.md): `local_trusted` dev instances accept unauthenticated local board calls (the human gate binds agents via credential isolation; production deployments with auth enabled get the structural gate too); the receipt chain assumes a single writer, and same-user tampering is caught only against an externally anchored head; `share_external` writes (HubSpot, Linear, Clio, iManage, NetDocuments) are visibly refused in v1 rather than silently credentialed; Slack/Teams notification webhooks (operator-configured, no matter content) remain direct in v1. Which connector takes which path: [docs/connectors-inventory.md](docs/connectors-inventory.md).
+
+## See the gates work (2 minutes)
+
+```bash
+./bin/possiblaw    # one command: paperclip server + package import + gate proxy
+
+# simulate an agent attempting a court filing:
+curl -s -X POST http://127.0.0.1:3801/egress/file_court_document \
+  -H 'content-type: application/json' \
+  -d '{"payload":{"caption":"Acme v. Globex","court":"D. Del."},"meta":{"confidentiality":"standard"}}'
+# → 202 pending_approval + an approval in the paperclip dashboard. Approve it
+#   there, then re-run the same curl with "approvalId":"<id>" added to meta
+#   → 200, action package written to ~/.possiblaw/action-packages/ for a
+#   human to execute (no court API is called in v1).
+
+curl -s http://127.0.0.1:3801/receipts/verify
+# → {"ok":true,"length":N,"head":"..."} — the tamper-evident trail
+```
+
+## Quickstart
 
 ```bash
 git clone https://github.com/PossibLaw/possiblaw && cd possiblaw
@@ -25,8 +57,25 @@ git submodule update --init --recursive
 pnpm -C paperclip install
 ./bin/possiblaw
 # answer three prompts (org name, mission, variant)
-# → browser opens to your Paperclip dashboard, 175 agents already loaded
+# → browser opens to your paperclip dashboard, agents loaded, gate proxy running
 ```
+
+Add `--variant <slug>` to skip the interactive prompt, `--list-variants` to see the options, `--dry-run` to preview without writing. Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); package layout: [docs/paperclip-package.md](docs/paperclip-package.md); sharp edges: [docs/known-limitations.md](docs/known-limitations.md).
+
+## The catalog (the interchangeable parts)
+
+| Capability | Detail |
+|---|---|
+| **Org chart** | Chief of Staff + Chief Counsel + 34 leads — 28 legal practices (commercial, employment, IP, privacy, litigation, corporate, regulatory, research, tax, real estate, M&A, banking & finance, securities, restructuring, immigration, healthcare, antitrust, trade compliance, insurance, construction, government contracts, environmental/ESG, trusts & estates, family law, investigations, AI governance, advertising, benefits) and 6 business functions (BD, ops, finance, marketing, admin, legal ops) — + 139 specialists (incl. meta-reviewers — risk-spotter, debate-judge, reconciler — and a Capability Builder, operator-review gated) — **175 agents total**; full roster in [docs/agent-catalog.md](docs/agent-catalog.md) |
+| **Skills** | 171: contract drafting and review playbooks (NDA, MSA, SOW, amendments, SaaS, renewals, OSS compliance), per-practice playbooks and checklists across all 28 legal practices, firm-business skills (prebill review, trust accounting, conflicts screening, engagement letters, CLE tracking, client alerts, competitive intel), matter intake, missing-info gate, privacy encoder, Slack/Teams notifications, Markdown/DOCX output, capability authoring, connector descriptors (research, doc stores, e-signature, CRM, billing, practice management, email, drive) |
+| **Projects & tasks** | NDA Matters, Commercial Reviews, Eval Results; starter issues + a recurring renewal scan |
+| **Model lanes** | Per-agent `modelLane` metadata (primary / routing / drafting / review / extractive) — variants map each lane to the right model automatically |
+| **Team subsets** | `--teams litigation,commercial` (or presets `boutique` / `inhouse`) — import only the practices your firm runs; chiefs, meta-reviewers, and the skill closure come along automatically |
+| **Demos** | `--demo law-firm` / `inhouse-legal` / `biglaw-practice-group` — synthetic demo matters for a boutique firm, an in-house department, and a BigLaw practice group |
+| **Delivery** | `deliverables-courier` files finished work products to your own OneDrive/SharePoint, Google Drive, or Notion per an operator policy file — auto-file or on-request per work-product type, privacy-tier gated, local copy always retained |
+| **Theme** | `--theme possiblaw` (default) — light-first dashboard with a warm launch palette; `light` / `dark` also available |
+
+## Model variants
 
 The launcher picks the model-provider variant at import time. Ten are shipped:
 
@@ -48,23 +97,6 @@ check OpenRouter pins against its public catalog), so "you don't have access
 to this model" surfaces before import, not mid-matter (`--skip-model-probe`
 to bypass).
 
-Add `--variant <slug>` to skip the interactive prompt, or `--list-variants` to see them. Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); package layout: [docs/paperclip-package.md](docs/paperclip-package.md); sharp edges: [docs/known-limitations.md](docs/known-limitations.md).
-
-## What's in here
-
-| Capability | Detail |
-|---|---|
-| **Org chart** | Chief of Staff + Chief Counsel + 34 leads — 28 legal practices (commercial, employment, IP, privacy, litigation, corporate, regulatory, research, tax, real estate, M&A, banking & finance, securities, restructuring, immigration, healthcare, antitrust, trade compliance, insurance, construction, government contracts, environmental/ESG, trusts & estates, family law, investigations, AI governance, advertising, benefits) and 6 business functions (BD, ops, finance, marketing, admin, legal ops) — + 139 specialists (incl. meta-reviewers — risk-spotter, debate-judge, reconciler — and a Capability Builder, operator-review gated) — **175 agents total**; full roster in [docs/agent-catalog.md](docs/agent-catalog.md) |
-| **Skills** | 169: contract drafting and review playbooks (NDA, MSA, SOW, amendments, SaaS, renewals, OSS compliance), per-practice playbooks and checklists across all 28 legal practices (discovery, settlements, M&A diligence, disclosure schedules, leases, credit agreements, visa petitions, BAAs, sanctions screening, lien notices, wills and trusts, parenting plans, interview memos, ad claims, ERISA, and more), firm-business skills (prebill review, trust accounting, conflicts screening, engagement letters, CLE tracking, client alerts, competitive intel), matter intake, missing-info gate, privacy encoder, Slack/Teams notifications, Markdown/DOCX output, capability authoring (skill/agent/plugin), 18 connector descriptors (research, doc stores, e-signature, CRM, billing, practice management, email, drive) |
-| **Projects & tasks** | NDA Matters, Commercial Reviews, Eval Results; starter issues + a recurring renewal scan |
-| **Model lanes** | Per-agent `modelLane` metadata (primary / routing / drafting / review / extractive) — variants map each lane to the right model automatically |
-| **Variants** | `codex`, `claude`, `gemini`, `ollama`, `llamacpp`, `opencode`, `openrouter` (+ `-api` twins) — selected at import time by the launcher |
-| **Demos** | `--demo law-firm` / `inhouse-legal` / `biglaw-practice-group` — synthetic demo matters for a boutique firm, an in-house department, and a BigLaw practice group |
-| **Team subsets** | `--teams litigation,commercial` (or presets `boutique` / `inhouse`) — import only the practices your firm runs; chiefs, meta-reviewers, and the skill closure come along automatically |
-| **Delivery** | `deliverables-courier` files finished work products to your own OneDrive/SharePoint, Google Drive, or Notion per an operator policy file — auto-file or on-request per work-product type, privacy-tier gated, local copy always retained |
-| **Theme** | `--theme possiblaw` (default) — light-first dashboard with a warm launch palette; `light` / `dark` also available |
-| **Privacy posture** | Privacy-encoder skill blocks confidential/privileged matters unless a local model (Ollama or llama.cpp) is reachable |
-
 ---
 
 ## Architecture in 90 seconds
@@ -72,19 +104,27 @@ Add `--variant <slug>` to skip the interactive prompt, or `--list-variants` to s
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  bin/possiblaw   (one-command launcher: onboard,         │
-│                   variant select, package import)        │
+│                   variant select, package import,        │
+│                   egress-credential scrub)               │
+├─────────────────────────────────────────────────────────┤
+│  gate-proxy/    (loopback egress gate: per-boundary      │
+│                  policy, human approvals, anonymizer,    │
+│                  hash-chained receipts — holds the ONLY  │
+│                  egress credentials)                     │
 ├─────────────────────────────────────────────────────────┤
 │  companies/legal-operations/   (the PossibLaw package)   │
 │  ├── COMPANY.md + .paperclip.yaml + variants.yaml        │
+│  ├── gate-policy.yaml (per-firm trust-boundary policy)   │
 │  ├── agents/    (175 AGENTS.md — org chart + routing)    │
-│  ├── skills/    (169 SKILL.md — playbooks, gates,        │
+│  ├── skills/    (171 SKILL.md — playbooks, gates,        │
 │  │               outputs, notifications, connectors)     │
 │  ├── projects/  (NDA matters, commercial reviews,        │
 │  │               eval results + starter tasks)           │
 │  └── evals/     (eval convention + cases)                │
 ├─────────────────────────────────────────────────────────┤
 │  paperclip/  (git submodule — never modified; owns UI,   │
-│               auth, orchestration, budgets, adapters)    │
+│               auth, orchestration, budgets, adapters,    │
+│               approvals)                                 │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -128,11 +168,11 @@ Historical receipt from the retired standalone harness (2026-05-21): CUAD × cla
 
 | Guide | What it covers |
 |---|---|
-| [docs/operator-walkthrough.md](docs/operator-walkthrough.md) | Fresh Paperclip instance, package import, and starter NDA demo |
+| [docs/operator-walkthrough.md](docs/operator-walkthrough.md) | Fresh Paperclip instance, package import, the gate demo, and starter NDA matter |
 | [docs/agent-catalog.md](docs/agent-catalog.md) | The full catalog: every team, agent, and skill in the package |
 | [docs/paperclip-package.md](docs/paperclip-package.md) | Current Paperclip-native package path and import instructions |
-| [docs/known-limitations.md](docs/known-limitations.md) | Sharp edges: importer non-atomicity, sidebar scale, Ollama quality caveat |
-| [docs/connectors-inventory.md](docs/connectors-inventory.md) | All 14 connectors + 14 deferred v1 targets |
+| [docs/known-limitations.md](docs/known-limitations.md) | Sharp edges: gate-proxy trust limits, importer non-atomicity, sidebar scale, Ollama quality caveat |
+| [docs/connectors-inventory.md](docs/connectors-inventory.md) | Every connector and which egress path it takes through the gate |
 | [docs/privacy-filter.md](docs/privacy-filter.md) | Threat model, token format, adversarial test index |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architecture decision log |
 | [FOUNDATION.md](FOUNDATION.md) | How the paperclip submodule is wired; extension-point inventory |

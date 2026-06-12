@@ -1,10 +1,33 @@
 # Operator Walkthrough
 
-This is the repeatable path for proving PossibLaw as a Paperclip package.
+This is the repeatable path for proving PossibLaw as a trust pipeline. The
+shape of the walkthrough mirrors the shape of the product: launch the
+pipeline, watch a gate stop an egress action and hand the decision to you,
+then put the agent catalog to work inside it.
+
+One command starts everything — the paperclip server, the package import,
+and the Gate Proxy that every egress write (email send, document upload,
+e-signature, payment, court filing, external delete) must pass through.
+Egress credentials live only in the proxy process; the launcher scrubs them
+from the agent runtime, so agents cannot call vendors directly. Every gate
+decision appends to a hash-chained receipt log you can verify with one curl.
+The first hands-on step below exercises exactly that loop: a simulated court
+filing pauses at the human gate, you approve it in the dashboard, and the
+receipt trail shows the whole exchange.
+
+The 175 agents, 171 skills, and 34 teams are the interchangeable parts
+inside that pipeline. The rest of this walkthrough — variants, demo
+profiles, team subsets, delivery, the NDA matter — is how you choose which
+parts to run and watch them work.
 
 ## Goal
 
-Start a clean Paperclip instance, import `companies/legal-operations`, open the localhost UI, and run the starter NDA matter through the imported company. The package now ships an expanded org chart, missing-info gates, notification skills, output-to-disk skills, and a reversible privacy encoder, in addition to the NDA vertical slice.
+Start a clean Paperclip instance, import `companies/legal-operations`, see
+the egress gates and receipts work first-hand, open the localhost UI, and
+run the starter NDA matter through the imported company. The package ships
+an expanded org chart, missing-info gates, notification skills,
+output-to-disk skills, and a reversible privacy encoder, in addition to the
+NDA vertical slice.
 
 ## Prerequisites
 
@@ -107,6 +130,48 @@ Common flags:
 --gate-port <n>       Override the gate-proxy port (default 3801)
 --no-gate-proxy       Demo-only: skip the gate proxy (egress runs ungated)
 ```
+
+## See the gates work (2 minutes)
+
+Do this first, right after the launcher prints the dashboard URL. It proves
+the trust pipeline end to end: a hard gate, a human decision, and a
+verifiable receipt trail.
+
+```bash
+# simulate an agent attempting a court filing:
+curl -s -X POST http://127.0.0.1:3801/egress/file_court_document \
+  -H 'content-type: application/json' \
+  -d '{"payload":{"caption":"Acme v. Globex","court":"D. Del."},"meta":{"confidentiality":"standard"}}'
+```
+
+The response is `202` with `"status":"pending_approval"` and an
+`approvalId` — `COURT_FILING` is a `human` boundary in
+`companies/legal-operations/gate-policy.yaml`, so the gate opened an
+approval and is waiting for you. Open the paperclip dashboard, find the
+pending approval, and approve it. Then re-run the **same** curl with the
+approval attached:
+
+```bash
+curl -s -X POST http://127.0.0.1:3801/egress/file_court_document \
+  -H 'content-type: application/json' \
+  -d '{"payload":{"caption":"Acme v. Globex","court":"D. Del."},"meta":{"confidentiality":"standard","approvalId":"<id>"}}'
+```
+
+Now it returns `200`: the proxy wrote an action package to
+`~/.possiblaw/action-packages/` for a human to execute (no court API is
+called in v1). The approval is bound to the payload's sha256 — change the
+payload and re-use the same `approvalId`, and the gate blocks it as a
+bait-and-switch. Finally, verify the receipt trail:
+
+```bash
+curl -s http://127.0.0.1:3801/receipts/verify
+# → {"ok":true,"length":N,"head":"..."} — every gate decision, hash-chained
+```
+
+That loop — agent acts, gate intercepts, human decides, receipt lands — is
+the product. Reference detail for the proxy (credential scrub, ports,
+receipts path, flags) is in "The Gate Proxy (egress gates + receipts)"
+below.
 
 ## Variant setup
 
