@@ -256,4 +256,30 @@ describe("poller", () => {
     assert.equal(last.body.outcome, "blocked");
     assert.equal(last.body.approvalId, "E1");
   });
+
+  // minor: per-approval isolation — first getApproval throws → second still processed
+  it("minor: first approval getApproval throws → second approval still processed", async () => {
+    const dir = tmpDir();
+    const chain = new ReceiptChain(path.join(dir, "r.jsonl"));
+
+    chain.append(mkBody({ outcome: "pending", approvalId: "FAIL1", tool: "sign_document" }));
+    chain.append(mkBody({ outcome: "pending", approvalId: "OK2", issueId: "I_OK2", tool: "send_payment" }));
+
+    const comments: Array<{ issueId: string; body: string }> = [];
+    const approvals = new Map<string, ApprovalRecord>([
+      // FAIL1 is not in the map → getApproval will throw
+      ["OK2", { id: "OK2", status: "rejected", payload: {} }],
+    ]);
+    const client = makeFakeClient(approvals, comments);
+
+    await pollOnce(chain, client);
+
+    // OK2 must still be resolved even though FAIL1 threw
+    const entries = chain.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.approvalId, "OK2", "second approval must be processed despite first throwing");
+    assert.equal(last.body.outcome, "blocked");
+    assert.equal(comments.length, 1, "comment for OK2 must be posted");
+    assert.equal(comments[0].issueId, "I_OK2");
+  });
 });

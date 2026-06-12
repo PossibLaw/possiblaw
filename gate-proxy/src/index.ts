@@ -108,3 +108,15 @@ function shutdown(): void {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+// C2 (d): keep the process alive on unhandled rejections and uncaught exceptions.
+// Log one sanitized line (no payloads) and continue — the server stays up.
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  // Safety: only log the message, never any payload or stack that could contain it
+  log(`unhandled_rejection: ${msg.slice(0, 200)}`);
+});
+
+process.on("uncaughtException", (err) => {
+  log(`uncaught_exception: ${err.message.slice(0, 200)}`);
+});

@@ -96,7 +96,7 @@ export class PaperclipClient {
       this.baseUrl,
       this.apiKey,
       "POST",
-      `/api/companies/${this.companyId}/approvals`,
+      `/api/companies/${encodeURIComponent(this.companyId)}/approvals`,
       {
         type: "request_board_approval", // hardcoded — never a caller parameter
         ...(input.requestedByAgentId !== undefined
@@ -109,12 +109,13 @@ export class PaperclipClient {
   }
 
   async getApproval(id: string): Promise<ApprovalRecord> {
+    // I1 (b): encodeURIComponent every interpolated path segment
     return doRequest<ApprovalRecord>(
       this.fetchImpl,
       this.baseUrl,
       this.apiKey,
       "GET",
-      `/api/approvals/${id}`,
+      `/api/approvals/${encodeURIComponent(id)}`,
     );
   }
 
@@ -124,7 +125,7 @@ export class PaperclipClient {
       this.baseUrl,
       this.apiKey,
       "POST",
-      `/api/issues/${issueId}/comments`,
+      `/api/issues/${encodeURIComponent(issueId)}/comments`,
       { body },
     );
   }
@@ -135,7 +136,7 @@ export class PaperclipClient {
       this.baseUrl,
       this.apiKey,
       "POST",
-      `/api/issues/${issueId}/approvals`,
+      `/api/issues/${encodeURIComponent(issueId)}/approvals`,
       { approvalId },
     );
   }

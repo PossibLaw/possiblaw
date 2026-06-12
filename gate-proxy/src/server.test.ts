@@ -862,4 +862,303 @@ describe("gate server", () => {
 
     await close();
   });
+
+  // -------------------------------------------------------------------------
+  // I4 regression — prototype-named tools via server → 403 + blocked receipt
+  // -------------------------------------------------------------------------
+  it("I4: __proto__ tool via server → 403 blocked receipt", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const protoTools = ["__proto__", "toString", "valueOf", "constructor"];
+    for (const tool of protoTools) {
+      const { status, json } = await postEgress(baseUrl, tool, { payload: {} });
+      assert.equal(status, 403, `"${tool}" should → 403`);
+      assert.ok(
+        String((json as Record<string, unknown>)["error"]).includes("unknown_tool") ||
+        String((json as Record<string, unknown>)["error"]).includes("not_found"),
+        `response for "${tool}" must mention unknown_tool or not_found`,
+      );
+    }
+
+    await close();
+  });
+
+  // -------------------------------------------------------------------------
+  // I1 regression — confused-deputy URL smuggling via meta.approvalId
+  // -------------------------------------------------------------------------
+  it("I1: meta.approvalId with path traversal → 400, no performer call", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    let callCount = 0;
+    const fakePerformer: Performer = async () => { callCount++; return {}; };
+
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: makeFakeClient(),
+      performers: { file_court_document: fakePerformer },
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postEgress(baseUrl, "file_court_document", {
+      payload: { title: "Motion" },
+      meta: { approvalId: "../../companies/x/approvals/y" },
+    });
+
+    assert.equal(status, 400, `expected 400 for path-traversal approvalId, got ${status}`);
+    assert.ok(
+      String((json as Record<string, unknown>)["error"]).includes("approvalId"),
+      `error should mention approvalId: ${JSON.stringify(json)}`,
+    );
+    assert.equal(callCount, 0, "performer must NOT be called");
+
+    await close();
+  });
+
+  it("I1: meta.issueId with path traversal → 400, no performer call", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    let callCount = 0;
+    const fakePerformer: Performer = async () => { callCount++; return {}; };
+
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: { send_email: fakePerformer },
+      localModelAvailable: false,
+    });
+
+    const { status } = await postEgress(baseUrl, "send_email", {
+      payload: { to: "a@b.com", subject: "Hi", body: "ok" },
+      meta: { issueId: "../../admin/secret" },
+    });
+
+    assert.equal(status, 400);
+    assert.equal(callCount, 0);
+
+    await close();
+  });
+
+  // -------------------------------------------------------------------------
+  // I2 regression — body size cap → 413
+  // -------------------------------------------------------------------------
+  it("I2: >1MB body → 413 response is received", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    // Build a body slightly over 1MB
+    const bigBody = "x".repeat(1_100_000);
+    const res = await fetch(`${baseUrl}/egress/send_email`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: bigBody,
+    });
+
+    assert.equal(res.status, 413, "expected 413 for oversized body");
+
+    await close();
+  });
+
+  // -------------------------------------------------------------------------
+  // I2 (c) regression — 257 entities → 400
+  // -------------------------------------------------------------------------
+  it("I2(c): 257 entities in meta → 400", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const tooManyEntities = Array.from({ length: 257 }, (_, i) => `Entity${i}`);
+    const { status } = await postEgress(baseUrl, "send_email", {
+      payload: { to: "a@b.com", subject: "Hi", body: "ok" },
+      meta: { entities: tooManyEntities },
+    });
+
+    assert.equal(status, 400, `expected 400 for 257 entities, got ${status}`);
+
+    await close();
+  });
+
+  // -------------------------------------------------------------------------
+  // I5 regression — claimedConfidentiality in allow receipt
+  // -------------------------------------------------------------------------
+  it("I5: allow receipt includes claimedConfidentiality", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const fakePerformer: Performer = async () => ({ id: "ok" });
+
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: { send_email: fakePerformer },
+      localModelAvailable: false,
+    });
+
+    await postEgress(baseUrl, "send_email", {
+      payload: { to: "a@b.com", subject: "Hi", body: "ok" },
+      meta: { confidentiality: "standard" },
+    });
+
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.outcome, "performed");
+    const meta = last.body.meta as Record<string, unknown>;
+    assert.equal(
+      meta["claimedConfidentiality"],
+      "standard",
+      "allow receipt must carry claimedConfidentiality",
+    );
+
+    await close();
+  });
+
+  // -------------------------------------------------------------------------
+  // NEW FUNCTIONAL — deanonymize model response
+  // -------------------------------------------------------------------------
+  it("NEW FUNCTIONAL: anonymize path — performer echoes ENTITY_A → response contains original entity; receipts file free of entity", async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "r.jsonl");
+    const receipts = new ReceiptChain(filePath);
+
+    // Performer echoes the masked token back
+    const fakePerformer: Performer = async (req) => {
+      const maskedPrompt = (req.payload as Record<string, unknown>)["prompt"] as string;
+      // Extract ENTITY_A from masked prompt and echo it back in content
+      return { content: maskedPrompt.replace(/(\bENTITY_A\b)/g, "$1 says hi") };
+    };
+    const performers: PerformerRegistry = { query_external_model: fakePerformer };
+
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers,
+      localModelAvailable: false,
+    });
+
+    const originalEntity = "Acme Corp";
+    const payload = { prompt: `${originalEntity} needs advice on merger strategy.` };
+    const { status, json } = await postEgress(baseUrl, "query_external_model", {
+      payload,
+      meta: { confidentiality: "privileged", entities: [originalEntity] },
+    });
+
+    assert.equal(status, 200);
+    const j = json as Record<string, unknown>;
+    const result = j["result"] as Record<string, unknown>;
+
+    // Response content must contain the original entity (deanonymized)
+    assert.ok(
+      typeof result["content"] === "string" && (result["content"] as string).includes(originalEntity),
+      `response content must contain original entity "${originalEntity}"; got: ${JSON.stringify(result["content"])}`,
+    );
+    // Response must NOT contain the token
+    assert.ok(
+      !(result["content"] as string).includes("ENTITY_A"),
+      `response content must not contain ENTITY_A token; got: ${JSON.stringify(result["content"])}`,
+    );
+
+    // Receipts file must still be free of the entity
+    const fileContents = fs.readFileSync(filePath, "utf8");
+    assert.ok(
+      !fileContents.includes(originalEntity),
+      `receipts file must not contain "${originalEntity}"`,
+    );
+
+    // Receipt outcome must be anonymized_performed
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.outcome, "anonymized_performed");
+
+    await close();
+  });
+
+  // -------------------------------------------------------------------------
+  // C2 regression — corrupt receipts file + POST /egress → 500 response received, process alive
+  // -------------------------------------------------------------------------
+  it("C2: corrupt receipts file tail + POST /egress/send_email → response IS received (500), server still up", async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "r.jsonl");
+    // Write a valid entry then corrupt the tail
+    const receipts = new ReceiptChain(filePath);
+    // Corrupt the file so append() will throw ReceiptChainCorruptError
+    fs.writeFileSync(filePath, '{"seq":1,"ts":"x","prevHash":"GENESIS","hash":"badhash","body":{}}\nNOT_JSON_TAIL\n', "utf8");
+
+    const fakePerformer: Performer = async () => ({ id: "ok" });
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: { send_email: fakePerformer },
+      localModelAvailable: false,
+    });
+
+    // POST should receive a response (500) — not a connection crash
+    const res = await fetch(`${baseUrl}/egress/send_email`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payload: { to: "a@b.com", subject: "Hi", body: "ok" } }),
+    });
+
+    assert.ok(
+      res.status === 500 || res.status === 400 || res.status === 502,
+      `expected an HTTP response (not a crash), got ${res.status}`,
+    );
+
+    // Server still up — can serve another request
+    const healthRes = await fetch(`${baseUrl}/health`);
+    assert.ok(
+      healthRes.status === 200 || healthRes.status === 503,
+      "server must still respond to /health after corrupt-chain error",
+    );
+
+    await close();
+  });
+
+  // minor — meta must be a plain object
+  it("minor: meta as array → 400", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const res = await fetch(`${baseUrl}/egress/send_email`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payload: { to: "a@b.com", subject: "Hi", body: "ok" }, meta: ["bad"] }),
+    });
+
+    assert.equal(res.status, 400);
+    const j = await res.json() as Record<string, unknown>;
+    assert.ok(String(j["error"]).includes("meta"), `error must mention meta: ${JSON.stringify(j)}`);
+
+    await close();
+  });
 });

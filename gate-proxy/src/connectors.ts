@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import crypto from "node:crypto";
 import type { EgressRequest } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -68,6 +69,14 @@ function makeSendEmail(env: PerformerEnv, fetchImpl: typeof fetch): Performer {
       throw new PerformerError("invalid_payload: send_email requires to/subject/body");
     }
 
+    // I3: reject header fields containing CRLF to prevent header injection
+    if (typeof to === "string" && /[\r\n]/.test(to)) {
+      throw new PerformerError("invalid_payload: header fields must not contain line breaks");
+    }
+    if (typeof subject === "string" && /[\r\n]/.test(subject)) {
+      throw new PerformerError("invalid_payload: header fields must not contain line breaks");
+    }
+
     // Build minimal RFC-2822 message
     const rfc2822 = `To: ${to}\r\nSubject: ${subject}\r\n\r\n${body}`;
     const raw = base64url(Buffer.from(rfc2822, "utf8"));
@@ -111,7 +120,8 @@ function makeUploadDocument(env: PerformerEnv, fetchImpl: typeof fetch): Perform
         throw new PerformerError("invalid_payload: upload_document onedrive requires driveId and parentItemId");
       }
 
-      const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${parentItemId}:/${name}:/content`;
+      // minor: encodeURIComponent on agent-supplied path segments
+      const url = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(parentItemId)}:/${encodeURIComponent(name)}:/content`;
       const res = await fetchImpl(url, {
         method: "PUT",
         headers: {
@@ -135,9 +145,13 @@ function makeUploadDocument(env: PerformerEnv, fetchImpl: typeof fetch): Perform
       const name = p["name"] as string;
       const content = p["content"] as string;
 
-      // Multipart upload: metadata part + media part
-      const boundary = "gdrive_multipart_boundary";
+      // minor: random boundary per call (crypto.randomUUID); check content doesn't contain it
+      const boundary = crypto.randomUUID().replace(/-/g, "");
       const metadata = JSON.stringify({ name });
+      if (content.includes(boundary)) {
+        // Astronomically unlikely but guard per spec
+        throw new PerformerError("invalid_payload: content conflicts with multipart boundary");
+      }
       const multipartBody = [
         `--${boundary}`,
         "Content-Type: application/json; charset=UTF-8",
@@ -290,7 +304,8 @@ const DEFAULT_ACTION_PACKAGE_DIR = path.join(os.homedir(), ".possiblaw", "action
 function makeActionPackagePerformer(env: PerformerEnv): Performer {
   return async (req, _opts) => {
     const pkgDir = env.GATE_ACTION_PACKAGE_DIR ?? DEFAULT_ACTION_PACKAGE_DIR;
-    fs.mkdirSync(pkgDir, { recursive: true });
+    // minor: create directory with restricted permissions (0o700)
+    fs.mkdirSync(pkgDir, { recursive: true, mode: 0o700 });
 
     const createdAt = new Date().toISOString();
     const safeTs = createdAt.replace(/[:.]/g, "-");
@@ -306,7 +321,8 @@ function makeActionPackagePerformer(env: PerformerEnv): Performer {
       meta: { agentId: req.meta.agentId, issueId: req.meta.issueId },
       createdAt,
     };
-    fs.writeFileSync(filePath, JSON.stringify(pkg, null, 2), "utf8");
+    // minor: write with restricted permissions (0o600)
+    fs.writeFileSync(filePath, JSON.stringify(pkg, null, 2), { encoding: "utf8", mode: 0o600 });
 
     return {
       actionPackage: filePath,

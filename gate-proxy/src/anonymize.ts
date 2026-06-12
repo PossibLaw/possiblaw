@@ -35,8 +35,9 @@ const PATTERN_CLASSES: ReadonlyArray<{ prefix: string; re: RegExp }> = [
   },
   {
     prefix: "EMAIL",
-    // Standard email local@domain.tld
-    re: /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g,
+    // I2 (b): linear-safe bounded form — no nested unbounded quantifiers.
+    // local: up to 64 chars of safe set; domain: 1-8 labels of 1-63 chars; TLD: 2-24 chars.
+    re: /\b[A-Za-z0-9._%+\-]{1,64}@(?:[A-Za-z0-9\-]{1,63}\.){1,8}[A-Za-z]{2,24}\b/g,
   },
   {
     prefix: "PHONE",
@@ -96,9 +97,11 @@ function patternToken(prefix: string, index: number): string {
  * An empty entities array trivially returns true.
  */
 export function checkCoverage(masked: string, entities: string[]): boolean {
-  const lower = masked.toLowerCase();
+  // C1: normalize both sides to NFC so NFD-encoded text (e.g. macOS filesystem
+  // strings) does not slip past NFC entities.
+  const lower = masked.normalize("NFC").toLowerCase();
   for (const entity of entities) {
-    if (lower.includes(entity.toLowerCase())) {
+    if (lower.includes(entity.normalize("NFC").toLowerCase())) {
       return false;
     }
   }
@@ -109,18 +112,29 @@ export function checkCoverage(masked: string, entities: string[]): boolean {
 // anonymize
 // ---------------------------------------------------------------------------
 
+// I2 (c): cap on entities array and individual entity length
+const MAX_ENTITIES = 256;
+const MAX_ENTITY_LENGTH = 256;
+
 export function anonymize(text: string, entities: string[]): AnonymizeResult {
+  // C1: normalize text to NFC at entry so NFD-encoded strings (e.g. from macOS
+  // filesystem) are handled identically to NFC entities.
+  // I2 (c): enforce entity list caps (callers that hit these return confidence=0)
+  const cappedEntities = entities.slice(0, MAX_ENTITIES).map((e) =>
+    e.slice(0, MAX_ENTITY_LENGTH).normalize("NFC"),
+  );
+
   // map: token → original string
   const map: Record<string, string> = {};
 
   // Working copy we'll progressively replace
-  let masked = text;
+  let masked = text.normalize("NFC");
 
   // ---- Step 1: mask entities (longest-first to prevent partial double-masking) ----
 
   // Deduplicate while preserving input order, then sort longest-first.
   const seenEntities = new Map<string, string>(); // lower → original (first occurrence)
-  for (const e of entities) {
+  for (const e of cappedEntities) {
     const lk = e.toLowerCase();
     if (!seenEntities.has(lk)) {
       seenEntities.set(lk, e);
@@ -130,7 +144,7 @@ export function anonymize(text: string, entities: string[]): AnonymizeResult {
   // Assign tokens in INPUT ORDER (first occurrence in the original array).
   const entityTokenMap = new Map<string, string>(); // lower → token
   let tokenIndex = 0;
-  for (const e of entities) {
+  for (const e of cappedEntities) {
     const lk = e.toLowerCase();
     if (!entityTokenMap.has(lk)) {
       const tok = entityToken(tokenIndex++);
@@ -198,9 +212,9 @@ export function anonymize(text: string, entities: string[]): AnonymizeResult {
 
   // ---- Step 3: compute confidence ----
   let confidence: 0 | 1;
-  if (entities.length === 0) {
+  if (cappedEntities.length === 0) {
     confidence = 0;
-  } else if (checkCoverage(masked, entities)) {
+  } else if (checkCoverage(masked, cappedEntities)) {
     confidence = 1;
   } else {
     confidence = 0;

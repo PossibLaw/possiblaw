@@ -64,6 +64,10 @@ export function findUnresolvedApprovals(receipts: ReceiptChain): UnresolvedAppro
 // pollOnce
 // ---------------------------------------------------------------------------
 
+// minor: module-level reentrancy guard — overlapping calls no-op to avoid
+// double-processing the same unresolved approvals concurrently.
+let _pollInProgress = false;
+
 /**
  * For each unresolved approval:
  *   - getApproval → rejected | revision_requested →
@@ -72,41 +76,55 @@ export function findUnresolvedApprovals(receipts: ReceiptChain): UnresolvedAppro
  *         meta:{resolvedBy:"poller", approvalStatus})
  *       so the next findUnresolvedApprovals excludes it.
  *   - approved / pending → do nothing (approved is handled by agent re-entry).
+ *
+ * minor: per-approval try/catch so one failing getApproval skips to the next sibling.
+ * minor: module-level reentrancy guard so overlapping pollOnce calls no-op.
  */
 export async function pollOnce(receipts: ReceiptChain, client: PaperclipClient): Promise<void> {
-  const unresolved = findUnresolvedApprovals(receipts);
+  if (_pollInProgress) return;
+  _pollInProgress = true;
+  try {
+    const unresolved = findUnresolvedApprovals(receipts);
 
-  for (const { approvalId, issueId, tool } of unresolved) {
-    const record = await client.getApproval(approvalId);
+    for (const { approvalId, issueId, tool } of unresolved) {
+      try {
+        const record = await client.getApproval(approvalId);
 
-    if (record.status === "rejected" || record.status === "revision_requested") {
-      // Post comment on issue if we have one — NO payload text
-      if (issueId) {
-        await client.postIssueComment(
-          issueId,
-          `Egress approval resolved by poller. tool=${tool} approvalId=${approvalId} decision=${record.status}. ` +
-            `The agent must handle this outcome and start a new request if needed.`,
-        );
+        if (record.status === "rejected" || record.status === "revision_requested") {
+          // Post comment on issue if we have one — NO payload text
+          if (issueId) {
+            await client.postIssueComment(
+              issueId,
+              `Egress approval resolved by poller. tool=${tool} approvalId=${approvalId} decision=${record.status}. ` +
+                `The agent must handle this outcome and start a new request if needed.`,
+            );
+          }
+
+          // Append blocked receipt so this approval is excluded from future polls
+          const body: ReceiptBody = {
+            kind: "egress",
+            tool,
+            boundary: null,
+            decision: "human",
+            outcome: "blocked",
+            payloadSha256: sha256hex(`poller:${approvalId}`),
+            approvalId,
+            issueId,
+            meta: {
+              resolvedBy: "poller",
+              approvalStatus: record.status,
+            },
+          };
+          receipts.append(body);
+        }
+        // approved → do nothing (agent re-entry handles this)
+        // pending → do nothing (still waiting)
+      } catch {
+        // minor: one approval failure skips to next sibling; outer caller logs
+        continue;
       }
-
-      // Append blocked receipt so this approval is excluded from future polls
-      const body: ReceiptBody = {
-        kind: "egress",
-        tool,
-        boundary: null,
-        decision: "human",
-        outcome: "blocked",
-        payloadSha256: sha256hex(`poller:${approvalId}`),
-        approvalId,
-        issueId,
-        meta: {
-          resolvedBy: "poller",
-          approvalStatus: record.status,
-        },
-      };
-      receipts.append(body);
     }
-    // approved → do nothing (agent re-entry handles this)
-    // pending → do nothing (still waiting)
+  } finally {
+    _pollInProgress = false;
   }
 }

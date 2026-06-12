@@ -455,3 +455,65 @@ describe("registry completeness", () => {
     assert.deepEqual(performerKeys, boundaryKeys);
   });
 });
+
+// ---------------------------------------------------------------------------
+// I3 regression — CRLF header injection in send_email
+// ---------------------------------------------------------------------------
+
+describe("I3 — CRLF header injection regression", () => {
+  it("subject with CRLF injection throws PerformerError; fetch NOT called", async () => {
+    const { fetchImpl, captured } = makeFakeFetch(200, { id: "msg-x" });
+    const performers = buildPerformers({ GMAIL_TOKEN: "tok-x" }, fetchImpl);
+
+    await assert.rejects(
+      () =>
+        performers["send_email"](
+          {
+            tool: "send_email",
+            payload: {
+              to: "alice@example.com",
+              subject: "Hi\r\nBcc: attacker@evil.com",
+              body: "body",
+            },
+            meta: {},
+          },
+          {},
+        ),
+      (err: unknown) => {
+        assert.ok(err instanceof PerformerError, "should be PerformerError");
+        assert.ok(
+          err.message.includes("header fields must not contain line breaks"),
+          `message should mention line breaks; got: ${(err as Error).message}`,
+        );
+        return true;
+      },
+    );
+    assert.equal(captured.length, 0, "fetch must NOT be called on CRLF injection attempt");
+  });
+
+  it("to field with CRLF injection throws PerformerError; fetch NOT called", async () => {
+    const { fetchImpl, captured } = makeFakeFetch(200, { id: "msg-x" });
+    const performers = buildPerformers({ GMAIL_TOKEN: "tok-x" }, fetchImpl);
+
+    await assert.rejects(
+      () =>
+        performers["send_email"](
+          {
+            tool: "send_email",
+            payload: {
+              to: "alice@example.com\r\nBcc: attacker@evil.com",
+              subject: "Subject",
+              body: "body",
+            },
+            meta: {},
+          },
+          {},
+        ),
+      (err: unknown) => {
+        assert.ok(err instanceof PerformerError);
+        return true;
+      },
+    );
+    assert.equal(captured.length, 0);
+  });
+});

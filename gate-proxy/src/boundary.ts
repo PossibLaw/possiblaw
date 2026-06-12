@@ -24,9 +24,11 @@ export const TOOL_BOUNDARIES: Readonly<Record<string, BoundaryRule>> = Object.fr
 });
 
 export function classify(req: EgressRequest): BoundaryType | null {
-  const rule = TOOL_BOUNDARIES[req.tool];
-  if (rule === undefined) {
+  // I4: guard against prototype-named tools (__proto__, toString, valueOf, constructor)
+  // that would return inherited members instead of returning undefined.
+  if (!Object.prototype.hasOwnProperty.call(TOOL_BOUNDARIES, req.tool)) {
     throw new UnknownToolError(req.tool);
   }
+  const rule = TOOL_BOUNDARIES[req.tool];
   return typeof rule === "function" ? rule(req.meta) : rule;
 }

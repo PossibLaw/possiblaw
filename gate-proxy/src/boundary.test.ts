@@ -75,4 +75,22 @@ describe("classify", () => {
       },
     );
   });
+
+  // I4 — prototype-named tool regression
+  it("I4: prototype-named tools throw UnknownToolError (not inherited member)", () => {
+    const protoTools = ["__proto__", "toString", "valueOf", "constructor"];
+    for (const toolName of protoTools) {
+      assert.throws(
+        () => classify(req(toolName)),
+        (err: unknown) => {
+          assert.ok(
+            err instanceof UnknownToolError,
+            `"${toolName}" should throw UnknownToolError, got: ${String(err)}`,
+          );
+          return true;
+        },
+        `classify("${toolName}") should throw UnknownToolError`,
+      );
+    }
+  });
 });

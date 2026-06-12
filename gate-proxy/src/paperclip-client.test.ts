@@ -254,3 +254,29 @@ describe("PaperclipClient integrity invariant", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// I1 (b) regression — encodeURIComponent on path segments
+// ---------------------------------------------------------------------------
+
+describe("PaperclipClient I1 — URL path encoding regression", () => {
+  it("getApproval with path-traversal id encodes %2F so fetch URL contains %2F", async () => {
+    const { fetchImpl, calls } = makeFakeFetch([
+      { status: 200, body: { id: "a../b", status: "pending", payload: {} } },
+    ]);
+    const client = buildClient({ fetchImpl });
+
+    await client.getApproval("a/../b");
+
+    assert.equal(calls.length, 1);
+    const url = calls[0].url;
+    assert.ok(
+      url.includes("%2F") || url.includes("%2f"),
+      `URL must encode '/' as %2F to prevent path traversal; got: ${url}`,
+    );
+    assert.ok(
+      !url.includes("/../"),
+      `URL must not contain unencoded '/../'; got: ${url}`,
+    );
+  });
+});

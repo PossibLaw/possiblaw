@@ -276,3 +276,58 @@ describe("anonymize — longest-first overlap", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// C1 — Unicode normalization bypass regression
+// ---------------------------------------------------------------------------
+
+describe("anonymize — C1 Unicode NFC normalization bypass regression", () => {
+  it("NFD text with NFC entity: masked output contains neither NFC nor NFD form, confidence=1", () => {
+    // "Café Müller" in NFC
+    const nfcEntity = "Café Müller"; // NFC: é=é, ü=ü
+    // Same string in NFD (decomposed: e + combining acute, u + combining umlaut)
+    const nfdText = "Café Müller needs legal advice.";
+
+    // Pre-condition: NFD and NFC forms are not equal as raw strings
+    assert.notEqual(nfdText.normalize("NFD"), nfcEntity.normalize("NFC").normalize("NFD") === nfdText.normalize("NFD") ? "equal" : "not-equal", "test data setup");
+
+    const result = anonymize(nfdText, [nfcEntity]);
+
+    // Neither the NFC nor the NFD form of the entity should appear in masked
+    assert.ok(
+      !result.masked.normalize("NFC").toLowerCase().includes(nfcEntity.toLowerCase()),
+      `NFC form of entity should be absent from masked; got: "${result.masked}"`,
+    );
+    assert.ok(
+      !result.masked.normalize("NFD").toLowerCase().includes(nfdText.slice(0, 10).toLowerCase()),
+      `NFD form of entity should be absent from masked; got: "${result.masked}"`,
+    );
+    assert.equal(result.confidence, 1, "confidence must be 1 when entity was masked");
+  });
+
+  it("checkCoverage catches NFD leak when given unnormalized masked text containing NFC entity", () => {
+    // Simulate: masked text still has the NFD form, entity list has NFC form
+    const nfcEntity = "Café Müller"; // NFC
+    const nfdForm = "Café Müller"; // NFD, visually identical
+
+    // If we pass NFD-form masked + NFC entity, checkCoverage must detect the leak
+    const result = checkCoverage(nfdForm, [nfcEntity]);
+    assert.equal(result, false, "checkCoverage must return false (leak detected) when NFD and NFC forms match after normalization");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// I2 (b) — EMAIL ReDoS regression: 64KB adversarial string completes <500ms
+// ---------------------------------------------------------------------------
+
+describe("anonymize — I2(b) EMAIL ReDoS regression", () => {
+  it("64KB adversarial 'a.a.a…!' string through anonymize() completes in under 500ms", () => {
+    // Classic ReDoS trigger for naive email regex: long sequence of valid-looking
+    // local-part chars followed by a non-matching char
+    const adversarial = "a.".repeat(32_000) + "!"; // ~64KB
+    const start = Date.now();
+    anonymize(adversarial, []);
+    const elapsed = Date.now() - start;
+    assert.ok(elapsed < 500, `anonymize should complete in <500ms on adversarial input; took ${elapsed}ms`);
+  });
+});

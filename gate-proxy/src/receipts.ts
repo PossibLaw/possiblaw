@@ -166,6 +166,13 @@ function computeHash(prevHash: string, seq: number, ts: string, normalizedBody: 
 // ReceiptChain
 // ---------------------------------------------------------------------------
 
+/**
+ * Append-only, hash-linked receipt chain persisted to a JSONL file.
+ *
+ * Single-writer assumption: only one gate-proxy process may write to a given
+ * receipts file at a time. There is no cross-process locking; running two
+ * processes against the same file will corrupt the chain.
+ */
 export class ReceiptChain {
   private readonly filePath: string;
 
