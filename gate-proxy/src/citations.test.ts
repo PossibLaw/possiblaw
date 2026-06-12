@@ -47,3 +47,46 @@ test("documentSha256 is stable across cosmetic whitespace", () => {
   assert.equal(documentSha256("410 U.S.  113\n"), documentSha256("410 U.S. 113"));
   assert.notEqual(documentSha256("410 U.S. 113"), documentSha256("410 U.S. 114"));
 });
+
+test("unicode evasion: zero-width space inside reporter is stripped", () => {
+  assert.deepEqual(extractCitations("410 U.​S. 113"), ["410 U.S. 113"]);
+});
+
+test("unicode evasion: fullwidth digits fold to ASCII", () => {
+  assert.deepEqual(extractCitations("４１０ U.S. １１３"), ["410 U.S. 113"]);
+});
+
+test("unicode evasion: soft hyphen does not corrupt the page number", () => {
+  assert.deepEqual(extractCitations("410 U.S. 1­13"), ["410 U.S. 113"]);
+});
+
+test("official U.S. Reports spacing 'U. S.' matches", () => {
+  assert.deepEqual(extractCitations("410 U. S. 113"), ["410 U. S. 113"]);
+});
+
+test("'F. 3d' spaced series matches", () => {
+  assert.deepEqual(extractCitations("123 F. 3d 456"), ["123 F. 3d 456"]);
+});
+
+test("section-symbol-less U.S.C. extracts", () => {
+  assert.deepEqual(extractCitations("jurisdiction under 28 U.S.C. 1331"), ["28 U.S.C. 1331"]);
+});
+
+test("trailing sentence punctuation is not absorbed", () => {
+  assert.deepEqual(extractCitations("liable under 42 U.S.C. § 1983. Next sentence."), ["42 U.S.C. § 1983"]);
+});
+
+test("statute tail length is bounded", () => {
+  const long = "42 U.S.C. § 1" + "a".repeat(500);
+  const result = extractCitations(long);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].length <= 90, true);
+});
+
+test("F.4th and Fed. R. Evid. extract", () => {
+  assert.deepEqual(extractCitations("See 12 F.4th 345 and Fed. R. Evid. 702."), ["12 F.4th 345", "Fed. R. Evid. 702"]);
+});
+
+test("documentSha256 binds compatibility-equivalent text to one sha", () => {
+  assert.equal(documentSha256("４１０ U.S. １１３"), documentSha256("410 U.S. 113"));
+});
