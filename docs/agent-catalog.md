@@ -2,6 +2,8 @@
 
 174 agents · 169 skills · 34 teams under two executives. Derived from `companies/legal-operations/` (agent frontmatter + `.paperclip.yaml` lanes); regenerate after package changes.
 
+The catalog is the menu — import what your firm practices. `./bin/possiblaw --teams <names>` (e.g. `litigation,commercial`, or presets `boutique` / `inhouse`) imports just those teams plus the executives, meta-reviewers, capability builder, and the skills they reference. See the operator walkthrough.
+
 Lanes: **routing** = classify + delegate · **drafting** = produces documents · **review** = adversarial clause-by-clause reading · **extractive** = structured extraction/tracking. Every agent works inside paperclip issues, never sends/files/serves anything externally, and gates external actions on operator approval.
 
 ## Executives

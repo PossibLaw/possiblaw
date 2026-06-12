@@ -27,6 +27,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -67,8 +68,158 @@ def _encode_file(abs_path: Path):
 # enter the bundle; READMEs and helper files stay out of the import body.
 EXTRA_ROOT_BASENAMES = {"PROJECT.md", "TASK.md"}
 
+# --- Team subset import (--include-teams) -----------------------------------
+# A "team" is a practice/business lead plus its specialists. Valid team names
+# are lead slugs minus the "-lead" suffix, for leads reporting to a chief.
+# These agents ship in EVERY subset (executive routers, the builder, and the
+# meta-review trio routed across teams):
+CHIEF_SLUGS = ("chief-of-staff", "chief-counsel")
+ALWAYS_INCLUDE_SLUGS = CHIEF_SLUGS + (
+    "capability-builder", "risk-spotter", "debate-judge", "reconciler",
+)
+LEAD_SUFFIX = "-lead"
 
-def build_inline_source(package_root: Path, extra_roots: list[Path] | None = None) -> dict:
+_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---", re.S)
+
+
+def _parse_agent_frontmatter(text: str) -> dict | None:
+    """Extract slug / reportsTo / skills from an AGENTS.md frontmatter."""
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return None
+    fm = m.group(1)
+    slug = re.search(r"^slug:\s*(\S+)\s*$", fm, re.M)
+    if not slug:
+        return None
+    reports = re.search(r"^reportsTo:\s*(\S+)\s*$", fm, re.M)
+    skills: list[str] = []
+    in_skills = False
+    for line in fm.splitlines():
+        if re.match(r"^skills:\s*$", line):
+            in_skills = True
+            continue
+        if in_skills:
+            item = re.match(r"^  - (\S+)\s*$", line)
+            if item:
+                skills.append(item.group(1))
+            else:
+                in_skills = False
+    return {
+        "slug": slug.group(1),
+        "reportsTo": reports.group(1) if reports else None,
+        "skills": skills,
+    }
+
+
+def _collect_agents(files: dict[str, object]) -> dict[str, dict]:
+    """Parse every bundled agents/<slug>/AGENTS.md frontmatter."""
+    agents: dict[str, dict] = {}
+    for rel, content in files.items():
+        parts = rel.split("/")
+        if len(parts) == 3 and parts[0] == "agents" and parts[2] == "AGENTS.md":
+            if not isinstance(content, str):
+                continue
+            meta = _parse_agent_frontmatter(content)
+            if meta:
+                agents[parts[1]] = meta
+    return agents
+
+
+def _valid_teams(agents: dict[str, dict]) -> dict[str, str]:
+    """Map team name -> lead slug for leads reporting to a chief."""
+    teams: dict[str, str] = {}
+    for slug, meta in agents.items():
+        if slug.endswith(LEAD_SUFFIX) and meta.get("reportsTo") in CHIEF_SLUGS:
+            teams[slug[: -len(LEAD_SUFFIX)]] = slug
+    return teams
+
+
+def list_teams_from_root(package_root: Path) -> list[str]:
+    files = {rel: _encode_file(abs_path) for rel, abs_path in _iter_files(Path(package_root))}
+    return sorted(_valid_teams(_collect_agents(files)))
+
+
+def _compute_subset(files: dict[str, object], include_teams: list[str]) -> tuple[set, set]:
+    """Return (included agent slugs, included skill slugs) for the teams."""
+    agents = _collect_agents(files)
+    teams = _valid_teams(agents)
+    unknown = sorted(set(include_teams) - set(teams))
+    if unknown:
+        raise ValueError(
+            f"unknown team(s): {', '.join(unknown)}; valid teams: {', '.join(sorted(teams))}"
+        )
+
+    included = {s for s in ALWAYS_INCLUDE_SLUGS if s in agents}
+    included.update(teams[t] for t in include_teams)
+    # Transitive closure over reportsTo so every specialist follows its lead.
+    # Chiefs do NOT expand the set — their direct reports are exactly the
+    # leads (selected explicitly above) and the always-include roles.
+    expandable = included - set(CHIEF_SLUGS)
+    changed = True
+    while changed:
+        changed = False
+        for slug, meta in agents.items():
+            if slug not in included and meta.get("reportsTo") in expandable:
+                included.add(slug)
+                expandable.add(slug)
+                changed = True
+
+    referenced_by_included: set = set()
+    referenced_by_anyone: set = set()
+    for slug, meta in agents.items():
+        referenced_by_anyone.update(meta["skills"])
+        if slug in included:
+            referenced_by_included.update(meta["skills"])
+    skills_on_disk = {rel.split("/")[1] for rel in files if rel.startswith("skills/")}
+    base_skills = skills_on_disk - referenced_by_anyone  # attached to nobody: always ship
+    included_skills = (referenced_by_included & skills_on_disk) | base_skills
+    return included, included_skills
+
+
+def _filter_sidecar(text: str, included_agents: set) -> str:
+    """Drop excluded agents from the sidecar's `agents:` mapping and
+    `sidebar.agents` list. Pure text transform — the sidecar is generated
+    from a uniform template (2-space slug keys, 4-space sidebar items), and
+    this helper is stdlib-only by contract."""
+    out: list[str] = []
+    section = None          # current top-level key
+    dropping_block = False  # inside an excluded agents.<slug> block
+    in_sidebar_agents = False
+    for line in text.splitlines(keepends=True):
+        top = re.match(r"^([A-Za-z_][A-Za-z0-9_-]*):", line)
+        if top:
+            section = top.group(1)
+            dropping_block = False
+            in_sidebar_agents = False
+            out.append(line)
+            continue
+        if section == "agents":
+            block = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+            if block:
+                dropping_block = block.group(1) not in included_agents
+            if dropping_block:
+                continue
+        elif section == "sidebar":
+            if re.match(r"^  agents:\s*$", line):
+                in_sidebar_agents = True
+                out.append(line)
+                continue
+            if in_sidebar_agents:
+                item = re.match(r"^    - (\S+)\s*$", line)
+                if item:
+                    if item.group(1) not in included_agents:
+                        continue
+                else:
+                    in_sidebar_agents = False
+        out.append(line)
+    return "".join(out)
+
+
+def build_inline_source(
+    package_root: Path,
+    extra_roots: list[Path] | None = None,
+    include_teams: list[str] | None = None,
+) -> dict:
     if not package_root.exists():
         raise ValueError(f"package root does not exist: {package_root}")
     if not package_root.is_dir():
@@ -77,6 +228,25 @@ def build_inline_source(package_root: Path, extra_roots: list[Path] | None = Non
     files: dict[str, object] = {}
     for rel, abs_path in _iter_files(package_root):
         files[rel] = _encode_file(abs_path)
+
+    if include_teams is not None:
+        included_agents, included_skills = _compute_subset(files, include_teams)
+        kept: dict[str, object] = {}
+        for rel, content in files.items():
+            parts = rel.split("/")
+            if parts[0] == "agents" and len(parts) > 1 and parts[1] not in included_agents:
+                continue
+            if parts[0] == "skills" and len(parts) > 1 and parts[1] not in included_skills:
+                continue
+            if rel == ".paperclip.yaml" and isinstance(content, str):
+                content = _filter_sidecar(content, included_agents)
+            kept[rel] = content
+        files = kept
+        print(
+            f"subset: teams={','.join(include_teams)} "
+            f"agents={len(included_agents)} skills={len(included_skills)}",
+            file=sys.stderr,
+        )
 
     for extra in extra_roots or []:
         extra = Path(extra)
@@ -162,8 +332,127 @@ def _self_test() -> int:
         else:
             raise AssertionError("path collision must raise ValueError")
 
+    _self_test_teams()
+
     print("OK: _possiblaw_inline_source self-test passed")
     return 0
+
+
+def _write_agent(root: Path, slug: str, reports_to: str | None, skills: list[str]) -> None:
+    lines = ["---", f"name: {slug}", "kind: agent", f"slug: {slug}", f"title: {slug}"]
+    if reports_to:
+        lines.append(f"reportsTo: {reports_to}")
+    if skills:
+        lines.append("skills:")
+        lines.extend(f"  - {s}" for s in skills)
+    lines += ["---", "", f"You are {slug}.", ""]
+    d = root / "agents" / slug
+    d.mkdir(parents=True)
+    (d / "AGENTS.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def _self_test_teams() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td) / "pkg"
+        root.mkdir(parents=True)
+
+        # Org: chiefs + one meta-reviewer + builder (always included) +
+        # two teams (alpha, beta) with one specialist each.
+        _write_agent(root, "chief-of-staff", None, ["skill-base-attach"])
+        _write_agent(root, "chief-counsel", "chief-of-staff", [])
+        _write_agent(root, "risk-spotter", "chief-counsel", ["skill-meta"])
+        _write_agent(root, "capability-builder", "chief-of-staff", [])
+        _write_agent(root, "alpha-lead", "chief-counsel", ["skill-alpha-lead"])
+        _write_agent(root, "alpha-drafter", "alpha-lead", ["skill-alpha-draft", "skill-shared"])
+        _write_agent(root, "beta-lead", "chief-of-staff", [])
+        _write_agent(root, "beta-runner", "beta-lead", ["skill-beta-run", "skill-shared"])
+        for skill in (
+            "skill-base-attach", "skill-meta", "skill-alpha-lead",
+            "skill-alpha-draft", "skill-beta-run", "skill-shared",
+            "skill-unattached",  # base skill: referenced by nobody
+        ):
+            d = root / "skills" / skill
+            d.mkdir(parents=True)
+            (d / "SKILL.md").write_text(f"---\nname: {skill}\n---\nbody\n", encoding="utf-8")
+        sidecar = "\n".join([
+            "schema: paperclip/v1",
+            "company:",
+            "  brandColor: \"#F97316\"",
+            "agents:",
+        ] + [
+            f"  {slug}:\n    role: r\n    adapter:\n      type: codex_local"
+            for slug in (
+                "chief-of-staff", "chief-counsel", "risk-spotter", "capability-builder",
+                "alpha-lead", "alpha-drafter", "beta-lead", "beta-runner",
+            )
+        ] + [
+            "sidebar:",
+            "  agents:",
+            "    - chief-of-staff",
+            "    - chief-counsel",
+            "    - risk-spotter",
+            "    - capability-builder",
+            "    - alpha-lead",
+            "    - alpha-drafter",
+            "    - beta-lead",
+            "    - beta-runner",
+            "projects:",
+            "  demo:",
+            "    leadAgentSlug: chief-of-staff",
+            "",
+        ])
+        (root / ".paperclip.yaml").write_text(sidecar, encoding="utf-8")
+        (root / "COMPANY.md").write_text("---\nname: T\nslug: t\n---\nbody\n", encoding="utf-8")
+
+        # list_teams: leads are *-lead reporting to a chief; meta/builder excluded.
+        teams = list_teams_from_root(root)
+        assert teams == ["alpha", "beta"], teams
+
+        # Closure: alpha only -> chiefs + meta + builder + alpha team; beta gone.
+        out = build_inline_source(root, include_teams=["alpha"])
+        files = out["source"]["files"]
+        agent_dirs = {k.split("/")[1] for k in files if k.startswith("agents/")}
+        assert agent_dirs == {
+            "chief-of-staff", "chief-counsel", "risk-spotter", "capability-builder",
+            "alpha-lead", "alpha-drafter",
+        }, agent_dirs
+
+        # Skill closure: included agents' refs + unattached base skill; beta-only skills gone.
+        skill_dirs = {k.split("/")[1] for k in files if k.startswith("skills/")}
+        assert skill_dirs == {
+            "skill-base-attach", "skill-meta", "skill-alpha-lead",
+            "skill-alpha-draft", "skill-shared", "skill-unattached",
+        }, skill_dirs
+
+        # Sidecar filter consistency: agents: blocks == bundled agent dirs == sidebar entries.
+        side = files[".paperclip.yaml"]
+        assert isinstance(side, str)
+        import re as _re
+        side_agents = set(_re.findall(r"^  ([A-Za-z0-9_-]+):", side.split("sidebar:")[0].split("agents:")[1], _re.M))
+        assert side_agents == agent_dirs, (side_agents, agent_dirs)
+        sidebar_entries = set(_re.findall(r"^    - (\S+)", side.split("sidebar:")[1].split("projects:")[0], _re.M))
+        assert sidebar_entries == agent_dirs, (sidebar_entries, agent_dirs)
+        # Non-agent sections survive untouched.
+        assert "leadAgentSlug: chief-of-staff" in side
+        assert "brandColor" in side
+        assert "schema: paperclip/v1" in side
+
+        # COMPANY.md and other root files are never filtered.
+        assert "COMPANY.md" in files
+
+        # Both teams = same as full catalog for this synthetic package.
+        out_all = build_inline_source(root, include_teams=["alpha", "beta"])
+        assert {k for k in out_all["source"]["files"]} == {
+            k for k in build_inline_source(root)["source"]["files"]
+        }
+
+        # Unknown team -> ValueError naming the valid slugs.
+        try:
+            build_inline_source(root, include_teams=["alpha", "gamma"])
+        except ValueError as e:
+            assert "gamma" in str(e) and "alpha" in str(e) and "beta" in str(e), e
+        else:
+            raise AssertionError("unknown team must raise ValueError")
 
 
 def main(argv: list[str]) -> int:
@@ -175,6 +464,16 @@ def main(argv: list[str]) -> int:
         default=[],
         help="extra directory whose PROJECT.md/TASK.md files merge into the bundle (repeatable; demo overlays)",
     )
+    parser.add_argument(
+        "--include-teams",
+        help="comma-separated team names (lead slugs without the -lead suffix); "
+        "bundle only those teams plus chiefs, the capability builder, and the meta-reviewers",
+    )
+    parser.add_argument(
+        "--list-teams",
+        action="store_true",
+        help="print valid team names for --include-teams (one per line) and exit",
+    )
     parser.add_argument("--self-test", action="store_true", help="run built-in tests and exit")
     args = parser.parse_args(argv)
 
@@ -184,10 +483,23 @@ def main(argv: list[str]) -> int:
     if not args.package_root:
         parser.error("--package-root is required")
 
+    if args.list_teams:
+        for team in list_teams_from_root(Path(args.package_root)):
+            print(team)
+        return 0
+
+    include_teams = None
+    if args.include_teams:
+        include_teams = [t.strip() for t in args.include_teams.split(",") if t.strip()]
+        if not include_teams:
+            print("error: --include-teams given but no team names parsed", file=sys.stderr)
+            return 2
+
     try:
         payload = build_inline_source(
             Path(args.package_root),
             extra_roots=[Path(p) for p in args.extra_root],
+            include_teams=include_teams,
         )
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)

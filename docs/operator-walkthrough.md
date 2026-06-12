@@ -193,6 +193,35 @@ name and mission to paste at launch, which tasks to move to `todo` first, and
 the delegation chain to expect. Every entity, person, citation, and statute in
 the demo data is fictional.
 
+### Team subset import (`--teams`)
+
+The catalog is the menu — import what your firm practices. By default the
+launcher imports all 174 agents; `--teams` imports only the named teams:
+
+```bash
+./bin/possiblaw --teams litigation,commercial   # two practices
+./bin/possiblaw --teams boutique                # preset: commercial, employment,
+                                                # litigation, real-estate, family-law,
+                                                # estates + the business teams
+./bin/possiblaw --teams inhouse                 # preset: commercial, employment,
+                                                # privacy, corporate, regulatory,
+                                                # ai-governance + the business teams
+```
+
+Team names are the lead slugs without the `-lead` suffix (`tax`,
+`real-estate`, `bd`, ...). Every subset always includes the chiefs
+(chief-of-staff, chief-counsel), the capability builder, and the
+meta-reviewers (risk-spotter, debate-judge, reconciler), plus each selected
+lead's specialists and every skill those agents reference. Connector
+descriptors that aren't attached to a specific agent ship in every subset.
+
+An unknown team name exits before anything starts and prints the valid list.
+If a matter arrives for a practice that isn't imported, the chiefs comment
+that the practice is not enabled in this deployment and escalate to the
+operator — re-import (or a second company) brings in more teams later.
+Subset imports also keep the sidebar short, which is the easiest fix for
+sidebar sluggishness at full-catalog scale (see `docs/known-limitations.md`).
+
 ### Preflight model probe (codex / codex-api / claude / claude-api)
 
 Before starting anything, live runs probe each distinct lane model with one

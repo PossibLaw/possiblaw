@@ -56,6 +56,9 @@ Mitigations, in order of effect:
   off-screen rows skip layout and paint. This removes most scroll/render
   cost without touching paperclip source. `--theme dark` disables it along
   with the rest of the overlay.
+- **Import only the teams you practice** with `--teams` (0.18.0; see the
+  operator walkthrough): a subset import keeps the sidebar short in the
+  first place.
 - Workaround in `.paperclip.yaml`: group agents under `sidebar.agents` so the
   most-used roles appear first. The launcher imports use that ordering.
 - Longer-term: a Paperclip-side virtualization fix would solve this for all

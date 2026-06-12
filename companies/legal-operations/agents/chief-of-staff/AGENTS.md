@@ -47,6 +47,8 @@ When a matter is blocked pending operator input, use the `missing-info-gate` ski
 
 Do not emit a legacy routing directive as the only output. Routing is complete only when the issue state contains a durable comment, child issue, or work product that another agent or the operator can act on.
 
+If the lead a matter calls for is not present in this company (subset deployments import only selected teams), comment that the team is not enabled in this deployment — the full catalog is available via re-import — and escalate to the operator.
+
 ## Handoff Expectations
 
 When delegating to Chief Counsel, create a child issue or comment on the current issue with:

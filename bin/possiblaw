@@ -97,6 +97,18 @@ OPTIONS:
                         the import (companies/demos/<profile>): law-firm,
                         inhouse-legal, or biglaw-practice-group. Each profile's
                         README.md is the demo script. All demo data is fictional.
+  --teams <list>        Import only the named teams (comma-separated lead
+                        slugs without the -lead suffix, e.g.
+                        "litigation,commercial"), plus the chiefs, the
+                        capability builder, and the meta-reviewers, with the
+                        skills they reference. Presets: "boutique"
+                        (commercial, employment, litigation, real-estate,
+                        family-law, estates + business teams) and "inhouse"
+                        (commercial, employment, privacy, corporate,
+                        regulatory, ai-governance + business teams).
+                        Default: the full catalog. The catalog is the menu —
+                        import what your firm practices; re-import to add
+                        teams later.
   --theme <name>        UI look for the dashboard: possiblaw (default —
                         light-first with the warm PossibLaw palette), light
                         (paperclip's stock light theme as the default), or
@@ -251,6 +263,7 @@ SKIP_MODEL_PROBE="false"
 THEME="${POSSIBLAW_THEME:-possiblaw}"
 ONBOARD_EXTRA_ENV=""
 DEMO_PROFILE=""
+TEAMS=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -269,6 +282,7 @@ while [ "$#" -gt 0 ]; do
         --skip-model-probe) SKIP_MODEL_PROBE="true"; shift ;;
         --theme) [ "$#" -ge 2 ] || { err "--theme requires a value"; exit 2; }; THEME="$2"; shift 2 ;;
         --demo) [ "$#" -ge 2 ] || { err "--demo requires a value"; exit 2; }; DEMO_PROFILE="$2"; shift 2 ;;
+        --teams) [ "$#" -ge 2 ] || { err "--teams requires a value"; exit 2; }; TEAMS="$2"; shift 2 ;;
         --no-browser) NO_BROWSER="true"; shift ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
@@ -381,6 +395,41 @@ if [ "$PREFLIGHT_FAILED" = "true" ]; then
 fi
 
 milestone "pre-flight complete"
+
+# ---------------------------------------------------------------------------
+# --teams: expand presets and validate every name against the package's lead
+# roster BEFORE any probe, data-dir write, or server start. Unknown -> exit 1.
+# ---------------------------------------------------------------------------
+
+TEAMS_PRESET_BOUTIQUE="commercial,employment,litigation,real-estate,family-law,estates,bd,ops,finance,marketing,admin,legal-ops"
+TEAMS_PRESET_INHOUSE="commercial,employment,privacy,corporate,regulatory,ai-governance,legal-ops,bd,ops,finance,marketing,admin"
+if [ -n "$TEAMS" ]; then
+    case "$TEAMS" in
+        boutique) TEAMS="$TEAMS_PRESET_BOUTIQUE"; log "teams: preset 'boutique' -> $TEAMS" ;;
+        inhouse)  TEAMS="$TEAMS_PRESET_INHOUSE"; log "teams: preset 'inhouse' -> $TEAMS" ;;
+    esac
+    VALID_TEAMS="$(python3 "$INLINE_PY" --package-root "$PACKAGE" --list-teams)" || {
+        err "could not read the team roster from $PACKAGE"
+        exit 1
+    }
+    INVALID_TEAMS=""
+    OLD_IFS="$IFS"; IFS=','
+    for team in $TEAMS; do
+        team="$(printf '%s' "$team" | tr -d '[:space:]')"
+        [ -n "$team" ] || continue
+        if ! printf '%s\n' "$VALID_TEAMS" | grep -qx "$team"; then
+            INVALID_TEAMS="$INVALID_TEAMS $team"
+        fi
+    done
+    IFS="$OLD_IFS"
+    if [ -n "$INVALID_TEAMS" ]; then
+        err "Unknown team(s):$INVALID_TEAMS"
+        err "Valid teams (lead slugs without -lead), or presets boutique|inhouse:"
+        printf '%s\n' "$VALID_TEAMS" | while IFS= read -r t; do err "  - $t"; done
+        exit 1
+    fi
+    log "teams: subset import enabled ($TEAMS)"
+fi
 
 # ---------------------------------------------------------------------------
 # Variant selection
@@ -1119,21 +1168,6 @@ fi
 
 milestone "building import body (variant=$VARIANT, $(find "$PACKAGE" -type f | wc -l | tr -d ' ') files)"
 
-PAPERCLIP_JSON_FILE="$(mktemp -t possiblaw-paperclip.XXXXXX.json)"
-yaml_to_json "$PAPERCLIP_YAML" > "$PAPERCLIP_JSON_FILE"
-
-OVERRIDES_FILE="$(mktemp -t possiblaw-overrides.XXXXXX.json)"
-if ! python3 "$VARIANTS_PY" \
-        --variants-json "$VARIANTS_JSON_FILE" \
-        --paperclip-json "$PAPERCLIP_JSON_FILE" \
-        --variant "$VARIANT" \
-        > "$OVERRIDES_FILE"; then
-    err "adapter override generation failed"
-    kill_paperclip_tree "$PAPERCLIP_PID"
-    rm -f "$LAUNCHER_PID_FILE"
-    exit 1
-fi
-
 DEMO_ARGS=()
 if [ -n "$DEMO_DIR" ]; then
     DEMO_ARGS=(--extra-root "$DEMO_DIR")
@@ -1142,9 +1176,46 @@ if [ -n "$DEMO_DIR" ]; then
     log "demo profile: $DEMO_PROFILE (+$DEMO_PROJECT_COUNT projects, +$DEMO_TASK_COUNT tasks; see $DEMO_DIR/README.md for the demo script)"
 fi
 
+TEAMS_ARGS=()
+if [ -n "$TEAMS" ]; then
+    TEAMS_ARGS=(--include-teams "$TEAMS")
+fi
+
+# Bundle BEFORE override generation: with --teams the bundle carries a
+# filtered .paperclip.yaml, and adapter overrides must be generated from that
+# filtered sidecar so no override references an agent outside the subset.
 INLINE_FILE="$(mktemp -t possiblaw-inline.XXXXXX.json)"
-if ! python3 "$INLINE_PY" --package-root "$PACKAGE" ${DEMO_ARGS+"${DEMO_ARGS[@]}"} > "$INLINE_FILE"; then
+if ! python3 "$INLINE_PY" --package-root "$PACKAGE" \
+        ${DEMO_ARGS+"${DEMO_ARGS[@]}"} ${TEAMS_ARGS+"${TEAMS_ARGS[@]}"} \
+        > "$INLINE_FILE"; then
     err "inline source bundling failed"
+    kill_paperclip_tree "$PAPERCLIP_PID"
+    rm -f "$LAUNCHER_PID_FILE"
+    exit 1
+fi
+
+PAPERCLIP_JSON_FILE="$(mktemp -t possiblaw-paperclip.XXXXXX.json)"
+if [ -n "$TEAMS" ]; then
+    SUBSET_SIDECAR_FILE="$(mktemp -t possiblaw-subset-sidecar.XXXXXX.yaml)"
+    if ! python3 -c 'import json,sys; sys.stdout.write(json.load(open(sys.argv[1]))["source"]["files"][".paperclip.yaml"])' \
+            "$INLINE_FILE" > "$SUBSET_SIDECAR_FILE"; then
+        err "could not extract the filtered sidecar from the bundle"
+        kill_paperclip_tree "$PAPERCLIP_PID"
+        rm -f "$LAUNCHER_PID_FILE"
+        exit 1
+    fi
+    yaml_to_json "$SUBSET_SIDECAR_FILE" > "$PAPERCLIP_JSON_FILE"
+else
+    yaml_to_json "$PAPERCLIP_YAML" > "$PAPERCLIP_JSON_FILE"
+fi
+
+OVERRIDES_FILE="$(mktemp -t possiblaw-overrides.XXXXXX.json)"
+if ! python3 "$VARIANTS_PY" \
+        --variants-json "$VARIANTS_JSON_FILE" \
+        --paperclip-json "$PAPERCLIP_JSON_FILE" \
+        --variant "$VARIANT" \
+        > "$OVERRIDES_FILE"; then
+    err "adapter override generation failed"
     kill_paperclip_tree "$PAPERCLIP_PID"
     rm -f "$LAUNCHER_PID_FILE"
     exit 1

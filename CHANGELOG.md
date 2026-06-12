@@ -7,6 +7,49 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.18.0] — 2026-06-11 — Team subset import (`--teams`)
+
+### Added
+
+- `bin/possiblaw --teams <names>`: import only the named teams (lead slugs
+  without `-lead`, e.g. `litigation,commercial`) plus the chiefs, the
+  capability builder, the meta-reviewers, each selected lead's specialists
+  (transitive `reportsTo` closure that does not expand through chiefs), every
+  skill referenced by an included agent, and unattached base skills. Presets:
+  `boutique` and `inhouse`. Unknown team → exit 1 with the valid-slug list
+  BEFORE any probe, data-dir write, or server start.
+- `bin/_possiblaw_inline_source.py --include-teams` / `--list-teams`: closure
+  computation and consistent filtering of bundled agent/skill files, sidecar
+  `agents:` blocks, and `sidebar.agents` (pure stdlib text transform on the
+  template-generated sidecar). Adapter overrides are generated from the
+  bundle's FILTERED sidecar so no override references an excluded agent.
+- Chiefs' AGENTS.md: one static instruction — practice lead absent in this
+  deployment → comment "practice not enabled" (full catalog via re-import)
+  and escalate to the operator. Works for any subset; no dynamic tables.
+- Docs: walkthrough "Team subset import" section, README capability row,
+  agent-catalog "the catalog is the menu" note, known-limitations sidebar
+  bullet.
+
+### Validation
+
+- TDD red→green helper self-tests (closure, filter consistency
+  sidecar==dirs==sidebar, base-skill inclusion, unknown-team error). The red
+  test caught a real closure bug (expansion through chiefs pulled in every
+  team).
+- HAPPY: `--teams litigation,commercial --dry-run` → `agents=24 skills=49
+  projects=3 issues=3 warnings=0 errors=0`, matching the closure script
+  exactly; live import on disposable 3199 → 24 agents, 0 warnings, readback
+  exact (no excluded-team agents; Litigation Hold Drafter drafting→high/900
+  with 4 skills; Chief Counsel 10 skills; Capability Builder 4 skills).
+- Preset: `--teams boutique --dry-run` → `agents=72 skills=91 ... 0/0`.
+- FAILURE: `--teams litigaton` (typo) → exit 1, valid-slug list, no data dir
+  created.
+- Full-catalog regression: `agents=174 skills=169 projects=3 issues=3
+  warnings=0 errors=0`. `bash -n` + all three helper self-tests green;
+  port-3100 untouched.
+
+---
+
 ## [0.17.0] — 2026-06-11 — Sidebar scale mitigation on themed launches
 
 ### Added
