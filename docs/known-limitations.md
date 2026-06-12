@@ -45,10 +45,17 @@ The CLI default HTTP timeout is 2 minutes. ~6 DB writes × ~1.5s per write ×
 
 Paperclip's sidebar renders all agents linearly. At ~100 agents the sidebar
 gets noticeably sluggish in the browser; at ~200 it starts to jank during
-scroll. The package now ships 174 agents, so expect some sidebar sluggishness.
-Operator scope decision (per `~/.claude/plans/eventual-munching-fairy.md`
-§7): document, don't patch the submodule.
+scroll. The package now ships 174 agents. Operator scope decision (per
+`~/.claude/plans/eventual-munching-fairy.md` §7): document, don't patch the
+submodule.
 
+Mitigations, in order of effect:
+
+- **Themed launches apply a CSS mitigation automatically** (0.17.0): the UI
+  overlay injects `content-visibility: auto` on sidebar agent rows, so
+  off-screen rows skip layout and paint. This removes most scroll/render
+  cost without touching paperclip source. `--theme dark` disables it along
+  with the rest of the overlay.
 - Workaround in `.paperclip.yaml`: group agents under `sidebar.agents` so the
   most-used roles appear first. The launcher imports use that ordering.
 - Longer-term: a Paperclip-side virtualization fix would solve this for all

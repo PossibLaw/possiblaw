@@ -2,7 +2,7 @@
 """PossibLaw UI theme helper (stdlib only).
 
 Patches paperclip's BUILT ui/dist/index.html into a themed copy for the
-launcher's server/ui-dist overlay. Two insertions, both robust against
+launcher's server/ui-dist overlay. Three insertions, all robust against
 vite minification of the stock inline theme script:
 
   1. A seed script at the TOP of <head> that sets
@@ -10,7 +10,11 @@ vite minification of the stock inline theme script:
      stored preference. The stock theme script (which runs later in <head>)
      then applies light mode before first paint. A user's manual toggle
      persists and is never overridden.
-  2. theme "possiblaw" only: a <style id="possiblaw-theme"> block appended
+  2. Every overlay theme: a <style id="possiblaw-sidebar-perf"> block before
+     </head> applying content-visibility to sidebar agent rows so a
+     large agent catalog (174+) scrolls smoothly. --theme dark removes the
+     whole overlay, restoring stock behavior.
+  3. theme "possiblaw" only: a <style id="possiblaw-theme"> block appended
      before </head> that warms the light palette (cream background, coral
      primary) by overriding the :root design tokens. Dark mode tokens are
      untouched, so the in-app toggle still yields stock dark.
@@ -32,6 +36,18 @@ SEED_SCRIPT = (
     "if(!window.localStorage.getItem(k))window.localStorage.setItem(k,\"light\");}"
     "catch(e){}</script>"
 )
+
+SIDEBAR_PERF_STYLE = """<style id="possiblaw-sidebar-perf">
+/* PossibLaw: large-catalog sidebar mitigation. Off-screen agent rows skip
+   layout/paint via content-visibility; the intrinsic-size hint keeps scroll
+   geometry stable before rows render. Selector is the Tailwind named-group
+   class on SidebarAgentItem's row wrapper (ui/src/components/
+   SidebarAgents.tsx) — utility class strings survive the vite build verbatim. */
+.group\\/agent {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 32px;
+}
+</style>"""
 
 POSSIBLAW_STYLE = """<style id="possiblaw-theme">
 /* PossibLaw launch theme: warm, light-first overrides of paperclip's
@@ -72,11 +88,14 @@ def patch_index_html(html: str, theme: str) -> str:
     insert_at = head_open_end + 1
     html = html[:insert_at] + "\n    " + SEED_SCRIPT + html[insert_at:]
 
+    head_close = html.find("</head>")
+    if head_close == -1:
+        raise ValueError("no </head> tag found in index.html")
+    blocks = [SIDEBAR_PERF_STYLE]
     if theme == "possiblaw":
-        head_close = html.find("</head>")
-        if head_close == -1:
-            raise ValueError("no </head> tag found in index.html")
-        html = html[:head_close] + "    " + POSSIBLAW_STYLE + "\n  " + html[head_close:]
+        blocks.append(POSSIBLAW_STYLE)
+    insertion = "".join("    " + block + "\n  " for block in blocks)
+    html = html[:head_close] + insertion + html[head_close:]
 
     return html
 
@@ -105,6 +124,19 @@ def self_test() -> int:
     assert '<style id="possiblaw-theme">' in out2, "palette style missing"
     assert out2.index("possiblaw-theme") < out2.index("</head>"), "style must sit inside <head>"
     assert out2.index(SEED_SCRIPT) < out2.index("possiblaw-theme"), "seed first, style last"
+
+    # sidebar perf block: every overlay theme gets it, exactly once, in <head>.
+    # Selector must be the escaped Tailwind named-group class on
+    # SidebarAgentItem's row wrapper (ui/src/components/SidebarAgents.tsx).
+    for theme_name, themed_out in (("light", out), ("possiblaw", out2)):
+        count = themed_out.count('<style id="possiblaw-sidebar-perf">')
+        assert count == 1, f"sidebar perf block count {count} != 1 ({theme_name})"
+        assert "content-visibility: auto" in themed_out, f"content-visibility missing ({theme_name})"
+        assert "contain-intrinsic-size: auto" in themed_out, f"intrinsic-size hint missing ({theme_name})"
+        assert ".group\\/agent" in themed_out, f"escaped row selector missing ({theme_name})"
+        assert themed_out.index("possiblaw-sidebar-perf") < themed_out.index("</head>"), (
+            f"perf block must sit inside <head> ({theme_name})"
+        )
 
     # idempotence guard: patching is single-shot by design; the launcher
     # always patches a fresh copy from ui/dist, so double-patching is a bug

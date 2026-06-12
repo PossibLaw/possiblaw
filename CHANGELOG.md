@@ -7,6 +7,35 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.17.0] — 2026-06-11 — Sidebar scale mitigation on themed launches
+
+### Added
+
+- Themed launches (`--theme possiblaw` / `--theme light`) now inject a
+  `<style id="possiblaw-sidebar-perf">` block into the UI overlay applying
+  `content-visibility: auto; contain-intrinsic-size: auto 32px` to sidebar
+  agent rows, so off-screen rows skip layout/paint at 174-agent scale.
+  Selector is the Tailwind named-group class on `SidebarAgentItem`'s row
+  wrapper (`ui/src/components/SidebarAgents.tsx`), verified verbatim in the
+  built bundle. `--theme dark` removes the whole overlay as before; paperclip
+  source stays untouched (layer-not-fork).
+
+### Validation
+
+- TDD red→green on `bin/_possiblaw_theme.py --self-test` (perf block present
+  exactly once per overlay theme, escaped `.group\/agent` selector, inside
+  `<head>`).
+- EDGE: `--theme dark --dry-run` removed the overlay and the dry-run
+  regression returned `agents=174 skills=169 projects=3 issues=3 warnings=0
+  errors=0`.
+- HAPPY: live themed launch on disposable port 3199 (mktemp data dir,
+  `--skip-model-probe`): 174 agents imported, 0 warnings; curl readback of
+  the served UI shows the perf block exactly once with the escaped selector,
+  overlay marker intact; overlay re-applied cleanly after the dark removal.
+- `bash -n bin/possiblaw` green; operator's port-3100 server untouched.
+
+---
+
 ## [0.16.0] — 2026-06-11 — The catalog expansion: 174 agents / 169 skills across 34 teams
 
 ### Added
