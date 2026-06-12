@@ -28,7 +28,7 @@ Read-only operations use the agent's OAuth tokens. Money-movement goes through t
 |---|---|---|---|
 | `QBO_CLIENT_ID` | OAuth 2.0 client ID for the Intuit app | — | https://developer.intuit.com → My Apps → Keys & OAuth |
 | `QBO_CLIENT_SECRET` | OAuth 2.0 client secret | — | Intuit Developer portal |
-| `QBO_ACCESS_TOKEN` | OAuth 2.0 access token (1-hour TTL, read path) | — | Authorization-code flow per Intuit docs |
+| `QBO_ACCESS_TOKEN` | OAuth 2.0 access token for agent-side read operations (1-hour TTL); must be granted read-only scopes — a token with write scopes on the agent side would bypass the `MONEY_MOVEMENT` human gate | — | Authorization-code flow per Intuit docs |
 | `QBO_REFRESH_TOKEN` | OAuth 2.0 refresh token (100-day TTL, rotated on use) | — | Persisted from the original authorization-code exchange |
 | `QBO_REALM_ID` | QuickBooks company ID (also called "realm ID") | — | Returned in the OAuth callback as `realmId` |
 | `QBO_USE_SANDBOX` | `true` to hit the sandbox host, `false` for production | `true` | Operator chooses per environment |

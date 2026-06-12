@@ -28,8 +28,8 @@ Read operations use the agent's OAuth token. Writes go through the proxy and nee
 |---|---|---|---|
 | `GDRIVE_CLIENT_ID` | OAuth 2.0 client ID for the Google Cloud project | — | Google Cloud Console → APIs & Services → Credentials |
 | `GDRIVE_CLIENT_SECRET` | OAuth 2.0 client secret | — | Same page; keep in the operator's secret store |
-| `GDRIVE_ACCESS_TOKEN` | OAuth 2.0 bearer token (short-lived, read path only) | — | Authorization-code flow per Google OAuth docs |
-| `GDRIVE_REFRESH_TOKEN` | OAuth 2.0 refresh token (read path only) | — | Issued on first exchange when `access_type=offline` was requested |
+| `GDRIVE_READ_TOKEN` | OAuth 2.0 bearer token for agent-side read operations; supply a read-only-scoped credential here; it reaches agents and must not carry write scopes; the proxy's write credential (`GDRIVE_ACCESS_TOKEN`) is separate (operator-walkthrough Gate Proxy section) | — | Authorization-code flow per Google OAuth docs |
+| `GDRIVE_REFRESH_TOKEN` | OAuth 2.0 refresh token for refreshing the read token | — | Issued on first exchange when `access_type=offline` was requested |
 | `GDRIVE_MATTER_ROOT_FOLDER_ID` | Drive folder ID under which matter folders live | — | Operator copies the ID from the folder's Drive URL |
 
 Least-privilege scope (verified at https://developers.google.com/workspace/drive/api/guides/api-specific-auth, accessed 2026-06-09): request `https://www.googleapis.com/auth/drive.file` — non-sensitive, per-file access to files the app created or that were shared into the app's scope. Avoid the restricted full `https://www.googleapis.com/auth/drive` scope. Caveat: under `drive.file`, a pre-existing matter folder tree is invisible until the operator shares it into the app's scope (e.g. via the Google Picker) or the app created it — if broader access is genuinely required, the operator must approve the full scope explicitly first.
@@ -44,7 +44,7 @@ Filing is operator-gated like every external transmission in this package: uploa
 
 ## Authentication
 
-Google OAuth 2.0 authorization-code flow (read path): authorize at `https://accounts.google.com/o/oauth2/v2/auth` (request `access_type=offline` to receive a refresh token on the first exchange), exchange and refresh at `https://oauth2.googleapis.com/token`. Include `Authorization: Bearer $GDRIVE_ACCESS_TOKEN` on every **read** request. Official docs: https://developers.google.com/identity/protocols/oauth2/web-server (accessed 2026-06-09). Mint a Drive-only token — do not reuse a Gmail-scoped token (least privilege per credential).
+Google OAuth 2.0 authorization-code flow (read path): authorize at `https://accounts.google.com/o/oauth2/v2/auth` (request `access_type=offline` to receive a refresh token on the first exchange), exchange and refresh at `https://oauth2.googleapis.com/token`. Include `Authorization: Bearer $GDRIVE_READ_TOKEN` on every **read** request. Official docs: https://developers.google.com/identity/protocols/oauth2/web-server (accessed 2026-06-09). Mint a Drive-only token — do not reuse a Gmail-scoped token (least privilege per credential).
 
 ## Operation Patterns
 
@@ -57,7 +57,7 @@ Query operators verified at https://developers.google.com/workspace/drive/api/gu
 Example:
 ```sh
 curl -sS \
-  -H "Authorization: Bearer ${GDRIVE_ACCESS_TOKEN}" \
+  -H "Authorization: Bearer ${GDRIVE_READ_TOKEN}" \
   --data-urlencode "q='${GDRIVE_MATTER_ROOT_FOLDER_ID}' in parents and trashed = false" \
   -G "https://www.googleapis.com/drive/v3/files" \
   | python3 -c "import json,sys; d=json.load(sys.stdin); [print(f['id'], f.get('name'), f.get('mimeType')) for f in d.get('files',[])]"
@@ -105,7 +105,7 @@ After a successful proxy upload, verify by fetching the file metadata:
 Confirm the file exists before reporting success. UNCONFIRMED — the `webViewLink` metadata field for a human-clickable URL; verify on the v3 Files resource reference before linking it in comments.
 
 Failure modes:
-- 401 → access token expired (read path). Refresh at `https://oauth2.googleapis.com/token`; if refresh fails, post `BLOCKED: GDRIVE_AUTH_EXPIRED` and ask operator to re-consent.
+- 401 → access token expired (read path). Refresh at `https://oauth2.googleapis.com/token`; if refresh fails, post `BLOCKED: GDRIVE_READ_TOKEN_EXPIRED` and ask operator to re-consent.
 - 403 → under `drive.file` the target file/folder is not visible to the app; post `BLOCKED: GDRIVE_FILE_NOT_VISIBLE <id>` and ask the operator to share it into the app's scope (or approve a broader scope).
 - 404 → wrong `GDRIVE_MATTER_ROOT_FOLDER_ID` or deleted file; verify configuration.
 - 429 → quota exceeded; back off per `Retry-After`.

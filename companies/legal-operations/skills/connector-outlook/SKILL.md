@@ -29,7 +29,7 @@ Read and draft operations use the agent's delegated OAuth token. Sending is hand
 | `OUTLOOK_TENANT_ID` | Entra (Azure AD) tenant for the auth endpoints | `common` | Microsoft Entra admin center → Overview; use the tenant ID for single-tenant apps |
 | `OUTLOOK_CLIENT_ID` | App registration (client) ID | — | Entra admin center → App registrations |
 | `OUTLOOK_CLIENT_SECRET` | Client secret for the confidential app | — | App registration → Certificates & secrets; keep in the operator's secret store |
-| `OUTLOOK_ACCESS_TOKEN` | OAuth 2.0 bearer token (~1-hour lifetime) | — | Authorization-code flow per Microsoft identity platform docs |
+| `OUTLOOK_ACCESS_TOKEN` | OAuth 2.0 bearer token for agent-side read and draft operations (~1-hour lifetime); must be granted read-only or draft-only scopes (`Mail.ReadWrite` is the maximum — never `Mail.Send`); a token with send permission on the agent side would bypass the `THIRD_PARTY_EGRESS` gate | — | Authorization-code flow per Microsoft identity platform docs |
 | `OUTLOOK_REFRESH_TOKEN` | OAuth 2.0 refresh token | — | Issued when the `offline_access` scope was requested |
 
 Least-privilege delegated permissions (verified at https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0 and https://learn.microsoft.com/en-us/graph/api/user-post-messages?view=graph-rest-1.0, accessed 2026-06-09): `Mail.ReadBasic` is least-privileged for listing; reading bodies needs `Mail.Read`; creating drafts requires `Mail.ReadWrite`. Request `Mail.ReadWrite` + `offline_access` and nothing more. Never request `Mail.Send`.

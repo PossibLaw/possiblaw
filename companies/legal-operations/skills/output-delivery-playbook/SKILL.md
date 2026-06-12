@@ -137,10 +137,15 @@ rules:
    the operator must set `<VAR>` in the launcher environment (never agent
    env) and restart.
 
-5. **Verify by read-back.** Fetch the created file/page by id directly from
-   the vendor API (reads stay direct — the proxy is not in the read path)
-   and confirm it exists (and size matches, where the API returns size)
-   before claiming delivery. An unverified upload is not a delivery.
+5. **Verify delivery.** Primary verification: the gate proxy 200 response
+   contains the vendor-returned `id` (and `webUrl` where available), and the
+   retained local copy exists. These two together constitute verified delivery.
+   Optional read-back GET: if the connector's read-scoped token is configured
+   (`MS_GRAPH_READ_TOKEN` / `GDRIVE_READ_TOKEN` / `NOTION_READ_KEY`), fetch
+   the item by id directly from the vendor API and confirm it exists (and size
+   matches where returned) — do not use a write-scoped token for this check.
+   Absent the read token, rely on the 200 response id plus the local copy;
+   never block delivery reporting on an optional read-back.
 6. **Post the completion comment.** Destination name, canonical link
    (`webUrl` / Drive link / Notion url), and the retained local path. For
    sweep runs, one comment per filed deliverable on its issue.

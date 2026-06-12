@@ -359,15 +359,25 @@ and passes them to the proxy only:
 
 | Env | Goes to | Purpose |
 |---|---|---|
-| `MS_GRAPH_TOKEN` | proxy only | OneDrive / SharePoint delivery |
-| `GDRIVE_ACCESS_TOKEN` | proxy only | Google Drive delivery |
-| `NOTION_API_KEY` | proxy only | Notion page/database writes |
+| `MS_GRAPH_TOKEN` | proxy only | OneDrive / SharePoint delivery (write credential) |
+| `GDRIVE_ACCESS_TOKEN` | proxy only | Google Drive delivery (write credential) |
+| `NOTION_API_KEY` | proxy only | Notion page/database writes (write credential) |
 | `GMAIL_TOKEN` | proxy only | Gmail send |
 | `EXTERNAL_MODEL_API_KEY` | proxy only | External model endpoint auth |
 | `LOCAL_MODEL_URL` / `EXTERNAL_MODEL_URL` | proxy (endpoints, not credentials) | Anonymizer / external-model routing |
 
-An agent that tries to call a vendor directly simply has no token — the
-proxy is the only credentialed path out.
+An agent that tries to call a vendor directly using the above vars simply
+has no token — the proxy is the only credentialed egress path out.
+
+**Agent-side read-only tokens** (not scrubbed — agents use these for read
+and verify operations; must be scoped read-only):
+
+| Env | Goes to | Purpose |
+|---|---|---|
+| `MS_GRAPH_READ_TOKEN` | agents | OneDrive / SharePoint read and verify (read-only scope; must not carry write permissions) |
+| `GDRIVE_READ_TOKEN` | agents | Google Drive read and list (read-only scope; must not carry write permissions) |
+| `NOTION_READ_KEY` | agents | Notion search, query, and page fetch (read-only scope; must not carry write permissions) |
+| `GATE_POLLER_INTERVAL_MS` | proxy | Rejection-poller cadence in milliseconds (default 30000) |
 
 Operational notes:
 

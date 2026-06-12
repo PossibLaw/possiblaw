@@ -3,7 +3,7 @@
 # Graded enforcement: allow = pass-through + receipt (SOFT);
 #   anonymize / human / block = hard gate (agent pauses until resolved).
 #
-# Receipts land in ~/.possiblaw/gate-receipts/ (one JSON file per egress event).
+# Receipts land in ~/.possiblaw/gate-receipts/<data-dir>/receipts.jsonl (one line appended per egress event, SHA-256 hash-chained).
 #
 # Every value below is the firm's to tune. Edit this file in your clone.
 # Restart the proxy after edits; it reads this file at startup only.

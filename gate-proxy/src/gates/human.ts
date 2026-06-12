@@ -87,6 +87,10 @@ export async function humanGate(
     boundary,
     payloadSha256,
     requestedAt: new Date().toISOString(),
+    title: `Egress gate: ${req.tool} (${boundary})`,
+    summary:
+      "An agent requests a gated egress action. The payload is represented by its SHA-256 hash only; " +
+      "open the full request for details.",
   };
 
   const created = await client.createApproval({

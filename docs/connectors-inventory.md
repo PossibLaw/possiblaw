@@ -2,7 +2,7 @@
 
 Complete inventory of all PossibLaw connectors — operational and planned.
 
-All egress writes go through the Gate Proxy (`POST $GATE_PROXY_URL/egress/<tool>`). The proxy holds every egress credential, writes a receipt for each call, and enforces the firm's `gate-policy.yaml`. Agents hold no egress credentials. Read-only operations go directly to the vendor API using agent-scoped tokens. If a `502 credential_missing` response arrives from the proxy, the operator must export the named credential in the launcher environment and restart; never set it in an agent environment.
+All egress writes go through the Gate Proxy (`POST $GATE_PROXY_URL/egress/<tool>`). The proxy holds every egress credential, writes a receipt for each call, and enforces the firm's `gate-policy.yaml`. Agents hold no credentials for the proxied egress paths; agent-side read tokens must be read-scoped (see each connector skill). Read-only operations go directly to the vendor API using agent-scoped read tokens. If a `502 credential_missing` response arrives from the proxy, the operator must export the named credential in the launcher environment and restart; never set egress write credentials in an agent environment.
 
 ---
 

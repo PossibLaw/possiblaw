@@ -82,7 +82,7 @@ describe("humanGate — first call with issueId", () => {
     const created = calls.createApproval[0];
     assert.equal(created.requestedByAgentId, "agent-1");
     assert.deepEqual(created.issueIds, ["issue-42"]);
-    // payload must contain sha, gate, tool, boundary — but NOT the egress payload text
+    // payload must contain sha, gate, tool, boundary, title, summary — but NOT the egress payload text
     assert.equal((created.payload as Record<string, unknown>)["payloadSha256"], sha);
     assert.equal((created.payload as Record<string, unknown>)["gate"], "possiblaw-egress");
     assert.equal((created.payload as Record<string, unknown>)["tool"], "send_email");
@@ -91,6 +91,15 @@ describe("humanGate — first call with issueId", () => {
       "requestedAt" in (created.payload as Record<string, unknown>),
       "payload must include requestedAt",
     );
+    // title and summary must be present for the dashboard approval card
+    const p = created.payload as Record<string, unknown>;
+    assert.ok(typeof p["title"] === "string" && (p["title"] as string).length > 0, "payload must include a non-empty title");
+    assert.ok(typeof p["summary"] === "string" && (p["summary"] as string).length > 0, "payload must include a non-empty summary");
+    assert.ok((p["title"] as string).includes("send_email"), `title should reference tool; got: ${String(p["title"])}`);
+    assert.ok((p["title"] as string).includes("THIRD_PARTY_EGRESS"), `title should reference boundary; got: ${String(p["title"])}`);
+    // summary must NOT contain any egress payload content (no sentinel)
+    assert.ok(!(p["summary"] as string).includes(sentinel), `summary must not include payload sentinel; got: ${String(p["summary"])}`);
+    assert.ok(!(p["title"] as string).includes(sentinel), `title must not include payload sentinel; got: ${String(p["title"])}`);
     // Sentinel MUST NOT appear anywhere in any client call
     const allCallsJson = JSON.stringify(calls);
     assert.ok(

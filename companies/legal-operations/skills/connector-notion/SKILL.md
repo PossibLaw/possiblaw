@@ -24,7 +24,7 @@ Read operations (search, query, fetch) use an agent-accessible token. Writes go 
 
 | Env | Purpose | Default | Source |
 |---|---|---|---|
-| `NOTION_API_KEY` | Internal integration token sent as `Authorization: Bearer <token>` (read path) | — | https://www.notion.so/my-integrations → New integration |
+| `NOTION_READ_KEY` | Internal integration token for agent-side read operations; supply a read-only-scoped credential here; it reaches agents and must not carry write scopes; the proxy's write credential (`NOTION_API_KEY`) is separate (operator-walkthrough Gate Proxy section) | — | https://www.notion.so/my-integrations → New integration |
 | `NOTION_VERSION` | Required `Notion-Version` header value | `2022-06-28` | Notion API release notes |
 
 The integration must be **explicitly shared** with each page or database it needs to access — Notion does not grant workspace-wide access by default. After creating the integration, the operator clicks "Share" on the target page and adds the integration.
@@ -39,7 +39,7 @@ Do not invoke for client-privileged content unless the Notion workspace is expli
 
 ## Authentication
 
-Bearer-token auth via `Authorization: Bearer $NOTION_API_KEY`. The `Notion-Version` header is **required** on every request. Official docs: https://developers.notion.com/reference/intro
+Bearer-token auth via `Authorization: Bearer $NOTION_READ_KEY` for read operations. The `Notion-Version` header is **required** on every request. Official docs: https://developers.notion.com/reference/intro
 
 ## Operation Patterns
 
@@ -48,7 +48,7 @@ Bearer-token auth via `Authorization: Bearer $NOTION_API_KEY`. The `Notion-Versi
 `Method: POST https://api.notion.com/v1/search`
 
 Headers:
-- `Authorization: Bearer $NOTION_API_KEY`
+- `Authorization: Bearer $NOTION_READ_KEY`
 - `Notion-Version: 2022-06-28`
 - `Content-Type: application/json`
 
@@ -95,7 +95,7 @@ For `confidential` or `privileged` matter content, set `meta.confidentiality` ac
 For appending blocks to an existing page, use the same `upload_document` proxy call with `destination: "notion"`, `parentPageId` set to the target page ID, and `content` carrying the text to append. The proxy creates a child page; if true block-append is needed, file as a follow-on operator task.
 
 Failure modes:
-- 401 → token invalid (read path). Post `BLOCKED: NOTION_API_KEY rejected`.
+- 401 → token invalid (read path). Post `BLOCKED: NOTION_READ_KEY rejected`.
 - 403 / `restricted_resource` → integration not shared with the target page or database. Post `BLOCKED: NOTION_INTEGRATION_NOT_SHARED <id>` with instructions to add the integration via the Share menu.
 - 404 → wrong page/database ID.
 - 429 → rate-limited (3 req/sec average per integration). Backoff per `Retry-After`.

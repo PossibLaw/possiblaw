@@ -24,9 +24,9 @@ Read-only operations use the agent's access token. Writes go through the proxy.
 
 | Env | Purpose | Default | Source |
 |---|---|---|---|
-| `HUBSPOT_ACCESS_TOKEN` | Private-app access token for read operations | — | HubSpot UI → Settings → Integrations → Private Apps → Create a private app |
+| `HUBSPOT_ACCESS_TOKEN` | Private-app access token for agent-side read operations; must be granted read-only scopes — a token with write scopes on the agent side would bypass the gate (writes are visibly blocked via the proxy's `not_implemented` posture, but a write-scoped token could be misused if the gate is misconfigured) | — | HubSpot UI → Settings → Integrations → Private Apps → Create a private app |
 
-The private-app token must be scoped at creation time. Minimum recommended scopes for legal-ops agents: `crm.objects.contacts.read/write`, `crm.objects.companies.read/write`, `crm.objects.deals.read/write`.
+The private-app token must be scoped at creation time. Minimum scopes for legal-ops read operations: `crm.objects.contacts.read`, `crm.objects.companies.read`, `crm.objects.deals.read`. Do not add write scopes to the agent-side token.
 
 ## When to Invoke
 

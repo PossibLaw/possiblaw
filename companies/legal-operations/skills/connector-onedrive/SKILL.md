@@ -40,14 +40,14 @@ through the proxy and need no token in the agent environment.
 
 | Env | Purpose | Default | Source |
 |---|---|---|---|
-| `MS_GRAPH_TOKEN` | Bearer token for read/verify Graph requests | — | Operator-supplied (see Authentication) |
+| `MS_GRAPH_READ_TOKEN` | Bearer token for read/verify Graph requests (agent-side) | — | Operator-supplied (see Authentication); supply a read-only-scoped credential here; it reaches agents and must not carry write scopes; the proxy's write credential is separate (operator-walkthrough Gate Proxy section) |
 
 Target drive / site / folder IDs are **not** env vars — they come from the
 operator's delivery policy file (see `output-delivery-playbook`).
 
 ## Authentication
 
-v1 uses an operator-supplied bearer token in `MS_GRAPH_TOKEN` for read and
+v1 uses an operator-supplied bearer token in `MS_GRAPH_READ_TOKEN` for read and
 verify operations. The operator mints it from their own tenant — for example
 via Graph Explorer (https://developer.microsoft.com/graph/graph-explorer)
 for short-lived testing, or an Entra ID app registration for durable use.
@@ -56,12 +56,12 @@ permissions tables in the two reference docs above, accessed 2026-06-11):
 
 | Permission type | Read / verify (`GET …/content`) |
 |---|---|
-| Delegated (work/school) | `Files.Read` or `Files.ReadWrite` |
+| Delegated (work/school) | `Files.Read` |
 | Application | `Files.Read.All` |
 
-The proxy holds the write credential. Tokens expire (typically ~1 hour for
-delegated tokens). A `401` mid-task means the operator must refresh the token;
-it is never an agent retry loop.
+The proxy holds the write credential (`MS_GRAPH_TOKEN`). Tokens expire
+(typically ~1 hour for delegated tokens). A `401` mid-task means the
+operator must refresh the token; it is never an agent retry loop.
 
 ## When to Invoke
 
@@ -75,7 +75,7 @@ destination trusted for that tier (see `output-delivery-playbook`).
 
 ## Operation Patterns
 
-All requests: `Authorization: Bearer $MS_GRAPH_TOKEN`. Base URL
+All requests: `Authorization: Bearer $MS_GRAPH_READ_TOKEN`. Base URL
 `https://graph.microsoft.com/v1.0`.
 
 ### Upload a deliverable via the gate proxy
@@ -133,7 +133,7 @@ Confirm the size matches the local file before reporting success. Use the
 returned `webUrl` as the link in the completion comment.
 
 Failure modes:
-- `401` → token missing/expired (read path). Post `BLOCKED: MS_GRAPH_TOKEN rejected`
+- `401` → token missing/expired (read path). Post `BLOCKED: MS_GRAPH_READ_TOKEN rejected`
   (owner: operator; action: refresh the token). Never echo the token.
 - `403` → token lacks the read scope for the target drive/site. Post the
   scope table above in the blocked comment.
@@ -171,6 +171,6 @@ always the source of truth (`output-delivery-playbook`).
   and flag the operator decision.
 - Do not create sharing links or change item permissions; filing is the only
   write this connector performs.
-- Never log, echo, or store `MS_GRAPH_TOKEN` anywhere — including blocked
-  comments, deliverables, and shell history-visible command lines beyond the
-  curl header itself.
+- Never log, echo, or store `MS_GRAPH_READ_TOKEN` anywhere — including
+  blocked comments, deliverables, and shell history-visible command lines
+  beyond the curl header itself.

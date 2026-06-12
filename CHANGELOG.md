@@ -82,6 +82,21 @@ Versioning: [SemVer](https://semver.org/).
   table — creds go to the proxy env, never agents; receipts path; flag
   notes), known-limitations entries for unauthenticated local_trusted
   board calls and the single-writer receipts assumption.
+- 16 connector skills (`connector-gmail`, `connector-google-drive`,
+  `connector-outlook`, `connector-onedrive`, `connector-notion`,
+  `connector-stripe`, `connector-quickbooks`, `connector-hubspot`,
+  `connector-linear`, `connector-clio`, `connector-imanage`,
+  `connector-netdocuments`, `connector-docusign`,
+  `connector-no-op-signature`, `connector-courtlistener`,
+  `connector-midpage`, `connector-lexis`) updated so all egress writes
+  route through the gate proxy; per-agent egress credentials unbound
+  from the sidecar (`adapterConfig.env`) — credentials live in the
+  proxy process only; `docs/connectors-inventory.md` rewritten as the
+  authoritative connector inventory with gate tool + v1 status per
+  connector. (commit d50e862)
+- `companies/legal-operations/.paperclip.yaml`: courier `GATE_PROXY_URL`
+  declarative default corrected from the test port to the real proxy
+  default port 3801. (commit 5cb8df3)
 
 ### Validation
 

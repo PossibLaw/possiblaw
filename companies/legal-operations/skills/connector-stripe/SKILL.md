@@ -24,10 +24,10 @@ Read-only operations use the agent's API key. Money-movement goes through the pr
 
 | Env | Purpose | Default | Source |
 |---|---|---|---|
-| `STRIPE_API_KEY` | Secret API key for read-only operations | — | https://dashboard.stripe.com/apikeys → use `sk_test_...` for dev, `sk_live_...` for production |
+| `STRIPE_API_KEY` | Restricted read-only API key for read operations; **must** be a restricted key (`rk_test_...` / `rk_live_...`), never a secret key (`sk_...`); a secret key on the agent side would bypass the `MONEY_MOVEMENT` human gate by granting agents direct write access | — | https://dashboard.stripe.com/apikeys → Restricted keys → create with read-only permissions |
 | `STRIPE_API_VERSION` | Pinned API version sent as `Stripe-Version` header | unset (uses account default) | https://stripe.com/docs/api/versioning |
 
-Test mode is implied by the `sk_test_` prefix; live mode by `sk_live_`. The connector does **not** require a separate env flag — the key prefix is authoritative.
+Test mode is implied by the `rk_test_` / `sk_test_` prefix; live mode by `rk_live_` / `sk_live_`. The connector does **not** require a separate env flag — the key prefix is authoritative.
 
 ## When to Invoke (read-only — direct)
 

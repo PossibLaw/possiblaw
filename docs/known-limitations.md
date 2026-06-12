@@ -148,9 +148,10 @@ before live use.
 On a dev machine, paperclip runs as a `local_trusted` instance and accepts
 unauthenticated loopback board calls — that is why the launcher can skip
 `PAPERCLIP_GATE_API_KEY`. The flip side: the human-approval gate is
-enforceable only against the agents' *missing credentials* (egress tokens
-exist solely in the gate-proxy process, so agents have no direct path to a
-vendor). An arbitrary local process outside the agent sandbox could still
+enforceable only against the agents' *missing egress credentials* (egress
+write tokens exist solely in the gate-proxy process, so agents have no
+direct egress write path to a vendor; agent-side read tokens must be
+read-scoped per each connector skill). An arbitrary local process outside the agent sandbox could still
 call the board or a vendor directly. Production deployments with auth
 enabled (export `PAPERCLIP_GATE_API_KEY`, minted via `paperclipai auth
 login`) get the structural gate as well.
@@ -163,6 +164,12 @@ pointed at the same `GATE_RECEIPTS_PATH` will interleave appends and break
 the chain. The launcher derives the path from the data-dir name
 (`~/.possiblaw/gate-receipts/<data-dir-name>/`), so parallel disposable
 launches stay isolated as long as their `--data-dir` values differ.
+
+Tamper-evidence has a same-user limit: a local process that can rewrite the
+whole file can also recompute every hash, so a wholesale rewrite is caught
+only against an externally anchored chain head (`POST /receipts/anchor`
+posts the head into a paperclip comment). Anchor periodically if receipts
+matter for your audit posture.
 
 ## Hybrid variant
 

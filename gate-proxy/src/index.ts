@@ -46,7 +46,7 @@ const policySource = POLICY_PATH ? `file:${POLICY_PATH}` : "defaults";
 
 const receipts = new ReceiptChain(RECEIPTS_PATH);
 
-// All three required env vars must be set to construct a client; else null
+// Two required env vars must be set to construct a client (API key is optional); else null
 const client =
   PAPERCLIP_BASE_URL && PAPERCLIP_COMPANY_ID
     ? new PaperclipClient({
