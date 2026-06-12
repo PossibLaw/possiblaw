@@ -16,6 +16,10 @@ describe("classify", () => {
     assert.equal(classify(req("upload_document")), "THIRD_PARTY_EGRESS");
   });
 
+  it("share_external → THIRD_PARTY_EGRESS", () => {
+    assert.equal(classify(req("share_external")), "THIRD_PARTY_EGRESS");
+  });
+
   it("query_external_model with confidentiality=privileged → CONFIDENTIAL_TO_CLOUD", () => {
     assert.equal(
       classify(req("query_external_model", { confidentiality: "privileged" })),
