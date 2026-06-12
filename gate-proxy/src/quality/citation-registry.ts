@@ -5,12 +5,20 @@
 //
 // What this proves / does not prove (honesty contract): a passing registration
 // means every detectable citation in the document has a row, every row claims
-// "Yes", and every quoted passage appears character-for-character inside the
-// source passage the checker says it came from. It does NOT prove the source
-// passage genuinely came from the cited authority — that link is enforced by
-// the checker agent's workflow and attributed via agentId in the receipt.
+// "Yes", every quoted passage appears character-for-character inside BOTH the
+// source passage the checker says it came from AND in the registered document
+// itself (quote-document binding: an attacker cannot register a fabricated
+// self-consistent quote pair that is absent from the actual document), and
+// coverage is verified via exact comparable-form equality between citations
+// extracted from the document and citations extracted from each row's citation
+// field (substring containment is not used: a crafted row cannot "cover" a
+// different citation by sharing a common substring). It does NOT prove the
+// source passage genuinely came from the cited authority — that link is
+// enforced by the checker agent's workflow and attributed via agentId in the
+// receipt.
 import type { ReceiptChain } from "../receipts.ts";
 import { extractCitations, normalizeText, documentSha256 } from "../citations.ts";
+import { ReceiptChainCorruptError } from "../receipts.ts";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -65,6 +73,16 @@ export class CitationRegistry {
   private readonly verified = new Set<string>();
 
   constructor(private readonly receipts: ReceiptChain) {
+    // Hardening C: verify chain integrity before scanning entries.
+    // An edited chain must not silently rebuild a wrong verified set.
+    const chainResult = receipts.verify();
+    if (!chainResult.ok) {
+      throw new ReceiptChainCorruptError(
+        `CitationRegistry: chain integrity check failed at line ${chainResult.badSeq}: ${chainResult.reason}. ` +
+          `Recovery: inspect the receipts file, truncate the corrupt entry, and re-anchor.`,
+      );
+    }
+
     // Rebuild verified set from the chain: any quality/performed receipt records
     // a sha that passed all checks in a prior session.
     for (const entry of receipts.entries()) {
@@ -128,14 +146,17 @@ export class CitationRegistry {
     };
 
     // -----------------------------------------------------------------------
-    // 1. Coverage: every extracted citation appears inside some row's citation
-    //    (spacing-insensitive containment).
+    // 1. Coverage: every extracted citation must itself be extracted from some
+    //    row's citation field (exact comparable-form equality — substring
+    //    containment allowed crafted rows to "cover" different citations).
+    //    CitationLimitError from a pathological row propagates as-is (caller
+    //    route will 400/500-guard it); no special handling needed here.
     // -----------------------------------------------------------------------
-    const rowCmp = input.rows.map((r) => comparable(r.citation));
-    const missing = citations.filter((c) => {
-      const cc = comparable(c);
-      return !rowCmp.some((rc) => rc.includes(cc));
-    });
+    const rowCites = new Set<string>();
+    for (const r of input.rows) {
+      for (const cite of extractCitations(r.citation)) rowCites.add(comparable(cite));
+    }
+    const missing = citations.filter((c) => !rowCites.has(comparable(c)));
     if (missing.length > 0) return fail("coverage_gap", missing);
 
     // -----------------------------------------------------------------------
@@ -147,15 +168,24 @@ export class CitationRegistry {
     if (notYes.length > 0) return fail("unverified_rows", notYes.map(({ i }) => `row ${i}`));
 
     // -----------------------------------------------------------------------
-    // 3. Quote fidelity: quoted text must appear verbatim (post-normalization)
-    //    inside the claimed source passage. Quoted-without-passage fails closed.
+    // 3. Quote fidelity: a row with non-empty quoted text fails closed as
+    //    quote_mismatch unless BOTH conditions hold:
+    //      (a) normalizeText(input.document).includes(normalizeText(r.quoted))
+    //          — the quote is actually present in the registered document
+    //          (prevents fabricated self-consistent quote pairs)
+    //      (b) r.sourcePassage !== undefined &&
+    //          normalizeText(r.sourcePassage).includes(normalizeText(r.quoted))
+    //          — the quote appears verbatim in the claimed source passage
+    //    Quoted-without-passage fails closed (condition b alone would reject it).
     // -----------------------------------------------------------------------
+    const normalizedDoc = normalizeText(input.document);
     const badQuotes = input.rows
       .map((r, i) => ({ r, i }))
       .filter(({ r }) =>
         r.quoted !== undefined &&
         r.quoted !== "" &&
         !(
+          normalizedDoc.includes(normalizeText(r.quoted)) &&
           r.sourcePassage !== undefined &&
           normalizeText(r.sourcePassage).includes(normalizeText(r.quoted))
         ),

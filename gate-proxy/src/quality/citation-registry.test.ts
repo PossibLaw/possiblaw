@@ -6,6 +6,7 @@ import path from "node:path";
 import { ReceiptChain } from "../receipts.ts";
 import { CitationRegistry } from "./citation-registry.ts";
 import { documentSha256 } from "../citations.ts";
+import { canonicalJson, sha256hex } from "../receipts.ts";
 
 function freshChain(): ReceiptChain {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-receipts-test-"));
@@ -109,4 +110,98 @@ test("zero-citation document registers trivially (citationCount 0)", () => {
   const r = reg.register({ document: "No citations here at all.", rows: [], meta: {} });
   assert.equal(r.ok, true);
   if (r.ok) assert.equal(r.citationCount, 0);
+});
+
+// ---------------------------------------------------------------------------
+// S1 regression tests — Fix A (quote-document binding) + Fix B (per-row extraction)
+// ---------------------------------------------------------------------------
+
+test("S1 regression: one row cannot cover a different citation via substring bleed", () => {
+  const reg = new CitationRegistry(freshChain());
+  const r = reg.register({
+    document: "cite 410 U.S. 113 and 10 U.S. 11",
+    rows: [{ citation: "Roe v. Wade, 410 U.S. 113 (1973)", match: "Yes" }],
+    meta: {},
+  });
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.reason, "coverage_gap");
+    assert.deepEqual(r.details, ["10 U.S. 11"]);
+  }
+});
+
+test("S1 regression: crafted row '1410 U.S. 1131' does not cover '410 U.S. 113'", () => {
+  const reg = new CitationRegistry(freshChain());
+  const r = reg.register({
+    document: "See 410 U.S. 113.",
+    rows: [{ citation: "1410 U.S. 1131", match: "Yes" }],
+    meta: {},
+  });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.reason, "coverage_gap");
+});
+
+test("S1 regression: fabricated quote absent from the document is rejected", () => {
+  const reg = new CitationRegistry(freshChain());
+  const r = reg.register({
+    document: "See 410 U.S. 113. We argue accordingly.",
+    rows: [{
+      citation: "Roe v. Wade, 410 U.S. 113 (1973)",
+      match: "Yes",
+      quoted: "a fabricated holding never in the document",
+      sourcePassage: "text containing a fabricated holding never in the document, self-consistently",
+    }],
+    meta: {},
+  });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.reason, "quote_mismatch");
+});
+
+test("no-quote attestation registers with quotedRowCount 0 (documented honesty floor)", () => {
+  const chain = freshChain();
+  const reg = new CitationRegistry(chain);
+  const r = reg.register({
+    document: "See 410 U.S. 113.",
+    rows: [{ citation: "Roe v. Wade, 410 U.S. 113 (1973)", match: "Yes" }],
+    meta: {},
+  });
+  assert.equal(r.ok, true);
+  assert.equal(chain.entries().at(-1)!.body.meta!["quotedRowCount"], 0);
+});
+
+// ---------------------------------------------------------------------------
+// Hardening C — verify chain integrity at construction
+// ---------------------------------------------------------------------------
+
+test("Hardening C: constructor rejects a chain with a tampered middle entry", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-receipts-c-"));
+  const filePath = path.join(dir, "receipts.jsonl");
+  const chain = new ReceiptChain(filePath);
+
+  // Build a valid 3-entry chain via a first registry
+  const reg1 = new CitationRegistry(chain);
+  reg1.register({
+    document: "See 410 U.S. 113.",
+    rows: [{ citation: "Roe v. Wade, 410 U.S. 113 (1973)", match: "Yes" }],
+    meta: {},
+  });
+
+  // Tamper the middle line (line 1, 0-indexed) body — leave hash intact
+  const lines = fs.readFileSync(filePath, "utf8").split("\n").filter(Boolean);
+  if (lines.length >= 1) {
+    const entry = JSON.parse(lines[0]) as import("../receipts.ts").ReceiptEntry;
+    entry.body.outcome = "performed"; // was "blocked" if it failed, or we just mutate
+    entry.body.outcome = entry.body.outcome === "performed" ? "blocked" : "performed";
+    lines[0] = JSON.stringify(entry);
+    fs.writeFileSync(filePath, lines.join("\n") + "\n");
+  }
+
+  // Constructing a new registry over the corrupt chain must throw
+  assert.throws(
+    () => new CitationRegistry(chain),
+    (err: unknown) => {
+      assert.ok(err instanceof Error, `expected Error, got ${String(err)}`);
+      return true;
+    },
+  );
 });
