@@ -5,7 +5,8 @@
     "moduleResolution": "NodeNext",
     "target": "ES2022",
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true
   },
   "include": ["src"]
 }
