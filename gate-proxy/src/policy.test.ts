@@ -28,6 +28,10 @@ function writeTmpYaml(content: string): string {
   return writeTmp(_sharedTmpDir, name, content);
 }
 
+after(() => {
+  if (_sharedTmpDir) fs.rmSync(_sharedTmpDir, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------------------------------
 // Test 1: Defaults — each of the 6 boundaries maps to exact default decision
 // ---------------------------------------------------------------------------

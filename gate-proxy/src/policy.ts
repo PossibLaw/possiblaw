@@ -61,7 +61,7 @@ export const DEFAULT_POLICY: Policy = Object.freeze({
     IRREVERSIBLE_EXTERNAL_OP: "human" as const,
   }),
   citationGate: Object.freeze({
-    boundaries: Object.freeze(["COURT_FILING", "THIRD_PARTY_EGRESS"]) as unknown as BoundaryType[],
+    boundaries: Object.freeze(["COURT_FILING", "THIRD_PARTY_EGRESS"] as BoundaryType[]) as BoundaryType[],
   }),
 });
 
@@ -103,7 +103,7 @@ function validateBoundariesObject(raw: unknown): Record<BoundaryType, Decision> 
 
 function validateCitationGate(raw: unknown): { boundaries: BoundaryType[] } {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new PolicyError("citationGate must be a mapping with a 'boundaries' list");
+    throw new PolicyError(`citationGate must be a mapping with a 'boundaries' list, got: ${Array.isArray(raw) ? "array" : typeof raw}`);
   }
   const obj = raw as Record<string, unknown>;
   for (const key of Object.keys(obj)) {
@@ -176,7 +176,7 @@ export function loadPolicy(filePath?: string): Policy {
   for (const key of Object.keys(doc)) {
     if (!VALID_TOP_LEVEL_KEYS.has(key)) {
       throw new PolicyError(
-        `Unknown top-level key "${key}" in policy file. Only "version" and "boundaries" are allowed.`,
+        `Unknown top-level key "${key}" in policy file. Only "version", "boundaries", and "citationGate" are allowed.`,
       );
     }
   }
