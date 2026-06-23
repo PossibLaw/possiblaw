@@ -224,9 +224,11 @@ def apply_firm_memory(files: dict, memory_text: str) -> dict:
 
     Preserves the head (everything up to and including FIRM_MEMORY_START),
     replaces the body between the markers, and keeps the tail (from
-    FIRM_MEMORY_END onward). Returns files unchanged if the key or markers
-    are absent.
+    FIRM_MEMORY_END onward). Returns a new dict (shallow copy of files) —
+    the caller's dict is never mutated. Returns files unchanged if the key
+    or markers are absent.
     """
+    files = dict(files)
     key = "skills/firm-memory/SKILL.md"
     src = files.get(key)
     if src is None:
@@ -362,10 +364,31 @@ def _self_test() -> int:
 
     # firm-memory overlay
     files = {"skills/firm-memory/SKILL.md": "a\n<!-- FIRM-MEMORY-BODY -->\nOLD\n<!-- /FIRM-MEMORY-BODY -->\nz\n"}
-    out = apply_firm_memory(dict(files), "- (nda) cap indemnity at fees paid\n")
+    original_files = dict(files)  # pre-call copy for purity check
+    out = apply_firm_memory(files, "- (nda) cap indemnity at fees paid\n")
     assert "cap indemnity at fees paid" in out["skills/firm-memory/SKILL.md"]
     assert "OLD" not in out["skills/firm-memory/SKILL.md"]
     assert out["skills/firm-memory/SKILL.md"].startswith("a\n")
+    # Purity: original input dict must be unchanged.
+    assert files == original_files, "apply_firm_memory mutated the caller's dict"
+
+    # No-op guard: key absent — returns files unchanged (same content).
+    files_no_key = {"other/file.md": "content"}
+    out_no_key = apply_firm_memory(files_no_key, "x")
+    assert out_no_key == files_no_key, "apply_firm_memory should return files unchanged when key is absent"
+
+    # No-op guard: key present but markers absent — content returned unchanged.
+    files_no_markers = {"skills/firm-memory/SKILL.md": "no markers here\n"}
+    out_no_markers = apply_firm_memory(files_no_markers, "x")
+    assert out_no_markers["skills/firm-memory/SKILL.md"] == "no markers here\n", \
+        "apply_firm_memory should leave content unchanged when markers are absent"
+
+    # Idempotency: applying the same memory_text twice yields the same result.
+    mem = "- (nda) cap indemnity at fees paid\n"
+    out1 = apply_firm_memory(files, mem)
+    out2 = apply_firm_memory(out1, mem)
+    assert out1["skills/firm-memory/SKILL.md"] == out2["skills/firm-memory/SKILL.md"], \
+        "apply_firm_memory is not idempotent"
 
     print("OK: _possiblaw_inline_source self-test passed")
     return 0
