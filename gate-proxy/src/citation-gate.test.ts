@@ -37,3 +37,12 @@ test("non-gated boundary is unaffected by the citation gate", async () => {
   assert.doesNotMatch(JSON.stringify(res.body), /citation_gate/);
   await srv.close();
 });
+
+test("gated boundary with a citation-free document passes the gate (only citation-bearing docs are gated)", async () => {
+  const srv = await startTestServer();
+  // A filing body with no detectable legal citations → nothing to verify →
+  // the citation gate does not fire; the request proceeds to the normal gates.
+  const res = await postEgress(srv, "file_court_document", { documentText: "Notice of appearance. No legal authorities are cited here." });
+  assert.doesNotMatch(JSON.stringify(res.body), /citation_gate/);
+  await srv.close();
+});
