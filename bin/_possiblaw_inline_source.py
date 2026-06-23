@@ -32,6 +32,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Firm-memory skill overlay markers.
+FIRM_MEMORY_START = "<!-- FIRM-MEMORY-BODY -->"
+FIRM_MEMORY_END = "<!-- /FIRM-MEMORY-BODY -->"
+
 # Directories whose contents must NOT enter the inline bundle.
 SKIP_DIR_NAMES = {".git", "__pycache__", "node_modules", ".DS_Store"}
 # File names to skip outright.
@@ -215,6 +219,28 @@ def _filter_sidecar(text: str, included_agents: set) -> str:
     return "".join(out)
 
 
+def apply_firm_memory(files: dict, memory_text: str) -> dict:
+    """Replace the firm-memory skill body between the markers with memory_text.
+
+    Preserves the head (everything up to and including FIRM_MEMORY_START),
+    replaces the body between the markers, and keeps the tail (from
+    FIRM_MEMORY_END onward). Returns files unchanged if the key or markers
+    are absent.
+    """
+    key = "skills/firm-memory/SKILL.md"
+    src = files.get(key)
+    if src is None:
+        return files
+    start = src.find(FIRM_MEMORY_START)
+    end = src.find(FIRM_MEMORY_END)
+    if start == -1 or end == -1 or end < start:
+        return files
+    head = src[: start + len(FIRM_MEMORY_START)]
+    tail = src[end:]
+    files[key] = head + "\n" + memory_text.rstrip("\n") + "\n" + tail
+    return files
+
+
 def build_inline_source(
     package_root: Path,
     extra_roots: list[Path] | None = None,
@@ -333,6 +359,13 @@ def _self_test() -> int:
             raise AssertionError("path collision must raise ValueError")
 
     _self_test_teams()
+
+    # firm-memory overlay
+    files = {"skills/firm-memory/SKILL.md": "a\n<!-- FIRM-MEMORY-BODY -->\nOLD\n<!-- /FIRM-MEMORY-BODY -->\nz\n"}
+    out = apply_firm_memory(dict(files), "- (nda) cap indemnity at fees paid\n")
+    assert "cap indemnity at fees paid" in out["skills/firm-memory/SKILL.md"]
+    assert "OLD" not in out["skills/firm-memory/SKILL.md"]
+    assert out["skills/firm-memory/SKILL.md"].startswith("a\n")
 
     print("OK: _possiblaw_inline_source self-test passed")
     return 0
@@ -474,6 +507,11 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="print valid team names for --include-teams (one per line) and exit",
     )
+    parser.add_argument(
+        "--firm-memory-file",
+        help="path to a firm-memory.md file; overlays its content into the "
+        "skills/firm-memory/SKILL.md body between the <!-- FIRM-MEMORY-BODY --> markers",
+    )
     parser.add_argument("--self-test", action="store_true", help="run built-in tests and exit")
     args = parser.parse_args(argv)
 
@@ -504,6 +542,16 @@ def main(argv: list[str]) -> int:
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
+
+    if args.firm_memory_file:
+        fm_path = Path(args.firm_memory_file)
+        if not fm_path.is_file():
+            print(f"error: --firm-memory-file not found: {fm_path}", file=sys.stderr)
+            return 2
+        memory_text = fm_path.read_text(encoding="utf-8")
+        payload["source"]["files"] = apply_firm_memory(
+            payload["source"]["files"], memory_text
+        )
 
     json.dump(payload, sys.stdout)
     sys.stdout.write("\n")
