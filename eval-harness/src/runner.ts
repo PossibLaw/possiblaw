@@ -134,8 +134,12 @@ export async function runCase(c: Case, opts: RunOptions): Promise<CaseRecord> {
  * Runs all cases for a target sequentially, respecting the budget limit.
  * Stops running new cases when cumulative cost would exceed the budget.
  */
-export async function runTarget(target: string, opts: RunOptions): Promise<RunReport> {
-  const cases = loadCasesForTarget(opts.casesDir, target);
+/**
+ * Runs a given list of cases sequentially (respecting the budget) and summarizes
+ * them under `label` (the report's target field). Shared by the target path
+ * (runTarget) and the benchmark path (CLI --benchmark).
+ */
+export async function runCases(cases: Case[], label: string, opts: RunOptions): Promise<RunReport> {
   const records: CaseRecord[] = [];
   let cumulativeCost = 0;
   let budgetAborted = false;
@@ -151,18 +155,25 @@ export async function runTarget(target: string, opts: RunOptions): Promise<RunRe
     cumulativeCost += rec.costUsd;
   }
 
-  // Determine model mix string for report
+  // Lane + model mix for the report header derive from the first case's target.
+  const refTarget = cases.length > 0 ? cases[0].target : label;
+  const lane = cases.length > 0 ? (cases[0].lane ?? laneFromPaperclip(opts.paperclipYamlPath, refTarget)) : "primary";
   let modelMix = opts.variant;
   try {
     const variantsFile = loadVariants(opts.variantsPath);
-    const lane = cases.length > 0 ? (cases[0].lane ?? laneFromPaperclip(opts.paperclipYamlPath, target)) : "primary";
     const model = resolveModel(variantsFile, opts.variant, lane);
     modelMix = `${model.adapterType}/${model.model}`;
   } catch {
     // keep variant as modelMix
   }
 
-  const lane = cases.length > 0 ? (cases[0].lane ?? laneFromPaperclip(opts.paperclipYamlPath, target)) : "primary";
+  return summarize(label, opts.variant, lane, modelMix, records, opts.budget, budgetAborted, timestamp);
+}
 
-  return summarize(target, opts.variant, lane, modelMix, records, opts.budget, budgetAborted, timestamp);
+/**
+ * Runs all cases for a target (loaded from the cases dir) sequentially.
+ */
+export async function runTarget(target: string, opts: RunOptions): Promise<RunReport> {
+  const cases = loadCasesForTarget(opts.casesDir, target);
+  return runCases(cases, target, opts);
 }
