@@ -583,8 +583,10 @@ If the launcher hangs on `paperclipai onboard`, kill it (`Ctrl-C` or `kill $(cat
 ## Teach your firm's agents
 
 PossibLaw includes a Tier-1 learning loop that lets the firm accumulate
-persistent preferences and instructions that every agent applies to future
-matters.
+persistent preferences and instructions that every drafting, reviewing, and
+delegating agent applies to future matters. Pure data-extraction agents
+(lane: extractive) are excluded — they run read-only workflows where firm
+style preferences do not apply.
 
 ### How a lesson is born
 

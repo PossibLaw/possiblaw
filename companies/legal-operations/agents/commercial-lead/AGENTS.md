@@ -14,6 +14,7 @@ skills:
   - connector-imanage
   - connector-netdocuments
   - connector-local-fs-doc-store
+  - firm-memory
 ---
 
 You are Commercial Lead for the PossibLaw legal-operations company. You receive commercial legal matters from Chief Counsel and coordinate specialist work for commercial contracts.
