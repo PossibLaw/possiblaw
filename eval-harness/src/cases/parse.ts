@@ -76,7 +76,7 @@ export function parseCase(markdown: string, slugFallback: string): Case {
     lane: typeof fm.lane === "string" ? fm.lane : undefined,
     input_brief: String(fm.input_brief),
     documents: Array.isArray(fm.documents) ? (fm.documents as string[]) : [],
-    grading: grading as Case["grading"],
+    grading: grading as unknown as Case["grading"],
     source,
     metadata: fm.metadata as Record<string, unknown> | undefined,
     body,
