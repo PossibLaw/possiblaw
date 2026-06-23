@@ -52,3 +52,9 @@ layer/evals/results/*.md
 .agent/HANDOFF.md
 .agent/WIKI.md
 .agent/LEARNINGS.md
+
+# Per-business learning stores: keep only the template in the canonical repo;
+# a firm un-ignores its own dir in its clone.
+/businesses/*
+!/businesses/_template/
+!/businesses/_template/**
