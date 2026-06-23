@@ -81,7 +81,7 @@ When resuming prior work, read `${REPO_ROOT}/.claude/history.md` first.
 
 ## Commands
 `./bin/possiblaw` - One-command launcher: onboard paperclip, pick variant, import the package, open the dashboard.
-`./bin/possiblaw --dry-run --variant codex --non-interactive --yes` - Validate the import body against `/api/companies/import/preview` without writing.
+`./bin/possiblaw --dry-run --variant codex --non-interactive --yes --mission "smoke test"` - Validate the import body against `/api/companies/import/preview` without writing (`--non-interactive` requires `--mission`).
 `./bin/possiblaw --list-variants` - Show available variants and their requirements.
 `bash -n bin/possiblaw` - Static-check the launcher.
 `python3 bin/_possiblaw_variants.py --self-test && python3 bin/_possiblaw_inline_source.py --self-test` - Self-test the Python helpers.
@@ -93,7 +93,7 @@ Run the launcher dry-run + helper self-tests before handoff. Expected dry-run pl
 - Runtime: paperclip (git submodule, pinned, never modified) owns UI, auth, orchestration, budgets, adapters, audit.
 - Package: Agent Companies v1 format under `companies/legal-operations/` — Markdown (`COMPANY.md`, `AGENTS.md`, `SKILL.md`, `PROJECT.md`, `TASK.md`) plus the `.paperclip.yaml` sidecar for paperclip-only fidelity.
 - Launcher: `bin/possiblaw` (bash) + `bin/_possiblaw_variants.py` / `bin/_possiblaw_inline_source.py` (stdlib-only Python). Imports via direct HTTP POST to `/api/companies/import` (the CLI strips `adapterConfig`; the HTTP API does not).
-- Variants: `companies/legal-operations/variants.yaml` maps each agent's `metadata.possiblaw.modelLane` (primary / routing / drafting / review / extractive) to per-variant adapter config. Variants: codex (Codex CLI), claude (Claude CLI), ollama (OpenCode → Ollama).
+- Variants: `companies/legal-operations/variants.yaml` maps each agent's `metadata.possiblaw.modelLane` (primary / routing / drafting / review / extractive) to per-variant adapter config. Ten variants across four paperclip adapter types: `codex`/`codex-api` (codex_local), `claude`/`claude-api` (claude_local), `ollama`/`llamacpp`/`opencode`/`openrouter` (opencode_local), `gemini`/`gemini-api` (gemini_local).
 - The standalone TypeScript CLI runtime was removed in 0.4.0 (see CHANGELOG); do not resurrect it. `layer/` holds remaining unconverted source material.
 
 ## Code Map
@@ -104,7 +104,9 @@ Run the launcher dry-run + helper self-tests before handoff. Expected dry-run pl
 - Docs: `docs/operator-walkthrough.md` (canonical getting-started), `docs/paperclip-package.md`, `docs/known-limitations.md`, `docs/ARCHITECTURE.md` (decision log).
 - Plan + handoff: `/Users/salvadorcarranza/.claude/plans/eventual-munching-fairy.md` (plan-of-record, local-only), `.agent/PLAN.md` (active work queue), `.agent/HANDOFF.md`.
 - Submodule: `paperclip/` (pinned, never modified).
-- Tests: validation is launcher dry-run against a fresh data dir + helper `--self-test` modes + per-package frontmatter/YAML parse checks. No Node test runner.
+- Egress trust proxy: `gate-proxy/` (standalone TypeScript; boundary classify → policy → anonymize → human gate → hash-chained receipts; citation gate enforced on court/third-party egress). Tests: `pnpm -C gate-proxy test` (node:test).
+- Eval harness: `eval-harness/` (standalone TypeScript CLI via `bin/eval`; scores agents/skills per case across all 10 variants, deterministic + all-pass rubric grading). Cases live in `companies/legal-operations/evals/cases/`. Tests: `pnpm -C eval-harness test` (node:test).
+- Tests: launcher dry-run against a fresh data dir + helper `--self-test` modes + per-package frontmatter/YAML parse checks; plus node:test suites in `gate-proxy/` and `eval-harness/` (`pnpm -C <component> test`).
 
 ## Canonical Roles
 - `product-strategist` — Clarifies user value, scope, and success criteria. Source of truth: `docs/roles/product-strategist.md`.
