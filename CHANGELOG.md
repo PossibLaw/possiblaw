@@ -7,6 +7,36 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.22.0] — 2026-06-22 — Phase 2 citation-gate enforcement
+
+### Added
+
+- `gate-proxy/src/document-text.ts`: `extractDocumentText(tool, payload)` helper
+  maps each citation-gated egress tool to the payload field that carries the
+  reviewable document text the citation gate hashes.
+- `gate-proxy/src/citation-gate.test.ts`: four integration tests for citation-gate
+  enforcement: no-registration blocked 403, passing registration proceeds, no
+  reviewable document fails closed 403, non-gated boundary unaffected.
+- `gate-proxy/src/test-helpers.ts`: shared server-start/post/register helpers
+  extracted for reuse across integration tests.
+
+### Changed
+
+- `gate-proxy/src/server.ts` (`handleEgress`): citation gate enforced immediately
+  after `decide()` and before any dispatch (including the human gate). On gated
+  boundaries (`COURT_FILING`, `THIRD_PARTY_EGRESS` by default), blocks with 403
+  unless a registered, payload-bound citation verification exists for the document
+  sha. Fails closed (403) when the payload carries no reviewable document text.
+  Receipts carry counts + shas only — never payload text.
+- `README.md`: citation verification row updated from "Advisory today → blocking in
+  Phase 2" to "Enforced at the gate (Phase 2)" with accurate enforcement details.
+- `gate-proxy/src/server.test.ts`: nine pre-Phase-2 tests updated to use a
+  `POLICY_NO_CITATION_GATE` policy (empty `citationGate.boundaries`) so that tests
+  covering human-gate flow, anonymize, and performer-error paths are not intercepted
+  by the new enforcement layer.
+
+---
+
 ## [0.21.0] — 2026-06-12 — Positioning reframe: lead with the trust pipeline
 
 ### Changed
