@@ -4698,3 +4698,16 @@ routines:
         enabled: true
     concurrencyPolicy: coalesce_if_active
     catchUpPolicy: skip_missed
+  learning-sweep:
+    # Intent declaration: learning-scribe sweeps recently completed matters for
+    # lawyer feedback and "remember this" comments, generalizes them into
+    # sanitized firm-memory lessons, and posts human-approval cards. The
+    # importer does not lift routine bindings; the operator wires the schedule
+    # in the UI.
+    triggers:
+      - kind: schedule
+        cronExpression: "0 3 * * *"
+        timezone: America/Chicago
+        enabled: true
+    concurrencyPolicy: coalesce_if_active
+    catchUpPolicy: skip_missed
