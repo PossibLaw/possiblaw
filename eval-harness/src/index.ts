@@ -8,9 +8,11 @@ import { parseCase, CaseParseError, loadCasesForTarget } from "./cases/parse.ts"
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { generateCoverage } from "./coverage.ts";
-import { runTarget } from "./runner.ts";
+import { runTarget, runCases } from "./runner.ts";
+import { loadBenchmark } from "./benchmarks.ts";
 import { createModelClient } from "./model-client/index.ts";
 import { writeReport, renderMarkdown, type RunReport } from "./report/index.ts";
+import type { Case } from "./types.ts";
 
 // Paths relative to repo root
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -32,8 +34,9 @@ Usage:
   ./bin/eval <command> [options]
 
 Commands:
-  run --agent <slug> | --skill <slug> [--variant <v>] [--budget <n>]
-      Run eval cases for an agent or skill, write report to eval-harness/results/
+  run (--agent <slug> | --skill <slug> | --benchmark <name>) [--variant <v>] [--budget <n>] [--limit <n>]
+      Run eval cases for an agent/skill, or a benchmark dataset (e.g. cuad).
+      Writes a report to eval-harness/results/. --limit caps how many cases run.
 
   list
       Print coverage table to stdout (lists all targets + eval status, reports parse errors)
@@ -51,38 +54,67 @@ Commands:
 
 async function cmdRun(args: string[]): Promise<void> {
   let target: string | null = null;
+  let benchmark: string | null = null;
   let variant = "codex";
   let budget: number | null = null;
+  let limit: number | null = null;
 
   for (let i = 0; i < args.length; i++) {
     if ((args[i] === "--agent" || args[i] === "--skill") && args[i + 1]) {
       target = args[++i];
+    } else if (args[i] === "--benchmark" && args[i + 1]) {
+      benchmark = args[++i];
     } else if (args[i] === "--variant" && args[i + 1]) {
       variant = args[++i];
     } else if (args[i] === "--budget" && args[i + 1]) {
       budget = parseFloat(args[++i]);
+    } else if (args[i] === "--limit" && args[i + 1]) {
+      limit = parseInt(args[++i], 10);
     }
   }
 
-  if (!target) {
-    console.error("Error: --agent <slug> or --skill <slug> is required");
+  if (!target && !benchmark) {
+    console.error("Error: one of --agent <slug>, --skill <slug>, or --benchmark <name> is required");
+    process.exit(1);
+  }
+  if (target && benchmark) {
+    console.error("Error: --benchmark cannot be combined with --agent/--skill");
     process.exit(1);
   }
 
   const client = createModelClient();
-  console.log(`Running eval for target: ${target} (variant: ${variant})`);
-
-  const report = await runTarget(target, {
+  const opts = {
     variant,
     budget,
     client,
     variantsPath: VARIANTS_PATH,
     paperclipYamlPath: PAPERCLIP_YAML_PATH,
     casesDir: CASES_DIR,
-  });
+  };
+
+  let report: RunReport;
+  let label: string;
+
+  if (benchmark) {
+    let cases: Case[];
+    try {
+      cases = loadBenchmark(benchmark, REPO_ROOT);
+    } catch (e) {
+      console.error(`Error: ${(e as Error).message}`);
+      process.exit(1);
+    }
+    if (limit !== null && limit >= 0) cases = cases.slice(0, limit);
+    label = benchmark;
+    console.log(`Running benchmark: ${benchmark} (${cases.length} cases, variant: ${variant})`);
+    report = await runCases(cases, label, opts);
+  } else {
+    label = target as string;
+    console.log(`Running eval for target: ${label} (variant: ${variant})`);
+    report = await runTarget(label, opts);
+  }
 
   // Print per-case table
-  console.log(`\n${target}  (${report.cases.length} cases, lane=${report.lane} → ${report.modelMix})`);
+  console.log(`\n${label}  (${report.cases.length} cases, lane=${report.lane} → ${report.modelMix})`);
   for (const c of report.cases) {
     const status = c.skipped ? "SKIP" : c.pass ? "PASS" : "FAIL";
     const detail = c.detail ? `  (${c.detail})` : "";

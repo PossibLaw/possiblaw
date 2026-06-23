@@ -7,6 +7,24 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.23.0] — 2026-06-23 — Eval harness: runnable CUAD benchmark
+
+### Added
+
+- `eval-harness/src/benchmarks.ts`: a benchmark registry mapping a name → `Case[]`
+  loaded from its dataset. `cuad` is the first entry (reads
+  `layer/evals/datasets/cuad/fixtures.jsonl` via the existing adapter); the Harvey
+  LAB adapter plugs in here later (spec §13).
+- `eval-harness/src/runner.ts`: `runCases(cases, label, opts)` extracted from
+  `runTarget` so a given case list (agent/skill cases or a benchmark) flows through
+  one pipeline. `runTarget` now delegates to it.
+- CLI `run` gains `--benchmark <name>` and `--limit <n>`:
+  `./bin/eval run --benchmark cuad --variant <v> [--limit <n>]` scores
+  `clause-extractor` against the CUAD fixtures and writes a report. `--benchmark`
+  is mutually exclusive with `--agent`/`--skill`; an unknown benchmark errors clearly.
+
+---
+
 ## [0.22.0] — 2026-06-22 — Phase 2 citation-gate enforcement
 
 ### Added
