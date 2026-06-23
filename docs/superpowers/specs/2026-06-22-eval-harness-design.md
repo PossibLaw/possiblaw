@@ -136,7 +136,7 @@ grading:
       type: contains
       value: "two (2) year"
   rubric:                      # when mode=rubric (all-pass; LAB-compatible)
-    judge_model: claude_local  # which lane/driver judges
+    judge_model: review        # which LANE judges (resolved via variants.yaml lanes)
     pass_rule: all             # all = every criterion must pass (LAB all-pass)
     criteria:
       - id: mutual-symmetry

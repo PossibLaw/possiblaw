@@ -32,7 +32,11 @@ export async function runRubric(
   subjectModel: ResolvedModel,
 ): Promise<{ score: number; pass: boolean; verdicts: CriterionVerdict[]; judgeIsSubject: boolean }> {
   const judgeModel = resolveJudge(rubric.judge_model);
-  const judgeIsSubject = judgeModel.model === subjectModel.model;
+  // Flag when the judge is effectively the model under test. Compare the full
+  // (adapterType, model) pair so a shared model name across adapter families
+  // is not mistaken for a self-judge, and vice versa.
+  const judgeIsSubject =
+    judgeModel.model === subjectModel.model && judgeModel.adapterType === subjectModel.adapterType;
 
   const verdicts: CriterionVerdict[] = [];
   for (const criterion of rubric.criteria) {

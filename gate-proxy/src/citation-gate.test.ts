@@ -16,7 +16,10 @@ test("gated boundary with a registered, passing citation verification proceeds p
   const doc = "Plaintiff cites 410 U. S. 113.";
   await registerCitation(srv, doc, [{ citation: "410 U.S. 113", match: "Yes" }]);
   const res = await postEgress(srv, "file_court_document", { documentText: doc });
-  assert.notEqual(res.status, 403); // reaches human gate / allow, not citation-blocked
+  // Passed the citation gate → reaches the human gate (503 with the null client
+  // in this harness). Crucially, it is NOT a citation-gate block.
+  assert.equal(res.status, 503);
+  assert.doesNotMatch(JSON.stringify(res.body), /citation_gate/);
   await srv.close();
 });
 

@@ -2,6 +2,11 @@
 // Maps CUAD fixtures.jsonl → Case[]
 // CUAD fixture schema: { id, text, question, gold_label, gold_spans }
 // Maps: id → slug, question → input_brief, text → document, gold_label → golden check value
+//
+// v1 STATUS: interface demonstration. This adapter proves the benchmark-adapter
+// shape on real data but is not yet wired into the runner/CLI (no --benchmark path
+// yet). The live CUAD-backed cases are the hand-authored markdown cases under
+// companies/legal-operations/evals/cases/. See spec §3 (prove the interface) and §13.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Case } from "../types.ts";
