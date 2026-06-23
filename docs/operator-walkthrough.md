@@ -15,7 +15,7 @@ The first hands-on step below exercises exactly that loop: a simulated court
 filing pauses at the human gate, you approve it in the dashboard, and the
 receipt trail shows the whole exchange.
 
-The 175 agents, 171 skills, and 34 teams are the interchangeable parts
+The 176 agents, 172 skills, and 34 teams are the interchangeable parts
 inside that pipeline. The rest of this walkthrough — variants, demo
 profiles, team subsets, delivery, the NDA matter — is how you choose which
 parts to run and watch them work.
@@ -111,7 +111,7 @@ To preview only (no DB writes):
 
 ```bash
 ./bin/possiblaw --variant codex --dry-run --non-interactive --yes
-# preview: agents=175 skills=171 projects=3 issues=3 warnings=0 errors=0
+# preview: agents=176 skills=172 projects=3 issues=3 warnings=0 errors=0
 ```
 
 Common flags:
@@ -263,7 +263,7 @@ the demo data is fictional.
 ### Team subset import (`--teams`)
 
 The catalog is the menu — import what your firm practices. By default the
-launcher imports all 175 agents; `--teams` imports only the named teams:
+launcher imports all 176 agents; `--teams` imports only the named teams:
 
 ```bash
 ./bin/possiblaw --teams litigation,commercial   # two practices
@@ -579,6 +579,73 @@ If `output-local-docx` reports BLOCKED with `pandoc not installed`, run `brew in
 If `privacy-encoder` reports the key directory is on a synced cloud folder (iCloud, Dropbox, OneDrive, Google Drive), the warning is non-blocking. Move the key dir off the sync target if you need the matter to be local-only.
 
 If the launcher hangs on `paperclipai onboard`, kill it (`Ctrl-C` or `kill $(cat $DATA_DIR/possiblaw.pid)`) and inspect `$DATA_DIR/possiblaw.log` for the failure. The most common cause is port 3100 already in use; pass `--port <free-port>` to work around it.
+
+## Teach your firm's agents
+
+PossibLaw includes a Tier-1 learning loop that lets the firm accumulate
+persistent preferences and instructions that every agent applies to future
+matters.
+
+### How a lesson is born
+
+1. **Feedback or a `remember this:` instruction.** Any comment on an issue
+   that starts with `remember this:` is captured by the `learning-scribe`
+   agent (ops-lead routing). The scribe also picks up explicit corrections
+   and preferences posted on issues. Examples:
+
+   ```
+   remember this: always cite the Delaware General Corporation Law by title,
+   not just section number.
+
+   remember this: our preferred NDA governing law is New York.
+   ```
+
+2. **Sanitizer + ethical-wall check.** Before writing anything, the
+   `learning-loop` package runs a fail-closed sanitizer that strips
+   client-specific facts (names, matter IDs, dollar figures) so that only
+   generalized preferences reach the firm-memory store. A lesson that cannot
+   be sanitized cleanly is dropped and the scribe posts a comment explaining
+   why.
+
+3. **Approval card.** The scribe proposes the sanitized lesson as a
+   Paperclip approval card on the issue. You review it in the dashboard,
+   approve it (or edit the text first), and only then does the lesson land in
+   `businesses/<slug>/learnings/ledger.jsonl`.
+
+4. **Memory injection on the next launch.** When you run the launcher with
+   `--business <slug>`, the approved lessons in `businesses/<slug>/memory/`
+   are overlaid into the `firm-memory` skill, which ships empty in the stock
+   package. Every agent that references `firm-memory` will apply those
+   standing instructions to all subsequent matters.
+
+### The `--business` flag
+
+```bash
+./bin/possiblaw --business acme-legal
+```
+
+The flag names a per-firm store under `businesses/acme-legal/`. If the
+directory does not exist the launcher bootstraps it from
+`businesses/_template/`. The env variable `POSSIBLAW_BUSINESS_DIR` can be
+set instead of the flag when you run non-interactively.
+
+### Recurring lessons and the learning sweep
+
+The `learning-sweep` routine scans the ledger for approved lessons that
+appear repeatedly (same preference, different matters) and promotes them to
+`businesses/<slug>/memory/firm-memory.md` so they are baked into the next
+import. The sweep runs on demand; wire a schedule in the Paperclip UI once
+you have enough history.
+
+### Coming in Tier-2: SkillOpt
+
+Recurring patterns that are too specific for a simple preference (e.g. a
+multi-step review checklist the firm applies consistently) will be promoted
+to draft skill updates by a future SkillOpt agent. Tier-2 / SkillOpt is
+designed but not yet shipped — approved lessons from Tier-1 accumulate in
+the ledger and will feed SkillOpt when it lands.
+
+---
 
 ## Reset
 

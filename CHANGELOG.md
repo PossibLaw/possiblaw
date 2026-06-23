@@ -7,6 +7,51 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.24.0] — 2026-06-23 — Learning loop (Tier-1 firm memory)
+
+### Added
+
+- `learning-loop/` standalone TypeScript package: fail-closed ethical-wall
+  sanitizer (strips client facts before any lesson write), append-only
+  `ledger.ts` (JSONL + rendered `.md`), HOT `memory.ts` render layer,
+  `recurrence.ts` (detects repeated lessons for SkillOpt feed),
+  `remember-parser.ts` (extracts `remember this:` instructions from issue
+  comments), `store.ts` (per-business JSONL round-trip). `learn` CLI (`propose
+  / accept / reject / recurring / render`). 22 node:test unit tests across all
+  modules.
+- `companies/legal-operations/skills/firm-memory/SKILL.md`: HOT firm-memory
+  skill. Ships empty; `--business <slug>` overlays `businesses/<slug>/memory/
+  firm-memory.md` at import. Every agent that references `firm-memory` applies
+  standing firm preferences to all subsequent matters.
+- `companies/legal-operations/agents/learning-scribe/AGENTS.md`: ops-lead
+  routing, drafting lane. Picks up `remember this:` comments and explicit
+  corrections, runs the sanitizer, and proposes lessons as Paperclip approval
+  cards. Only approved lessons reach the ledger.
+- `.paperclip.yaml` `learning-sweep` routine: on-demand scan that promotes
+  repeatedly-approved lessons into `businesses/<slug>/memory/firm-memory.md`
+  for the next `--business` import.
+- `businesses/_template/`: per-firm store scaffold (`learnings/`,
+  `memory/firm-memory.md`, `skill-overlays/`, `README.md`). `businesses/`
+  directory created; only `_template` is tracked; per-slug dirs are
+  gitignored.
+- `bin/possiblaw` `--business <slug>` flag: resolves `businesses/<slug>/`,
+  bootstraps from `_template` on first use, overlays `firm-memory.md` into the
+  import body, injects `POSSIBLAW_BUSINESS_DIR` into every agent's env.
+
+### Changed
+
+- Agent and skill counts: **176 agents / 172 skills** (was 175 / 171).
+  `learning-scribe` is the new agent; `firm-memory` is the new skill.
+
+### Deferred
+
+- Tier-2 SkillOpt (recurring lesson patterns → draft skill updates, eval-
+  validated before apply) is designed and documented but not yet shipped.
+  The recurrence tracker (`learning-loop/src/recurrence.ts`) accumulates the
+  feed; SkillOpt will consume it in a later phase.
+
+---
+
 ## [0.23.0] — 2026-06-23 — Eval harness: runnable CUAD benchmark
 
 ### Added
