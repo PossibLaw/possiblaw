@@ -36,7 +36,7 @@ export function sanitizeLesson(text: string, entities: string[] = []): SanitizeR
 
   for (const e of entities) {
     const needle = norm(e).trim();
-    if (needle.length >= 3 && hay.includes(needle)) {
+    if (needle.length >= 2 && hay.includes(needle)) {
       violations.push(`entity:${e}`);
       continue;
     }

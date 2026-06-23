@@ -24,3 +24,9 @@ test("org stopwords alone do not trip the wall", () => {
   const r = sanitizeLesson("Prefer LLC over Inc for new entities.", ["ACME Inc."]);
   assert.equal(r.ok, true);
 });
+
+test("a short party-name acronym fails closed", () => {
+  const r = sanitizeLesson("BP acquired the target this quarter.", ["BP"]);
+  assert.equal(r.ok, false);
+  assert.ok(r.violations.some((v) => v.startsWith("entity")));
+});
