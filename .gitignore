@@ -31,6 +31,17 @@ layer/evals/datasets/ledgar/cache/samples.jsonl
 layer/evals/results/*.json
 layer/evals/results/*.md
 
+# Stray local clones / caches (never tracked)
+/possiblaw/
+/.agents/
+/.pnpm-store/
+
+# Eval harness run outputs (runtime artifacts, not source)
+/eval-harness/results/
+
+# Subagent-driven-development progress ledger (local scratch)
+/.superpowers/
+
 # Local agent continuity files (keep local; do not commit)
 .claude/history.md
 .agent/PLAN.md
