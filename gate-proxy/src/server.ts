@@ -24,6 +24,8 @@ import { anonymize, deanonymize } from "./anonymize.ts";
 import { humanGate } from "./gates/human.ts";
 import type { EgressMeta, EgressRequest } from "./types.ts";
 import type { CitationRegistry } from "./quality/citation-registry.ts";
+import { documentSha256, extractCitations } from "./citations.ts";
+import { extractDocumentText } from "./document-text.ts";
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -411,7 +413,7 @@ async function handleEgress(
   res: http.ServerResponse,
   deps: Required<GateServerDeps>,
 ): Promise<void> {
-  const { policy, receipts, client, performers, localModelAvailable, log } = deps;
+  const { policy, receipts, client, performers, localModelAvailable, citationRegistry, log } = deps;
 
   // 1. Read raw body (with size cap)
   const { body: rawBody, limitExceeded } = await readBody(req);
@@ -597,6 +599,36 @@ async function handleEgress(
 
   // I5: claimedConfidentiality in every egress receipt meta
   const claimedConfidentiality = meta.confidentiality ?? "unspecified";
+
+  // 5b. Citation gate (OUTBOUND_QUALITY): on configured boundaries, egress that
+  // CARRIES LEGAL CITATIONS must have a registered, passing citation verification
+  // bound to the document's sha before any dispatch (including the human gate).
+  // A document with no detectable citations has nothing to re-check and passes
+  // the gate (matches the Phase 2 goal: "egress carrying legal citations").
+  // Fail-closed: a gated boundary whose payload carries no reviewable document
+  // text at all is blocked (we cannot rule out citations we cannot see).
+  if (boundary !== null && policy.citationGate.boundaries.includes(boundary)) {
+    const documentText = extractDocumentText(tool, payload);
+    if (documentText === null) {
+      receipts.append({
+        kind: "egress", tool, boundary, decision, outcome: "blocked",
+        payloadSha256, agentId: meta.agentId, issueId: meta.issueId, approvalId: meta.approvalId,
+        meta: { reason: "citation_gate_no_document", claimedConfidentiality },
+      });
+      sendJson(res, 403, { decision: "block", reason: "citation_gate: no reviewable document text on a citation-gated boundary" });
+      return;
+    }
+    const docSha = documentSha256(documentText);
+    if (extractCitations(documentText).length > 0 && !citationRegistry.has(docSha)) {
+      receipts.append({
+        kind: "egress", tool, boundary, decision, outcome: "blocked",
+        payloadSha256, agentId: meta.agentId, issueId: meta.issueId, approvalId: meta.approvalId,
+        meta: { reason: "citation_gate_unverified", documentSha256: docSha, claimedConfidentiality },
+      });
+      sendJson(res, 403, { decision: "block", reason: "citation_gate: no registered citation verification for this document" });
+      return;
+    }
+  }
 
   // 6. Dispatch by decision
   switch (decision) {

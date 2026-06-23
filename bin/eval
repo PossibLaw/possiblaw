@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec pnpm -C "$REPO_ROOT/eval-harness" exec tsx src/index.ts "$@"

@@ -19,6 +19,13 @@ import { PerformerError, type Performer, type PerformerRegistry } from "./connec
 import { createGateServer, type GateServerDeps } from "./server.ts";
 import { CitationRegistry } from "./quality/citation-registry.ts";
 
+// Policy with an empty citation gate — used by tests that pre-date Phase 2
+// enforcement and do not register citations before posting egress.
+const POLICY_NO_CITATION_GATE: Policy = {
+  ...DEFAULT_POLICY,
+  citationGate: { boundaries: [] },
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -113,7 +120,7 @@ describe("gate server", () => {
     };
     const performers: PerformerRegistry = { send_email: fakeSendEmail };
     const { baseUrl, close } = await startServer({
-      policy: DEFAULT_POLICY,
+      policy: POLICY_NO_CITATION_GATE,
       receipts,
       client: null,
       performers,
@@ -152,7 +159,7 @@ describe("gate server", () => {
     const client = makeFakeClient(approvals);
 
     const { baseUrl, close } = await startServer({
-      policy: DEFAULT_POLICY,
+      policy: POLICY_NO_CITATION_GATE,
       receipts,
       client,
       performers,
@@ -203,7 +210,7 @@ describe("gate server", () => {
     const client = makeFakeClient(approvals);
 
     const { baseUrl, close } = await startServer({
-      policy: DEFAULT_POLICY,
+      policy: POLICY_NO_CITATION_GATE,
       receipts,
       client,
       performers,
@@ -248,7 +255,7 @@ describe("gate server", () => {
     const client = makeFakeClient(approvals);
 
     const { baseUrl, close } = await startServer({
-      policy: DEFAULT_POLICY,
+      policy: POLICY_NO_CITATION_GATE,
       receipts,
       client,
       performers,
@@ -493,7 +500,7 @@ describe("gate server", () => {
     const performers: PerformerRegistry = { send_email: fakePerformer };
 
     const { baseUrl, close } = await startServer({
-      policy: DEFAULT_POLICY,
+      policy: POLICY_NO_CITATION_GATE,
       receipts,
       client: null,
       performers,
@@ -569,7 +576,7 @@ describe("gate server", () => {
     const performers: PerformerRegistry = { file_court_document: fakePerformer };
 
     const { baseUrl, close } = await startServer({
-      policy: DEFAULT_POLICY,
+      policy: POLICY_NO_CITATION_GATE,
       receipts,
       client: null,  // null = paperclip unconfigured
       performers,
@@ -778,7 +785,7 @@ describe("gate server", () => {
     const client = makeFakeClient(approvals);
 
     const { baseUrl, close } = await startServer({
-      policy: DEFAULT_POLICY,
+      policy: POLICY_NO_CITATION_GATE,
       receipts,
       client,
       performers,
@@ -815,11 +822,12 @@ describe("gate server", () => {
     const fakePerformer: Performer = async () => ({ done: true });
     const performers: PerformerRegistry = { send_email: fakePerformer };
 
-    // Force an invalid decision via type cast — this bypasses TS exhaustiveness
+    // Force an invalid decision via type cast — this bypasses TS exhaustiveness.
+    // Use empty citationGate so the gate does not intercept before the unhandled-decision path.
     const badPolicy: Policy = {
       version: 1,
       boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "bogus_decision" as unknown as "allow" },
-      citationGate: { boundaries: [...DEFAULT_POLICY.citationGate.boundaries] },
+      citationGate: { boundaries: [] },
     };
 
     const { baseUrl, close } = await startServer({
@@ -1017,7 +1025,7 @@ describe("gate server", () => {
     const fakePerformer: Performer = async () => ({ id: "ok" });
 
     const { baseUrl, close } = await startServer({
-      policy: DEFAULT_POLICY,
+      policy: POLICY_NO_CITATION_GATE,
       receipts,
       client: null,
       performers: { send_email: fakePerformer },

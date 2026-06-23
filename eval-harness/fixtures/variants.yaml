@@ -1,0 +1,19 @@
+variants:
+  claude:
+    default:
+      adapterType: claude_local
+      adapterConfig:
+        model: claude-sonnet
+        timeoutSec: 600
+    lanes:
+      drafting:
+        timeoutSec: 900
+      review:
+        timeoutSec: 900
+  ollama:
+    default:
+      adapterType: opencode_local
+      adapterConfig:
+        model: llama3.1:70b
+    lanes:
+      drafting: {}
