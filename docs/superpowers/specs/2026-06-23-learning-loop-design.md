@@ -139,6 +139,43 @@ Built after v1, gated on enough graded eval cases (see §16). Composition (opera
 3. **Memory injection reliability** — skill-sync body injection vs. a company-doc fallback; pick the more deterministic.
 4. **`--extra-root` extension** — confirm extending `EXTRA_ROOT_BASENAMES` to carry `SKILL.md` overlay content (and any sidecar) is clean and collision-safe.
 
+## Spike results (2026-06-23)
+
+### Item 1 — `install-update` semantics
+**VERDICT: refreshes body/content at runtime; does NOT automatically re-sync to attached agents.**
+
+`POST /companies/:companyId/skills/:skillId/install-update` calls `svc.installUpdate` (`company-skills.ts:1918`), which re-fetches the skill from its `sourceLocator` via `readUrlSkillImports` and then calls `upsertImportedSkills` (`company-skills.ts:2320`). `upsertImportedSkills` writes `markdown: skill.markdown` (the full body) into the `company_skills` DB row. The route logs `company.skill_update_installed` and returns the updated skill record.
+
+However, there is **no heartbeat wakeup, no `syncSkills` call, and no per-agent notification** in this route or the service. Skill body is updated in the DB; adapters pick it up the next time they rebuild their runtime skill list (e.g., on next run / `POST /agents/:id/skills/sync`). For a local skill (sourceType other than `github`/`skills_sh`) `installUpdate` will error at `if (!skill.sourceLocator)` (line 1927) — the launcher must use `PATCH /companies/:companyId/skills/:skillId/files` (`company-skills.ts:156`) to write the new body directly, then optionally call `install-update` for remote skills.
+
+**Task 15 impact:** For the `firm-memory` local skill, use `PATCH …/skills/:skillId/files` (body = updated `firm-memory.md`) to write the new body at runtime. `install-update` is not the right path for a local skill (it will 422). The "refresh on next launch" fallback therefore applies unchanged for v1; no additional code needed.
+
+### Item 2 — Operator-feedback surface
+**VERDICT: recommend `GET /issues/:id/comments` — richest, most reliable surface for lawyer corrections.**
+
+Three surfaces examined:
+- **Issue comments** (`issues.ts:4534`): `GET /issues/:id/comments` returns an array of comment objects with `{ id, body, authorType, authorUserId, authorAgentId, createdAt, presentation, metadata }`. `authorType` is `"user"` for lawyer-typed text; `body` is free text (the correction/direction/comment). Paginatable with `?after=<commentId>&order=asc&limit=N`. The `POST /issues/:id/comments` endpoint accepts `body` + optional `metadata` field — lawyers post corrections here.
+- **Approval reject/revision note** (`approvals.ts:232`): `POST /approvals/:id/reject` accepts `{ decisionNote?: string }` (schema at `packages/shared/src/validators/approval.ts:14`). Returned on `GET /approvals/:id` as `approval.decisionNote`. Useful only if the scribe posts a lesson as an approval and the lawyer writes a rejection note — secondary surface.
+- **Gate receipts**: not relevant as a human-feedback surface (machine-generated, no free-text lawyer input).
+
+**Recommended surface: `GET /issues/:id/comments` filtered to `authorType === "user"`** — this is where all lawyer free-text corrections, directions, and explicit "remember this:" teachings land, and the shape is unambiguous.
+
+**Task 11 impact:** `learning-scribe` skill should read `GET /issues/:id/comments?order=asc` for completed matters, filter `authorType === "user"`, and scan `body` text for corrections and explicit "remember this:" markers. The approval `decisionNote` is a useful secondary signal for lessons that were rejected with a reason, but the primary input is issue comments.
+
+### Item 3 — Memory injection reliability
+**VERDICT: skill-sync (`desiredSkills`) is the reliable path; skill body is present in `paperclipRuntimeSkills` at run time for all materialized adapters.**
+
+`POST /agents/:id/skills/sync` (`agents.ts:1509`) resolves `desiredSkills`, writes the updated `adapterConfig` with `writePaperclipSkillSyncPreference`, then calls `adapter.syncSkills` (or `adapter.listSkills`) passing `runtimeSkillConfig = { ...runtimeConfig, paperclipRuntimeSkills: runtimeSkillEntries }` (line 1561–1563). `listRuntimeSkillEntries` (`company-skills.ts:2166`) reads all skills and resolves each to a local directory path (or materializes it), so the full `SKILL.md` body is on-disk and path-referenced in the config passed to the adapter. For adapters in `LEGACY_MATERIALIZED_SKILLS_SET` (gemini_local, opencode_local, cursor, pi_local) and any adapter declaring `requiresMaterializedRuntimeSkills: true`, the files are materialized to disk and path-passed to the adapter at run time. For `claude_local`/`codex_local`, the adapter receives the same `paperclipRuntimeSkills` entry list.
+
+**v1 decision:** attach `firm-memory` skill via `desiredSkills` in the agent's skill-sync — this is the deterministic path. Company-doc fallback (embedding the body in `COMPANY.md`) is available but less clean; not needed for v1.
+
+### Item 4 — Overlay mechanism
+**VERDICT: v1 plan is sound; `EXTRA_ROOT_BASENAMES` extension is correctly deferred to Tier-2.**
+
+`EXTRA_ROOT_BASENAMES = {"PROJECT.md", "TASK.md"}` (`_possiblaw_inline_source.py:69`). Extra-root merging (`lines 251–262`) admits only files whose basename is in that set; any other basename is silently skipped. A `SKILL.md` from a firm overlay would be skipped today — which is the intended behavior for v1. Tier-2 (SkillOpt) will need `EXTRA_ROOT_BASENAMES` extended to include `SKILL.md` (and potentially `.paperclip.yaml` sidecars), but that is deferred. Collision detection is already in place (line 258–261): if an extra-root file has the same `rel` path as a package file the build raises `ValueError` — so the v1 plan of merging `firm-memory.md` into the `firm-memory` skill body at import via **marker substitution in the skill's content** (not via extra-root) is the right approach and avoids the collision issue.
+
+**Task 15 (refresh path) and Task 14 (import) impact:** Confirmed: use `PATCH …/skills/:skillId/files` to write the merged body at import time (Task 14); same endpoint is the runtime refresh path (Task 15). `install-update` is not usable for local skills.
+
 ## 15. Risks / landmines
 
 1. **Bad lesson propagation** (OpenClaw's own warning) — mitigated by the two gates + revertible ledger/archive.
