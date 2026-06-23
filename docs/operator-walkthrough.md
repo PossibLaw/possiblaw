@@ -610,7 +610,10 @@ matters.
 3. **Approval card.** The scribe proposes the sanitized lesson as a
    Paperclip approval card on the issue. You review it in the dashboard,
    approve it (or edit the text first), and only then does the lesson land in
-   `businesses/<slug>/learnings/ledger.jsonl`.
+   `businesses/<slug>/learnings/ledger.jsonl` — and the firm-memory store
+   (`businesses/<slug>/memory/firm-memory.md`) is immediately re-rendered
+   from all accepted lessons. Approval is the gate; there is no further
+   recurrence requirement for a lesson to reach firm memory.
 
 4. **Memory injection on the next launch.** When you run the launcher with
    `--business <slug>`, the approved lessons in `businesses/<slug>/memory/`
@@ -629,13 +632,20 @@ directory does not exist the launcher bootstraps it from
 `businesses/_template/`. The env variable `POSSIBLAW_BUSINESS_DIR` can be
 set instead of the flag when you run non-interactively.
 
-### Recurring lessons and the learning sweep
+### The learning sweep
 
-The `learning-sweep` routine scans the ledger for approved lessons that
-appear repeatedly (same preference, different matters) and promotes them to
-`businesses/<slug>/memory/firm-memory.md` so they are baked into the next
-import. The sweep runs on demand; wire a schedule in the Paperclip UI once
-you have enough history.
+The `learning-sweep` routine wakes the `learning-scribe` on a schedule to
+scan recently completed matters for new lawyer feedback and `remember this:`
+instructions that have not yet been proposed. Its job is discovery and
+proposal — it surfaces lessons for your approval; it does not promote lessons
+to firm memory. Firm memory is updated on approval (Step 3 above), not by the
+sweep. Wire a schedule in the Paperclip UI once you have enough history; the
+sweep can also be triggered on demand.
+
+Detecting a preference that recurs across many matters (`topicsAtThreshold`)
+is the **Tier-2** trigger — it signals that a pattern may warrant a standing
+skill refinement rather than a simple preference. That path (SkillOpt) is
+described below and is not yet shipped.
 
 ### Coming in Tier-2: SkillOpt
 
