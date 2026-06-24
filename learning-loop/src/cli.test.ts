@@ -143,3 +143,45 @@ test("propose-edit then approve-edit writes the overlay", async () => {
   const props = await loadProposals(dir);
   assert.equal(props.find((p) => p.id === id)?.status, "approved");
 });
+
+test("approve-edit --overlay-file with contaminated body returns exit 2 and writes nothing", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-"));
+  // Step 1: propose-edit with a CLEAN overlay file.
+  const cleanOverlay = join(dir, "clean.md");
+  await writeFile(cleanOverlay, "# NDA\n- Default governing law: Delaware.\n", "utf8");
+  const add = await run([
+    "propose-edit", "--business", dir, "--skill", "legal-nda-playbook", "--matter", "POS-1",
+    "--file-id", "F1", "--observed", "lawyer added a Delaware governing-law clause",
+    "--edit", "default governing law to Delaware unless specified", "--overlay-file", cleanOverlay,
+  ]);
+  assert.equal(add.code, 0);
+  const id = add.stdout.trim();
+  assert.match(id, /^SEP-\d{8}-\d{3}$/);
+
+  // Step 2: write a CONTAMINATED overlay file (contains client entity name).
+  const badOverlay = join(dir, "bad.md");
+  await writeFile(badOverlay, "# NDA\n- ACME Inc. requires Delaware law.\n", "utf8");
+
+  // Step 3: approve-edit with the contaminated file + matching --entity flag — must be rejected.
+  const r = await run([
+    "approve-edit", "--business", dir, "--id", id,
+    "--overlay-file", badOverlay, "--entity", "ACME Inc.",
+  ]);
+  assert.equal(r.code, 2);
+  assert.match(r.stdout, /violations/);
+
+  // Step 4: overlay file must NOT have been written.
+  const overlayPath = join(dir, "skill-overlays", "legal-nda-playbook", "SKILL.md");
+  let written = false;
+  try {
+    await rf(overlayPath, "utf8");
+    written = true;
+  } catch {
+    written = false;
+  }
+  assert.equal(written, false, "overlay file must not be written on sanitizer rejection");
+
+  // Step 5: proposal status must still be "pending".
+  const props = await loadProposals(dir);
+  assert.equal(props.find((p) => p.id === id)?.status, "pending");
+});
