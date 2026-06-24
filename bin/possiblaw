@@ -1778,19 +1778,19 @@ maybe_morning_review() {
     today="$(date '+%Y%m%d')"
     marker="$BUSINESS_DIR/.last-review-$today"
     [ -e "$marker" ] && return 0
-    pending="$(cd "$REPO_ROOT" && node --import tsx learning-loop/src/cli.ts review-list --business "$BUSINESS_DIR" 2>/dev/null)"
+    pending="$( (cd "$REPO_ROOT/learning-loop" && node --import tsx src/cli.ts review-list --business "$BUSINESS_DIR") 2>/dev/null )" || pending=""
     if [ "$pending" = "[]" ] || [ -z "$pending" ]; then
         : # no pending proposals
     else
         printf '\n=== Skill-improvement review (%s) ===\n' "$today"
         printf '%s\n' "$pending" | python3 "$REPO_ROOT/bin/_possiblaw_review_print.py"
         printf 'Review each in the PossibLaw app or run:\n'
-        printf '  node --import tsx learning-loop/src/cli.ts approve-edit --business "%s" --id <SEP-id>\n' "$BUSINESS_DIR"
-        printf '  node --import tsx learning-loop/src/cli.ts reject-edit  --business "%s" --id <SEP-id>\n' "$BUSINESS_DIR"
+        printf '  (cd learning-loop && node --import tsx src/cli.ts approve-edit --business "%s" --id <SEP-id>)\n' "$BUSINESS_DIR"
+        printf '  (cd learning-loop && node --import tsx src/cli.ts reject-edit  --business "%s" --id <SEP-id>)\n' "$BUSINESS_DIR"
     fi
     : > "$marker"
 }
-maybe_morning_review
+maybe_morning_review || true
 
 if [ "$NO_BROWSER" != "true" ]; then
     if command -v open >/dev/null 2>&1; then

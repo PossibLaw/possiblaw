@@ -15,7 +15,7 @@ Versioning: [SemVer](https://semver.org/).
   `deliverables-courier` delivery as a `DeliveryRecord` keyed on the cloud
   vendor file ID (OneDrive item ID or Google Drive file ID), plus a SHA-256
   hash of the delivered draft body and delivery timestamp. Stored in
-  `businesses/<slug>/learnings/manifest.jsonl`. CLI subcommands:
+  `businesses/<slug>/deliveries/manifest.jsonl`. CLI subcommands:
   `manifest-add`, `manifest-pending`, `manifest-mark`.
 - **Diff module** (`learning-loop/src/diff.ts`): compares current cloud-file
   content against the delivered draft. Whitespace-only changes are not

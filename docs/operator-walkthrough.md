@@ -660,7 +660,7 @@ products — without any extra steps on your part.
 1. **Delivery.** When the `deliverables-courier` files a finished work
    product to your OneDrive or Google Drive, it records the vendor file ID
    and a hash of the delivered draft in the firm's delivery manifest
-   (`businesses/<slug>/learnings/manifest.jsonl`). No filenames or client
+   (`businesses/<slug>/deliveries/manifest.jsonl`). No filenames or client
    identifiers are stored — only the cloud vendor's stable file ID.
 
 2. **Edit in place in your cloud.** The lawyer opens the delivered file
@@ -679,7 +679,7 @@ products — without any extra steps on your part.
    fail-closed ethical-wall sanitizer used by Tier-1. Only generalized,
    client-fact-free edits produce a proposal. A proposal that cannot be
    sanitized cleanly is dropped (exit 2 — no partial write). Proposals are
-   queued in `businesses/<slug>/learnings/proposals.jsonl`.
+   queued in `businesses/<slug>/proposals/proposals.jsonl`.
 
 5. **Morning digest review.** The daily morning digest surfaces pending
    proposals for your yes / no / edit decision. The only human input the
