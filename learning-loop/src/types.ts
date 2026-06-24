@@ -14,3 +14,16 @@ export interface Lesson {
   status: LessonStatus;
   sources: SourceRef[];
 }
+
+export interface DeliveryRecord {
+  vendorFileId: string;                       // stable cloud id (manifest key)
+  destinationKind: "onedrive" | "gdrive";
+  driveId?: string;                           // OneDrive needs driveId; gdrive uses fileId alone
+  matter: string;                             // paperclip issue id
+  agentId: string;                            // drafting agent
+  skillSlug: string;                          // skill the drafter used (diff target)
+  deliveredAt: string;                        // ISO timestamp
+  draftHash: string;                          // sha256 hex of delivered bytes
+  draftPath: string;                          // retained local copy path
+  lastProcessedHash?: string;                 // hash last diffed by the sweep
+}
