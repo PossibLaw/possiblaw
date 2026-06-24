@@ -8,5 +8,7 @@ your firm's portable memory.
 - `memory/archive/` — decayed/overflow lessons.
 - `learnings/ledger.jsonl` — canonical lesson record (generated); `ledger.md` — human view.
 - `skill-overlays/` — reserved for Tier-2 (SkillOpt) skill edits.
+- `deliveries/` — delivery manifest (system-captured ids and content hashes, no client facts).
+- `proposals/` — queued skill-edit proposals awaiting morning review.
 
 Edit lessons only through the paperclip approval flow — do not hand-edit `ledger.jsonl`.
