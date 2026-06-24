@@ -247,6 +247,7 @@ def build_inline_source(
     package_root: Path,
     extra_roots: list[Path] | None = None,
     include_teams: list[str] | None = None,
+    business_overlay_root: Path | None = None,
 ) -> dict:
     if not package_root.exists():
         raise ValueError(f"package root does not exist: {package_root}")
@@ -288,6 +289,22 @@ def build_inline_source(
                     f"extra root {extra} collides with the package on '{rel}'"
                 )
             files[rel] = _encode_file(abs_path)
+
+    if business_overlay_root is not None:
+        overlay_dir = Path(business_overlay_root) / "skill-overlays"
+        if overlay_dir.is_dir():
+            for slug_dir in sorted(p for p in overlay_dir.iterdir() if p.is_dir()):
+                overlay_file = slug_dir / "SKILL.md"
+                if not overlay_file.is_file():
+                    continue
+                rel = f"skills/{slug_dir.name}/SKILL.md"
+                if rel not in files:
+                    raise ValueError(
+                        f"skill overlay for unknown package skill '{slug_dir.name}' "
+                        f"(no {rel} in package)"
+                    )
+                files[rel] = _encode_file(overlay_file)
+                print(f"overlay: {rel} <- business {Path(business_overlay_root).name}", file=sys.stderr)
 
     return {
         "source": {
@@ -359,6 +376,26 @@ def _self_test() -> int:
             pass
         else:
             raise AssertionError("path collision must raise ValueError")
+
+        # --- skill-overlay override pass ---
+        (root / "skills" / "demo-skill").mkdir(parents=True)
+        (root / "skills" / "demo-skill" / "SKILL.md").write_text("BASE\n", encoding="utf-8")
+        biz = Path(td) / "biz"
+        (biz / "skill-overlays" / "demo-skill").mkdir(parents=True)
+        (biz / "skill-overlays" / "demo-skill" / "SKILL.md").write_text("OVERLAID\n", encoding="utf-8")
+        out = build_inline_source(root, business_overlay_root=biz)
+        body = out["source"]["files"]["skills/demo-skill/SKILL.md"]
+        assert body == "OVERLAID\n", f"overlay not applied: {body!r}"
+
+        (biz / "skill-overlays" / "ghost").mkdir(parents=True)
+        (biz / "skill-overlays" / "ghost" / "SKILL.md").write_text("X\n", encoding="utf-8")
+        raised = False
+        try:
+            build_inline_source(root, business_overlay_root=biz)
+        except ValueError:
+            raised = True
+        assert raised, "unknown overlay slug must raise"
+        print("OK: skill-overlay override pass")
 
     _self_test_teams()
 
