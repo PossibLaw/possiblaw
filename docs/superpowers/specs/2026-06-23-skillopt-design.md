@@ -1,7 +1,9 @@
 # SkillOpt add-on — Tier-2 skill refinement (design)
 
+> **DEFERRED (2026-06-23).** Superseded as the Tier-2 centerpiece by the learn-from-edits **skill-improvement loop** (`docs/superpowers/specs/2026-06-23-skill-improvement-loop-design.md`). SkillOpt needs clear evals + lots of graded data a firm won't have on day one, so it is **not built now**. This document is retained as the design of the **deferred future engine**: once a firm accumulates enough graded cases, SkillOpt can generate eval-validated candidate skill edits that flow into the *same* morning-review queue the skill-improvement loop establishes. The reusable parts that the active build adopts now (the **skill-overlay override apply path**, §6b) are carried into the new spec.
+
 **Date:** 2026-06-23
-**Status:** Approved (brainstorming) — pending implementation plan
+**Status:** DEFERRED — future engine; not in the active build (see banner above)
 **Branch:** `feat/skill-optimizer` (off `main` @ `13b6e1f`, after Tier-1 PR #1 merged)
 **Supersedes/extends:** `docs/superpowers/specs/2026-06-23-learning-loop-design.md` §11 (Tier-2, previously "designed / deferred"). Tier-1 (memory) shipped in PR #1.
 
