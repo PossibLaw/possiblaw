@@ -229,3 +229,35 @@ warns instead of blocking; the live run requires the key exported in the
 launching shell. The key is stored once per import as a company secret
 (provider `local_encrypted`); re-importing into a fresh data dir creates a
 fresh secret, and rotation afterward happens in the Paperclip UI.
+
+## Learning loop
+
+### Memory propagation is next-launch, not live (v1)
+
+When a lawyer approves a firm-memory lesson, the `learning-scribe` writes it
+into `businesses/<slug>/memory/firm-memory.md` and re-renders the skill body.
+Running agents do **not** pick up the new content immediately. They receive
+the updated memory on the next `./bin/possiblaw --business <slug>` launch,
+which re-imports the firm-memory skill body from disk.
+
+The reason is a Paperclip API constraint: the `install-update` endpoint 422s
+when `sourceLocator` is null (i.e., for a locally-stored skill), and fires no
+agent re-sync. The intended future path for runtime refresh is `PATCH
+…/companies/:id/skills/:skillId/files` to update the materialized skill files
+followed by `POST /agents/:id/skills/sync` to re-materialize to the adapter;
+neither call is implemented in v1.
+
+### HOT cap and archive
+
+Firm memory is capped at roughly 100 lines. Content within the cap is injected
+into every matter context so agents always have the firm's current preferences
+in scope. Lessons beyond the cap are moved to `memory/archive/<date>.md` and
+are no longer injected — they are retained for audit and manual retrieval but
+do not affect the agents' live context.
+
+### Human-gated approval
+
+Nothing enters firm memory without explicit lawyer approval. The ethical-wall
+sanitizer rejects any candidate lesson that carries client-identifying facts.
+Only generalized firm preferences (style, risk tolerance, preferred clauses,
+and similar) pass review and enter the HOT memory body.

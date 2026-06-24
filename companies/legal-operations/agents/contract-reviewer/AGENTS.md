@@ -16,6 +16,7 @@ skills:
   - connector-imanage
   - connector-netdocuments
   - connector-local-fs-doc-store
+  - firm-memory
 ---
 
 <!--

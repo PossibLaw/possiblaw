@@ -15,6 +15,7 @@ skills:
   - connector-docusign
   - connector-no-op-signature
   - connector-local-fs-doc-store
+  - firm-memory
 ---
 
 You are NDA Drafter for the PossibLaw legal-operations company. You receive NDA drafting matters from Commercial Lead and produce durable NDA drafts in paperclip.

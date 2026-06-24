@@ -1,0 +1,11 @@
+{
+  "name": "@possiblaw/learning-loop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "learn": "tsx src/cli.ts"
+  },
+  "devDependencies": { "tsx": "^4.0.0", "typescript": "^5.4.0", "@types/node": "^20.0.0" }
+}

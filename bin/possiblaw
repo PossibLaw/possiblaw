@@ -139,6 +139,13 @@ OPTIONS:
                         to live launches; the in-app light/dark toggle in the
                         sidebar account menu always wins once a user sets it.
                         Env override: POSSIBLAW_THEME.
+  --business <slug>     Firm identity slug. Overlays
+                        businesses/<slug>/memory/firm-memory.md into the
+                        firm-memory skill body at import, and sets
+                        POSSIBLAW_BUSINESS_DIR on every agent so the
+                        learning-loop scribe can locate the store.
+                        If businesses/<slug>/ does not exist, it is created
+                        from businesses/_template/ automatically.
   --no-browser          Don't auto-open the dashboard URL.
   -h, --help            Show this help and exit.
 
@@ -289,6 +296,7 @@ THEME="${POSSIBLAW_THEME:-possiblaw}"
 ONBOARD_EXTRA_ENV=""
 DEMO_PROFILE=""
 TEAMS=""
+BUSINESS_SLUG=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -310,6 +318,7 @@ while [ "$#" -gt 0 ]; do
         --theme) [ "$#" -ge 2 ] || { err "--theme requires a value"; exit 2; }; THEME="$2"; shift 2 ;;
         --demo) [ "$#" -ge 2 ] || { err "--demo requires a value"; exit 2; }; DEMO_PROFILE="$2"; shift 2 ;;
         --teams) [ "$#" -ge 2 ] || { err "--teams requires a value"; exit 2; }; TEAMS="$2"; shift 2 ;;
+        --business) [ "$#" -ge 2 ] || { err "--business requires a value"; exit 2; }; BUSINESS_SLUG="$2"; shift 2 ;;
         --no-browser) NO_BROWSER="true"; shift ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
@@ -331,6 +340,47 @@ if [ "$VARIANTS_FILE" = "$DEFAULT_VARIANTS_FILE" ] && [ "$PACKAGE" != "$DEFAULT_
     VARIANTS_FILE="$PACKAGE/variants.yaml"
 fi
 PAPERCLIP_YAML="$PACKAGE/.paperclip.yaml"
+
+# ---------------------------------------------------------------------------
+# --business: resolve firm identity dir and firm-memory file
+# ---------------------------------------------------------------------------
+#
+# When --business <slug> is given:
+#   1. Resolve businesses/<slug>/ under REPO_ROOT.
+#   2. If the directory does not exist, copy businesses/_template/ to it.
+#   3. Set BUSINESS_DIR and FIRM_MEMORY_FILE for later use in the bundle step
+#      and the per-agent env PATCH.
+
+BUSINESS_DIR=""
+FIRM_MEMORY_FILE=""
+if [ -n "$BUSINESS_SLUG" ]; then
+    # Slug containment guard: reject path-traversal characters before building
+    # any filesystem path. Only [A-Za-z0-9._-] is allowed; this rejects '/'
+    # and '..' and any other shell-special characters.
+    if ! printf '%s' "$BUSINESS_SLUG" | grep -qE '^[A-Za-z0-9._-]+$'; then
+        err "--business slug contains invalid characters: '$BUSINESS_SLUG'"
+        err "Allowed: letters, digits, '.', '_', '-' (no slashes or path traversal)"
+        exit 1
+    fi
+    BUSINESS_DIR="$REPO_ROOT/businesses/$BUSINESS_SLUG"
+    BUSINESSES_TEMPLATE="$REPO_ROOT/businesses/_template"
+    if [ ! -d "$BUSINESS_DIR" ]; then
+        if [ ! -d "$BUSINESSES_TEMPLATE" ]; then
+            err "--business: template directory not found: $BUSINESSES_TEMPLATE"
+            exit 1
+        fi
+        log "--business: creating $BUSINESS_DIR from template"
+        cp -r "$BUSINESSES_TEMPLATE" "$BUSINESS_DIR"
+    fi
+    FIRM_MEMORY_FILE="$BUSINESS_DIR/memory/firm-memory.md"
+    if [ ! -f "$FIRM_MEMORY_FILE" ]; then
+        # Silently allow a missing file (fresh firm has no memory yet).
+        FIRM_MEMORY_FILE=""
+        log "--business: no firm-memory.md found at $BUSINESS_DIR/memory/; skipping overlay"
+    else
+        log "--business: will overlay firm memory from $FIRM_MEMORY_FILE"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # --list-variants short-circuit
@@ -1239,12 +1289,18 @@ if [ -n "$TEAMS" ]; then
     TEAMS_ARGS=(--include-teams "$TEAMS")
 fi
 
+FIRM_MEMORY_ARGS=()
+if [ -n "$FIRM_MEMORY_FILE" ]; then
+    FIRM_MEMORY_ARGS=(--firm-memory-file "$FIRM_MEMORY_FILE")
+fi
+
 # Bundle BEFORE override generation: with --teams the bundle carries a
 # filtered .paperclip.yaml, and adapter overrides must be generated from that
 # filtered sidecar so no override references an agent outside the subset.
 INLINE_FILE="$(mktemp -t possiblaw-inline.XXXXXX.json)"
 if ! python3 "$INLINE_PY" --package-root "$PACKAGE" \
         ${DEMO_ARGS+"${DEMO_ARGS[@]}"} ${TEAMS_ARGS+"${TEAMS_ARGS[@]}"} \
+        ${FIRM_MEMORY_ARGS+"${FIRM_MEMORY_ARGS[@]}"} \
         > "$INLINE_FILE"; then
     err "inline source bundling failed"
     kill_paperclip_tree "$PAPERCLIP_PID"
@@ -1609,8 +1665,18 @@ if [ "$NO_GATE_PROXY" = "true" ]; then
 else
     printf '{"GATE_PROXY_URL": "%s"}' "$GATE_PROXY_URL" > "$PLAIN_ENV_FILE"
 fi
+# If --business was given, inject POSSIBLAW_BUSINESS_DIR into every agent's env.
+if [ -n "$BUSINESS_DIR" ]; then
+    python3 - "$PLAIN_ENV_FILE" "$BUSINESS_DIR" <<'PY'
+import json, sys
+path, bdir = sys.argv[1], sys.argv[2]
+d = json.load(open(path))
+d["POSSIBLAW_BUSINESS_DIR"] = bdir
+json.dump(d, open(path, "w"))
+PY
+fi
 
-if [ -n "$COMPANY_ID" ] && { [ -n "$SECRET_ENV_TSV" ] || [ "$NO_GATE_PROXY" != "true" ]; }; then
+if [ -n "$COMPANY_ID" ] && { [ -n "$SECRET_ENV_TSV" ] || [ "$NO_GATE_PROXY" != "true" ] || [ -n "$BUSINESS_DIR" ]; }; then
     milestone "binding adapter env to agents (API-key secret_refs + GATE_PROXY_URL)"
     PATCHES_FILE="$(mktemp -t possiblaw-env-patches.XXXXXX.json)"
     if ! python3 "$VARIANTS_PY" --build-env-patches \

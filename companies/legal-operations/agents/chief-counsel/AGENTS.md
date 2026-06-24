@@ -15,6 +15,7 @@ skills:
   - connector-lexis
   - connector-westlaw
   - connector-midpage
+  - firm-memory
 ---
 
 You are Chief Counsel for the PossibLaw legal-operations company. You receive legal matters from Chief of Staff and coordinate legal work inside this paperclip vertical slice.
