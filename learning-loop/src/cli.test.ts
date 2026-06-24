@@ -1,9 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./cli.ts";
+import { loadManifest } from "./manifest.ts";
+import { hashText } from "./diff.ts";
+import { loadProposals } from "./proposals.ts";
+import { readFile as rf } from "node:fs/promises";
 
 test("propose rejects a client-fact-laden lesson with exit 2", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ll-cli-"));
@@ -71,4 +75,113 @@ test("propose with no --matter returns code 1 'missing --matter'", async () => {
   ]);
   assert.equal(r.code, 1);
   assert.ok(r.stdout.includes("missing --matter"));
+});
+
+test("manifest-add records a delivery with the draft hash", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-"));
+  const draft = join(dir, "draft.md");
+  await writeFile(draft, "DRAFT BODY\n", "utf8");
+  const r = await run([
+    "manifest-add", "--business", dir, "--file-id", "FILE1", "--kind", "gdrive",
+    "--matter", "POS-1", "--agent", "ag1", "--skill", "legal-nda-playbook", "--draft-path", draft,
+  ]);
+  assert.equal(r.code, 0);
+  const m = await loadManifest(dir);
+  assert.equal(m.length, 1);
+  assert.equal(m[0].vendorFileId, "FILE1");
+  assert.equal(m[0].draftHash, hashText("DRAFT BODY\n"));
+});
+
+test("manifest-pending lists records; manifest-mark sets lastProcessedHash", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-"));
+  const draft = join(dir, "draft.md");
+  await writeFile(draft, "X\n", "utf8");
+  await run(["manifest-add", "--business", dir, "--file-id", "F", "--kind", "gdrive",
+    "--matter", "P-1", "--agent", "a", "--skill", "s", "--draft-path", draft]);
+  const pend = await run(["manifest-pending", "--business", dir]);
+  assert.equal(pend.code, 0);
+  assert.match(pend.stdout, /"vendorFileId":"F"/);
+  const mark = await run(["manifest-mark", "--business", dir, "--file-id", "F", "--hash", "hZ"]);
+  assert.equal(mark.code, 0);
+  const m = await loadManifest(dir);
+  assert.equal(m[0].lastProcessedHash, "hZ");
+});
+
+test("propose-edit sanitizer-rejects leaked entities at exit 2", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-"));
+  const overlay = join(dir, "o.md");
+  await writeFile(overlay, "# NDA\n- Default governing law: Delaware.\n", "utf8");
+  const r = await run([
+    "propose-edit", "--business", dir, "--skill", "legal-nda-playbook", "--matter", "POS-1",
+    "--file-id", "F1", "--observed", "ACME Inc. wanted Delaware law",
+    "--edit", "default to Delaware", "--overlay-file", overlay, "--entity", "ACME Inc.",
+  ]);
+  assert.equal(r.code, 2);
+  assert.match(r.stdout, /violations/);
+});
+
+test("propose-edit then approve-edit writes the overlay", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-"));
+  const overlay = join(dir, "o.md");
+  await writeFile(overlay, "# NDA\n- Default governing law: Delaware.\n", "utf8");
+  const add = await run([
+    "propose-edit", "--business", dir, "--skill", "legal-nda-playbook", "--matter", "POS-1",
+    "--file-id", "F1", "--observed", "lawyer added a Delaware governing-law clause",
+    "--edit", "default governing law to Delaware unless specified", "--overlay-file", overlay,
+  ]);
+  assert.equal(add.code, 0);
+  const id = add.stdout.trim();
+  assert.match(id, /^SEP-\d{8}-\d{3}$/);
+
+  const list = await run(["review-list", "--business", dir]);
+  assert.match(list.stdout, new RegExp(id));
+
+  const ok = await run(["approve-edit", "--business", dir, "--id", id]);
+  assert.equal(ok.code, 0);
+  const body = await rf(join(dir, "skill-overlays", "legal-nda-playbook", "SKILL.md"), "utf8");
+  assert.match(body, /Delaware/);
+  const props = await loadProposals(dir);
+  assert.equal(props.find((p) => p.id === id)?.status, "approved");
+});
+
+test("approve-edit --overlay-file with contaminated body returns exit 2 and writes nothing", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-"));
+  // Step 1: propose-edit with a CLEAN overlay file.
+  const cleanOverlay = join(dir, "clean.md");
+  await writeFile(cleanOverlay, "# NDA\n- Default governing law: Delaware.\n", "utf8");
+  const add = await run([
+    "propose-edit", "--business", dir, "--skill", "legal-nda-playbook", "--matter", "POS-1",
+    "--file-id", "F1", "--observed", "lawyer added a Delaware governing-law clause",
+    "--edit", "default governing law to Delaware unless specified", "--overlay-file", cleanOverlay,
+  ]);
+  assert.equal(add.code, 0);
+  const id = add.stdout.trim();
+  assert.match(id, /^SEP-\d{8}-\d{3}$/);
+
+  // Step 2: write a CONTAMINATED overlay file (contains client entity name).
+  const badOverlay = join(dir, "bad.md");
+  await writeFile(badOverlay, "# NDA\n- ACME Inc. requires Delaware law.\n", "utf8");
+
+  // Step 3: approve-edit with the contaminated file + matching --entity flag — must be rejected.
+  const r = await run([
+    "approve-edit", "--business", dir, "--id", id,
+    "--overlay-file", badOverlay, "--entity", "ACME Inc.",
+  ]);
+  assert.equal(r.code, 2);
+  assert.match(r.stdout, /violations/);
+
+  // Step 4: overlay file must NOT have been written.
+  const overlayPath = join(dir, "skill-overlays", "legal-nda-playbook", "SKILL.md");
+  let written = false;
+  try {
+    await rf(overlayPath, "utf8");
+    written = true;
+  } catch {
+    written = false;
+  }
+  assert.equal(written, false, "overlay file must not be written on sanitizer rejection");
+
+  // Step 5: proposal status must still be "pending".
+  const props = await loadProposals(dir);
+  assert.equal(props.find((p) => p.id === id)?.status, "pending");
 });

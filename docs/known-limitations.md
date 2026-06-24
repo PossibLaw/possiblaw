@@ -261,3 +261,47 @@ Nothing enters firm memory without explicit lawyer approval. The ethical-wall
 sanitizer rejects any candidate lesson that carries client-identifying facts.
 Only generalized firm preferences (style, risk tolerance, preferred clauses,
 and similar) pass review and enter the HOT memory body.
+
+## Skill-improvement loop
+
+### Offline download-edit-email is invisible
+
+The Tier-2 learn-from-edits loop captures changes made **in place** inside
+the connected cloud (OneDrive or Google Drive). If a lawyer downloads the
+delivered file, edits the local copy, and emails or re-uploads it under a
+different name or to a different folder, the sweep cannot detect the change —
+the vendor file ID recorded in the delivery manifest will no longer match.
+
+Workaround: lawyers must open and edit the delivered file directly in
+OneDrive or Google Drive (the file the courier filed) rather than downloading
+a copy.
+
+### No true on-lock or finalize-event trigger
+
+Paperclip routines fire only on `schedule`, `webhook`, or `api` triggers; our
+layer-not-fork constraint forbids modifying `paperclip/` to add a lock-event
+or finalize-event hook. The nightly `skill-improvement-sweep` scheduled
+routine is the substitute. "Soft-final" is defined as: a human modified the
+file after delivery (detected by comparing version history at sweep time
+against the hash stored in the delivery manifest). A file that has been
+finalized and re-opened for minor corrections may produce a second proposal;
+morning review is the gate that prevents spurious overlays from applying.
+
+### Box connector and native Google Docs export are deferred
+
+The v1 sweep covers OneDrive and Google Drive (binary/DOCX round-trip). Box
+connector support is not yet implemented — files delivered to Box are not
+tracked in the manifest and are invisible to the sweep. Native Google Docs
+files (`.gdoc` / `.gsheet` format) require a separate `files.export` call
+that is not yet wired up; only uploaded DOCX/PDF files stored in Drive are
+diffable today.
+
+### SkillOpt (eval-validated automatic refinement) is deferred
+
+SkillOpt — the system that would take recurring proposal patterns, run them
+through an eval harness, and automatically promote high-confidence skill
+refinements without per-proposal human review — is designed and documented
+but not yet shipped. The `skill-improvement-loop` delivers the diff →
+proposal → morning-review → overlay pipeline; SkillOpt would automate the
+review step for recurring patterns. Until SkillOpt lands, every proposal
+requires a manual yes/no/edit decision in the morning digest.

@@ -1,6 +1,6 @@
 # PossibLaw Agent Catalog
 
-176 agents · 172 skills · 34 teams under two executives. Derived from `companies/legal-operations/` (agent frontmatter + `.paperclip.yaml` lanes); regenerate after package changes.
+177 agents · 172 skills · 34 teams under two executives. Derived from `companies/legal-operations/` (agent frontmatter + `.paperclip.yaml` lanes); regenerate after package changes.
 
 The catalog is the menu — import what your firm practices. `./bin/possiblaw --teams <names>` (e.g. `litigation,commercial`, or presets `boutique` / `inhouse`) imports just those teams plus the executives, meta-reviewers, capability builder, and the skills they reference. See the operator walkthrough.
 
@@ -317,7 +317,7 @@ Lanes: **routing** = classify + delegate · **drafting** = produces documents ·
 | `experience-database-curator` | extractive | Matter-experience records for pitches with confidentiality flags. |
 | `competitive-intel-monitor` | extractive | Public-source competitive-intel briefing tables with citations. |
 
-### Ops Lead (`ops-lead`) — 7 specialists
+### Ops Lead (`ops-lead`) — 8 specialists
 
 | Agent | Lane | What it does |
 |---|---|---|
@@ -328,6 +328,7 @@ Lanes: **routing** = classify + delegate · **drafting** = produces documents ·
 | `engagement-letter-drafter` | drafting | Engagement-letter skeleton drafting, never sent to clients. |
 | `deliverables-courier` | extractive | Files finished work products to policy-declared OneDrive/Drive/Notion destinations with read-back verification; never alters content. |
 | `learning-scribe` | drafting | Captures lawyer feedback and `remember this:` comments, generalizes them into sanitized firm-memory lessons, and posts human-approval cards. |
+| `skill-improvement-scribe` | drafting | Diffs lawyers' finalized delivered documents against the agent's drafts and proposes sanitized, generalized skill-edit improvements for morning human review. |
 
 ### Legal Ops Lead (`legal-ops-lead`) — 3 specialists
 

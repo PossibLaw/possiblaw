@@ -15,7 +15,7 @@ The first hands-on step below exercises exactly that loop: a simulated court
 filing pauses at the human gate, you approve it in the dashboard, and the
 receipt trail shows the whole exchange.
 
-The 176 agents, 172 skills, and 34 teams are the interchangeable parts
+The 177 agents, 172 skills, and 34 teams are the interchangeable parts
 inside that pipeline. The rest of this walkthrough — variants, demo
 profiles, team subsets, delivery, the NDA matter — is how you choose which
 parts to run and watch them work.
@@ -111,7 +111,7 @@ To preview only (no DB writes):
 
 ```bash
 ./bin/possiblaw --variant codex --dry-run --non-interactive --yes
-# preview: agents=176 skills=172 projects=3 issues=3 warnings=0 errors=0
+# preview: agents=177 skills=172 projects=3 issues=3 warnings=0 errors=0
 ```
 
 Common flags:
@@ -263,7 +263,7 @@ the demo data is fictional.
 ### Team subset import (`--teams`)
 
 The catalog is the menu — import what your firm practices. By default the
-launcher imports all 176 agents; `--teams` imports only the named teams:
+launcher imports all 177 agents; `--teams` imports only the named teams:
 
 ```bash
 ./bin/possiblaw --teams litigation,commercial   # two practices
@@ -648,6 +648,53 @@ Detecting a preference that recurs across many matters (`topicsAtThreshold`)
 is the **Tier-2** trigger — it signals that a pattern may warrant a standing
 skill refinement rather than a simple preference. That path (SkillOpt) is
 described below and is not yet shipped.
+
+### Agents that learn from your edits
+
+Beyond explicit `remember this:` feedback, PossibLaw includes a Tier-2
+learn-from-edits loop that observes the changes you make to delivered work
+products — without any extra steps on your part.
+
+**How it works:**
+
+1. **Delivery.** When the `deliverables-courier` files a finished work
+   product to your OneDrive or Google Drive, it records the vendor file ID
+   and a hash of the delivered draft in the firm's delivery manifest
+   (`businesses/<slug>/deliveries/manifest.jsonl`). No filenames or client
+   identifiers are stored — only the cloud vendor's stable file ID.
+
+2. **Edit in place in your cloud.** The lawyer opens the delivered file
+   directly in OneDrive or Google Drive and edits it to produce the
+   finalized version. The file must be edited in place in the connected
+   cloud — downloads or email attachments are invisible to the sweep.
+
+3. **Nightly sweep.** The `skill-improvement-scribe` agent, driven by the
+   `skill-improvement-sweep` routine, re-reads each delivered file by its
+   vendor ID via the existing read-scoped connector (OneDrive
+   `…/items/{id}/versions`, Google Drive `…/files/{id}/revisions`). If a
+   human has modified the file since delivery (soft-final check), the scribe
+   diffs the current version against the delivered draft.
+
+4. **Sanitized skill-edit proposal.** The diff is passed through the same
+   fail-closed ethical-wall sanitizer used by Tier-1. Only generalized,
+   client-fact-free edits produce a proposal. A proposal that cannot be
+   sanitized cleanly is dropped (exit 2 — no partial write). Proposals are
+   queued in `businesses/<slug>/proposals/proposals.jsonl`.
+
+5. **Morning digest review.** The daily morning digest surfaces pending
+   proposals for your yes / no / edit decision. The only human input the
+   entire loop requires is this one decision per proposal; the manifest and
+   diff are captured programmatically.
+
+6. **Skill-overlay applied on next import.** An approved proposal writes a
+   per-firm `businesses/<slug>/skill-overlays/<slug>/SKILL.md` that replaces
+   the stock package skill on the next `--business <slug>` launch via the
+   launcher's inline-source overlay pass.
+
+**What is deferred:** Box connector support and native Google Docs export
+(`.docx` round-trip for Google-native files) are not yet implemented.
+SkillOpt (eval-validated automatic refinement driven by recurring patterns)
+remains deferred — see the SkillOpt section below.
 
 ### Coming in Tier-2: SkillOpt
 

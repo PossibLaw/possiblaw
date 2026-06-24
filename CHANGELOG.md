@@ -7,6 +7,76 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.25.0] — 2026-06-23 — Skill-improvement loop (Tier-2 learn-from-edits)
+
+### Added
+
+- **Delivery manifest** (`learning-loop/src/manifest.ts`): records each
+  `deliverables-courier` delivery as a `DeliveryRecord` keyed on the cloud
+  vendor file ID (OneDrive item ID or Google Drive file ID), plus a SHA-256
+  hash of the delivered draft body and delivery timestamp. Stored in
+  `businesses/<slug>/deliveries/manifest.jsonl`. CLI subcommands:
+  `manifest-add`, `manifest-pending`, `manifest-mark`.
+- **Diff module** (`learning-loop/src/diff.ts`): compares current cloud-file
+  content against the delivered draft. Whitespace-only changes are not
+  reported as diffs; only substantive edits produce a diff result. Used by
+  the scribe to detect "soft-final" files (human-modified since delivery).
+- **Proposals queue** (`learning-loop/src/proposals.ts`): append-only
+  `proposals.jsonl` store for `SkillEditProposal` records. Tracks proposal
+  status (`pending` → `approved` | `rejected`), skill slug, and proposed
+  overlay body. CLI subcommands: `propose-edit`, `approve-edit`.
+- **`propose-edit` CLI subcommand**: passes the diff through the existing
+  fail-closed ethical-wall sanitizer. Any proposal whose overlay body
+  contains client-identifying facts exits 2 and writes nothing — no partial
+  proposals can reach the queue.
+- **`approve-edit` CLI subcommand**: writes a per-firm
+  `businesses/<slug>/skill-overlays/<slug>/SKILL.md` and archives any prior
+  overlay version. The launcher's existing inline-source overlay pass picks
+  this file up on the next `--business <slug>` run, replacing the stock
+  package skill body.
+- **`skill-improvement-scribe` agent**
+  (`companies/legal-operations/agents/skill-improvement-scribe/AGENTS.md`):
+  ops-lead routing, extractive lane. Reads the delivery manifest via
+  connector, fetches current file versions via the existing read-scoped
+  OneDrive/Google Drive connectors, runs `diff` + `propose-edit` for each
+  soft-final file, and queues proposals. Driven by the
+  `skill-improvement-sweep` routine.
+- **`skill-improvement-sweep` routine** in `.paperclip.yaml`: nightly
+  scheduled sweep that invokes the `skill-improvement-scribe`. The morning
+  digest surfaces pending proposals for yes/no/edit review.
+
+### Changed
+
+- Agent and skill counts: **177 agents / 172 skills** (was 176 / 172).
+  `skill-improvement-scribe` is the new agent; no new package skill (the
+  overlay mechanism reuses existing skill slots).
+- `learning-loop/` test suite: **45 tests** (was 22) — 23 new tests cover
+  `manifest`, `diff`, `proposals`, and the new CLI subcommands.
+- `CLAUDE.md` code-map and commands updated to reflect the 45-test count
+  and Tier-2 module list.
+
+### Deferred
+
+- **SkillOpt** (eval-validated automatic skill refinement driven by
+  recurring patterns) remains deferred. The recurrence tracker
+  (`learning-loop/src/recurrence.ts`) continues to accumulate the feed.
+- **In-app capture** (paperclip-document finalize/lock event) is deferred;
+  external-destination capture is the shipped path.
+- **Box connector**: delivery to Box is not yet tracked in the manifest.
+- **Native Google Docs export** (`.gdoc` / `.gsheet` files.export): only
+  uploaded DOCX/PDF files stored in Drive are diffable in v1.
+
+### Validation receipts
+
+- `pnpm -C learning-loop test`: **45/45 pass**, 0 fail, 0 skip
+- `pnpm -C learning-loop typecheck`: tsc clean (no errors)
+- `bash -n bin/possiblaw`: silent (BASH-OK)
+- `python3 bin/_possiblaw_variants.py --self-test`: OK
+- `python3 bin/_possiblaw_inline_source.py --self-test`: OK (incl. overlay assertions)
+- Launcher dry-run: `agents=177 skills=172 projects=3 issues=3 warnings=0 errors=0`
+
+---
+
 ## [0.24.0] — 2026-06-23 — Learning loop (Tier-1 firm memory)
 
 ### Added

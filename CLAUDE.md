@@ -86,7 +86,7 @@ When resuming prior work, read `${REPO_ROOT}/.claude/history.md` first.
 `bash -n bin/possiblaw` - Static-check the launcher.
 `python3 bin/_possiblaw_variants.py --self-test && python3 bin/_possiblaw_inline_source.py --self-test` - Self-test the Python helpers.
 `pnpm -C paperclip install` - Install the paperclip submodule's dependencies (the only pnpm usage left).
-`pnpm -C learning-loop test` - Run the learning-loop node:test suite (22 tests: sanitizer, ledger, memory, recurrence, remember-parser, store, CLI).
+`pnpm -C learning-loop test` - Run the learning-loop node:test suite (45 tests: sanitizer, ledger, memory, recurrence, remember-parser, store, CLI, manifest, diff, proposals).
 
 Run the launcher dry-run + helper self-tests before handoff. Expected dry-run plan summary: 0 warnings, 0 errors.
 
@@ -99,15 +99,15 @@ Run the launcher dry-run + helper self-tests before handoff. Expected dry-run pl
 
 ## Code Map
 - Entry point: `bin/possiblaw` (bash launcher).
-- Package root: `companies/legal-operations/` — 176 agents under `agents/`, 172 skills under `skills/`, 3 projects under `projects/`, eval convention under `evals/`, `variants.yaml`, `.paperclip.yaml`.
-- Org chart: chief-of-staff (orchestrator), chief-counsel, 34 leads (28 legal practices: commercial, employment, ip, privacy, litigation, corporate, regulatory, research, tax, real-estate, ma, banking-finance, securities, restructuring, immigration, healthcare, antitrust, trade-compliance, insurance, construction, govcon, environmental, estates, family-law, investigations, ai-governance, advertising, benefits; 6 business functions: bd, ops, finance, marketing, admin, legal-ops), plus 139 specialists (incl. meta-reviewers risk-spotter/debate-judge/reconciler and capability-builder — operator-review gated). Each lead's AGENTS.md routing table is the authoritative specialist list; the full catalog is `docs/agent-catalog.md`.
+- Package root: `companies/legal-operations/` — 177 agents under `agents/`, 172 skills under `skills/`, 3 projects under `projects/`, eval convention under `evals/`, `variants.yaml`, `.paperclip.yaml`.
+- Org chart: chief-of-staff (orchestrator), chief-counsel, 34 leads (28 legal practices: commercial, employment, ip, privacy, litigation, corporate, regulatory, research, tax, real-estate, ma, banking-finance, securities, restructuring, immigration, healthcare, antitrust, trade-compliance, insurance, construction, govcon, environmental, estates, family-law, investigations, ai-governance, advertising, benefits; 6 business functions: bd, ops, finance, marketing, admin, legal-ops), plus 140 specialists (incl. meta-reviewers risk-spotter/debate-judge/reconciler, capability-builder — operator-review gated, and skill-improvement-scribe). Each lead's AGENTS.md routing table is the authoritative specialist list; the full catalog is `docs/agent-catalog.md`.
 - Historical source material: `layer/` (agents, skills, workflows, connector YAML, eval datasets) — convert into the package, don't extend.
 - Docs: `docs/operator-walkthrough.md` (canonical getting-started), `docs/paperclip-package.md`, `docs/known-limitations.md`, `docs/ARCHITECTURE.md` (decision log).
 - Plan + handoff: `/Users/salvadorcarranza/.claude/plans/eventual-munching-fairy.md` (plan-of-record, local-only), `.agent/PLAN.md` (active work queue), `.agent/HANDOFF.md`.
 - Submodule: `paperclip/` (pinned, never modified).
 - Egress trust proxy: `gate-proxy/` (standalone TypeScript; boundary classify → policy → anonymize → human gate → hash-chained receipts; citation gate enforced on court/third-party egress). Tests: `pnpm -C gate-proxy test` (node:test).
 - Eval harness: `eval-harness/` (standalone TypeScript CLI via `bin/eval`; scores agents/skills per case across all 10 variants, deterministic + all-pass rubric grading). Cases live in `companies/legal-operations/evals/cases/`. Tests: `pnpm -C eval-harness test` (node:test).
-- Learning loop: `learning-loop/` (standalone TypeScript; fail-closed sanitizer, JSONL ledger, HOT memory, recurrence tracker, `remember-parser`, store, `learn` CLI). Tests: `pnpm -C learning-loop test` (node:test, 22 tests).
+- Learning loop: `learning-loop/` (standalone TypeScript; fail-closed sanitizer, JSONL ledger, HOT memory, recurrence tracker, `remember-parser`, store, `learn` CLI; Tier-2 modules: `manifest` delivery-record store, `diff` content-comparison, `proposals` skill-edit proposal queue; `skill-improvement-scribe` agent + `skill-improvement-sweep` routine). Tests: `pnpm -C learning-loop test` (node:test, 45 tests).
 - Firm learning store: `businesses/` (per-firm `businesses/<slug>/` dirs: `learnings/`, `memory/firm-memory.md`, `skill-overlays/`). Only `businesses/_template/` is tracked; per-slug dirs are gitignored. Bootstrapped automatically on first `--business <slug>` run.
 - Tests: launcher dry-run against a fresh data dir + helper `--self-test` modes + per-package frontmatter/YAML parse checks; plus node:test suites in `gate-proxy/`, `eval-harness/`, and `learning-loop/` (`pnpm -C <component> test`).
 
