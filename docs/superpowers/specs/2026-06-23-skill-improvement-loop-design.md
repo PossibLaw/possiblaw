@@ -39,6 +39,7 @@ No model training, no live watcher, no graded eval set required, and no reliance
 **From the firm's cloud, via the existing connectors (read paths already specced):**
 - **OneDrive read-back by ID** — `GET /drives/{driveId}/items/{itemId}` (+ `/content`); token `MS_GRAPH_READ_TOKEN`, scope `Files.Read`; metadata includes `lastModifiedDateTime` / `lastModifiedBy` / `webUrl`. (`companies/legal-operations/skills/connector-onedrive/SKILL.md:124-133`.)
 - **Google Drive read-back by ID** — content `GET /drive/v3/files/{id}?alt=media`; metadata `GET /files/{id}?fields=id,name,size,modifiedTime,lastModifyingUser`; token `GDRIVE_READ_TOKEN`, scope `drive.file` (app-created files stay visible — our delivered file qualifies). Native Google Docs need `files.export` (UNCONFIRMED). (`companies/legal-operations/skills/connector-google-drive/SKILL.md:66-70,99-105`.)
+- **Native cloud version history (both, verified) — the versioning backbone:** OneDrive `GET /drives/{driveId}/items/{itemId}/versions` → `DriveItemVersion[]` (`id`, `lastModifiedDateTime`, `lastModifiedBy.user.{id,displayName}`, `size`; newest→oldest); least-privileged scope **`Files.Read`** (verified learn.microsoft.com, doc updated 2025-10-22; accessed 2026-06-23). Google Drive `GET /drive/v3/files/{fileId}/revisions` → `Revision[]` (`id`, `modifiedTime`, `lastModifyingUser`, `size`); scope **`drive.file`** covers revisions of app-created files (verified developers.google.com; accessed 2026-06-23). **Both are covered by the existing agent-side `*_READ_*` tokens — no new scope.** Per-version content download: Graph `…/versions/{version-id}/content`; Drive `…/revisions/{revisionId}?alt=media` (exact Drive `Revision` field list + content path to confirm at planning).
 - **Stable vendor file ID at delivery** — the gate proxy upload returns the vendor `id` + `webUrl` on 200. (`output-delivery-playbook` step 5; `connector-onedrive:112`; `connector-google-drive:93`.) The gate's hash-chained receipts also log each `upload_document` (candidate manifest cross-check; UNCONFIRMED whether the vendor id is in the receipt body — verify at planning).
 
 **From paperclip, via its existing API (no submodule edits, no PRs):**
@@ -75,11 +76,15 @@ No model training, no live watcher, no graded eval set required, and no reliance
 
 ## 7. Key mechanisms / seams
 
-### 7a. Delivery manifest (the anchor)
-Recorded by the courier at delivery; keyed on `vendorFileId`. This is what makes the loop robust to renames/moves and removes any need for naming conventions. Source of truth is the manifest file in `businesses/<slug>/deliveries/`; the gate-proxy receipt chain is a cross-check. **UNCONFIRMED — confirm the upload 200 response surfaces the vendor id to the courier (it does per the connector skills) and that we can persist it at delivery time.**
+### 7a. Delivery manifest (the anchor) — fully system-captured, never user-entered
+Recorded by the courier at delivery; keyed on `vendorFileId`. **Every identifier is captured programmatically — there is no user-entered data anywhere in the loop.** The vendor file `id` comes from the upload **200 response** (confirmed by the connector skills: `connector-onedrive:112`, `connector-google-drive:93`); the delivered-draft hash is computed from the bytes we sent; change provenance (who/when) is read from cloud version metadata. The manifest file in `businesses/<slug>/deliveries/` is the source of truth; the gate-proxy receipt chain is a cross-check. The only human input in the entire loop is the morning yes/no/edit review.
 
-### 7b. Connector read-back + soft-final detection
-Per destination: OneDrive `GET /drives/{driveId}/items/{itemId}` (+ `/content`); Drive `GET /files/{id}?alt=media` (+ metadata fields). "Changed by a human since delivery" = `modified > deliveredAt` (the app wrote the file exactly once at delivery, so any later change is the lawyer's); `lastModifiedBy`/`lastModifyingUser` is an optional refinement. Idempotency via `lastProcessedHash` per entry. Read tokens are the agent-side read-scoped `*_READ_*` vars (never write scopes). **UNCONFIRMED — exact metadata field names per vendor; Google native-Docs export path; verify at planning.**
+### 7b. Version tracking + human-modifier detection (the versioning backbone)
+Versioning is tracked from **system metadata**, two layers deep:
+- **Baseline (v0) = the delivered draft** — its content hash + retained local copy live in the manifest. This is our diff anchor.
+- **Cloud-native version history** — OneDrive `…/items/{itemId}/versions` (`DriveItemVersion`) and Drive `…/files/{fileId}/revisions` (`Revision`) give the full edit lineage with `id` + modified-time + **modifier identity** + size (see §4). Both use the existing `*_READ_*` read scopes.
+
+The sweep: (1) cheap-checks the file's current `lastModifiedDateTime`/`modifiedTime` against `deliveredAt`; (2) confirms a **human** made the change via `lastModifiedBy.user` (Graph) / `lastModifyingUser` (Drive) — distinguishing the lawyer's edit from our one-time delivery write; (3) fetches the current content and diffs it against the delivered baseline. Idempotency via `lastProcessedHash` (and last-seen version `id`) per manifest entry, so a change is proposed once. Reads use agent-side read-scoped tokens only (never write scopes). **Remaining to confirm at planning: exact Drive `Revision` field names + per-revision content path; Google native-Docs `files.export`.**
 
 ### 7c. Diff → suggestion distillation
 The scribe receives delivered-draft + current-final text; `diff.ts` provides a structured change set; the scribe's skill prompt enforces a *generalized* lesson + one-line rationale + the target skill slug (the skill the drafting agent used, carried in the manifest). It never copies client-specific clauses verbatim.
@@ -151,8 +156,7 @@ Carried verbatim from `2026-06-23-skillopt-design.md` §6b. A firm overlay's `SK
 
 ## 13. Open items / UNCONFIRMED to resolve at planning
 
-- **Manifest persistence:** confirm the courier can capture the vendor `id` at delivery and persist it; decide manifest file vs. gate-receipt-derived (§7a).
-- **Vendor metadata fields:** exact `modified*` / `lastModifiedBy` field names for Graph and Drive; Google native-Docs export path (§7b).
-- **Read scopes/tokens:** confirm `MS_GRAPH_READ_TOKEN` / `GDRIVE_READ_TOKEN` read scopes suffice for by-ID content reads of app-created files.
+- **Manifest persistence:** the vendor `id` is in the upload 200 response (confirmed); remaining = persist it at delivery and decide manifest-file vs. gate-receipt-derived (§7a).
+- **Read scopes/versioning (mostly resolved):** version history is confirmed under the existing `Files.Read` / `drive.file` read scopes (§4). Remaining = exact Drive `Revision` field names + per-revision content path; Google native-Docs `files.export` path.
 - **Designated-reviewer config + digest UX:** field name/location in `businesses/<slug>/`; launcher prompt vs `learn review` CLI; once-per-day gating marker.
 - **Sweep scheduling:** how the nightly `skill-improvement-sweep` cron is declared/wired (operator sets cadence in the UI, per the Tier-1 `learning-sweep` precedent).
