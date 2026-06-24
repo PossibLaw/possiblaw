@@ -146,7 +146,24 @@ rules:
    matches where returned) — do not use a write-scoped token for this check.
    Absent the read token, rely on the 200 response id plus the local copy;
    never block delivery reporting on an optional read-back.
-6. **Post the completion comment.** Destination name, canonical link
+6. **Record the delivery manifest (for skill improvement).** After a verified
+   upload, record the delivery so the nightly skill-improvement sweep can later
+   diff the lawyer's finalized version against this draft. Use the vendor `id`
+   from the 200 response (never a filename), the retained local draft path, and
+   the slug of the drafting skill the upstream agent used:
+
+   ```sh
+   node --import tsx learning-loop/src/cli.ts manifest-add \
+     --business "$POSSIBLAW_BUSINESS_DIR" \
+     --file-id "$VENDOR_FILE_ID" --kind "$KIND" ${DRIVE_ID:+--drive-id "$DRIVE_ID"} \
+     --matter "$ISSUE_ID" --agent "$PAPERCLIP_AGENT_ID" \
+     --skill "$DRAFTING_SKILL_SLUG" --draft-path "$LOCAL_DRAFT_PATH"
+   ```
+
+   Skip silently when `POSSIBLAW_BUSINESS_DIR` is unset (no firm store
+   configured). The manifest holds no client facts — only ids, a content hash,
+   and the local path.
+7. **Post the completion comment.** Destination name, canonical link
    (`webUrl` / Drive link / Notion url), and the retained local path. For
    sweep runs, one comment per filed deliverable on its issue.
 
