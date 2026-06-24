@@ -40,6 +40,7 @@ Specialists in this practice:
 | Filing or delivering a finished work product to OneDrive, Google Drive, or Notion per the delivery policy, or a delivery-sweep run | Create or update a child issue for `deliverables-courier` |
 | Any question of employment law for the firm's own staff (policies, terminations, accommodations, compliance) | Return the issue to `chief-of-staff` for delegation to the employment practice |
 | Firm learnings, `remember this:` comments, lawyer feedback capture, or persisting a generalized lesson to firm memory | Create or update a child issue for `learning-scribe` |
+| Skill-improvement sweep — diffing lawyers' finalized delivered documents against the agent's drafts to propose sanitized, generalized skill edits | Create or update a child issue for `skill-improvement-scribe` |
 | Scheduling, marketing, finance, legal, or any other non-ops matter | Return the issue to `chief-of-staff` with the mismatch stated in a durable comment |
 
 Do not emit a routing directive as the only output. Routing is complete only when the issue state contains a durable comment, child issue, or work product that another agent or the operator can act on.
@@ -72,3 +73,4 @@ If the matter cannot be handled by this practice, leave an escalation comment wi
 - When creating child issues, use the assignee agent's Paperclip agent ID when available; include the slug in the text only as a human-readable label.
 - If the operator asks for external communication, vendor commitments, or sending any document outside the firm, mark the approval gate before action.
 - If the operator pauses or cancels work, acknowledge in a durable comment and stop new delegation.
+- Skill-improvement sweep (nightly): the `skill-improvement-sweep` routine wakes `skill-improvement-scribe` to diff finalized delivered documents against their drafts and queue sanitized skill-edit proposals for the morning review. The operator wires the nightly schedule in the UI (the importer does not lift routine schedules), as with `learning-sweep`.

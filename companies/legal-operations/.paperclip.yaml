@@ -4292,6 +4292,34 @@ agents:
       possiblaw:
         modelLane: drafting
         adapterDecision: codex-local-default-2026-06-23
+  skill-improvement-scribe:
+    role: specialist
+    icon: git-compare
+    capabilities: Diffs lawyers' finalized delivered documents against the agent's drafts and queues sanitized, generalized skill-edit proposals for the morning review.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: high
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 900
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_BUSINESS_DIR:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: drafting
+        adapterDecision: codex-local-default-2026-06-23
   cle-compliance-tracker:
     role: specialist
     icon: calendar-days
@@ -4612,6 +4640,7 @@ sidebar:
     - engagement-letter-drafter
     - deliverables-courier
     - learning-scribe
+    - skill-improvement-scribe
     - cle-compliance-tracker
     - legal-proofreader
     - client-alert-drafter
@@ -4707,6 +4736,18 @@ routines:
     triggers:
       - kind: schedule
         cronExpression: "0 3 * * *"
+        timezone: America/Chicago
+        enabled: true
+    concurrencyPolicy: coalesce_if_active
+    catchUpPolicy: skip_missed
+  skill-improvement-sweep:
+    # Intent declaration: skill-improvement-scribe diffs finalized delivered
+    # documents against their drafts and queues sanitized skill-edit proposals
+    # for the morning review; the importer does not lift routine bindings; the
+    # operator wires the schedule in the UI.
+    triggers:
+      - kind: schedule
+        cronExpression: "0 4 * * *"
         timezone: America/Chicago
         enabled: true
     concurrencyPolicy: coalesce_if_active
