@@ -1783,8 +1783,7 @@ maybe_morning_review() {
         : # no pending proposals
     else
         printf '\n=== Skill-improvement review (%s) ===\n' "$today"
-        ( cd "$REPO_ROOT" && node --import tsx learning-loop/src/cli.ts review-list --business "$BUSINESS_DIR" 2>/dev/null ) \
-            | python3 "$REPO_ROOT/bin/_possiblaw_review_print.py"
+        printf '%s\n' "$pending" | python3 "$REPO_ROOT/bin/_possiblaw_review_print.py"
         printf 'Review each in the PossibLaw app or run:\n'
         printf '  node --import tsx learning-loop/src/cli.ts approve-edit --business "%s" --id <SEP-id>\n' "$BUSINESS_DIR"
         printf '  node --import tsx learning-loop/src/cli.ts reject-edit  --business "%s" --id <SEP-id>\n' "$BUSINESS_DIR"
