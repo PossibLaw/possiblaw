@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./cli.ts";
+import { loadManifest } from "./manifest.ts";
+import { hashText } from "./diff.ts";
 
 test("propose rejects a client-fact-laden lesson with exit 2", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ll-cli-"));
@@ -71,4 +73,34 @@ test("propose with no --matter returns code 1 'missing --matter'", async () => {
   ]);
   assert.equal(r.code, 1);
   assert.ok(r.stdout.includes("missing --matter"));
+});
+
+test("manifest-add records a delivery with the draft hash", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-"));
+  const draft = join(dir, "draft.md");
+  await writeFile(draft, "DRAFT BODY\n", "utf8");
+  const r = await run([
+    "manifest-add", "--business", dir, "--file-id", "FILE1", "--kind", "gdrive",
+    "--matter", "POS-1", "--agent", "ag1", "--skill", "legal-nda-playbook", "--draft-path", draft,
+  ]);
+  assert.equal(r.code, 0);
+  const m = await loadManifest(dir);
+  assert.equal(m.length, 1);
+  assert.equal(m[0].vendorFileId, "FILE1");
+  assert.equal(m[0].draftHash, hashText("DRAFT BODY\n"));
+});
+
+test("manifest-pending lists records; manifest-mark sets lastProcessedHash", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-"));
+  const draft = join(dir, "draft.md");
+  await writeFile(draft, "X\n", "utf8");
+  await run(["manifest-add", "--business", dir, "--file-id", "F", "--kind", "gdrive",
+    "--matter", "P-1", "--agent", "a", "--skill", "s", "--draft-path", draft]);
+  const pend = await run(["manifest-pending", "--business", dir]);
+  assert.equal(pend.code, 0);
+  assert.match(pend.stdout, /"vendorFileId":"F"/);
+  const mark = await run(["manifest-mark", "--business", dir, "--file-id", "F", "--hash", "hZ"]);
+  assert.equal(mark.code, 0);
+  const m = await loadManifest(dir);
+  assert.equal(m[0].lastProcessedHash, "hZ");
 });

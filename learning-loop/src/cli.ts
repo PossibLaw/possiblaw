@@ -1,9 +1,12 @@
+import { readFile } from "node:fs/promises";
 import { loadStore, saveStore } from "./store.ts";
 import { sanitizeLesson } from "./sanitizer.ts";
 import { nextLessonId, setStatus } from "./ledger.ts";
 import { appendLesson } from "./memory.ts";
 import { topicsAtThreshold } from "./recurrence.ts";
-import type { Lesson } from "./types.ts";
+import { loadManifest, saveManifest, upsertDelivery, markProcessed } from "./manifest.ts";
+import { hashText } from "./diff.ts";
+import type { Lesson, DeliveryRecord } from "./types.ts";
 
 function arg(argv: string[], name: string): string | undefined {
   const i = argv.indexOf(`--${name}`);
@@ -64,6 +67,38 @@ export async function run(argv: string[]): Promise<{ code: number; stdout: strin
     if (cmd === "render") {
       await saveStore(dir, lessons);
       return { code: 0, stdout: "rendered" };
+    }
+
+    if (cmd === "manifest-add") {
+      const fileId = arg(argv, "file-id");
+      const kind = arg(argv, "kind");
+      const matter = arg(argv, "matter");
+      const draftPath = arg(argv, "draft-path");
+      if (!fileId || !kind || !matter || !draftPath) {
+        return { code: 1, stdout: "manifest-add requires --file-id --kind --matter --draft-path" };
+      }
+      if (kind !== "onedrive" && kind !== "gdrive") return { code: 1, stdout: `bad --kind: ${kind}` };
+      const body = await readFile(draftPath, "utf8");
+      const records = await loadManifest(dir);
+      const rec: DeliveryRecord = {
+        vendorFileId: fileId, destinationKind: kind, driveId: arg(argv, "drive-id"),
+        matter, agentId: arg(argv, "agent") ?? "", skillSlug: arg(argv, "skill") ?? "",
+        deliveredAt: isoNow(), draftHash: hashText(body), draftPath,
+      };
+      await saveManifest(dir, upsertDelivery(records, rec));
+      return { code: 0, stdout: "ok" };
+    }
+
+    if (cmd === "manifest-pending") {
+      return { code: 0, stdout: JSON.stringify(await loadManifest(dir)) };
+    }
+
+    if (cmd === "manifest-mark") {
+      const fileId = arg(argv, "file-id");
+      const hash = arg(argv, "hash");
+      if (!fileId || !hash) return { code: 1, stdout: "manifest-mark requires --file-id --hash" };
+      await saveManifest(dir, markProcessed(await loadManifest(dir), fileId, hash));
+      return { code: 0, stdout: "ok" };
     }
 
     return { code: 1, stdout: `unknown command: ${cmd}` };
