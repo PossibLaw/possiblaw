@@ -1294,13 +1294,18 @@ if [ -n "$FIRM_MEMORY_FILE" ]; then
     FIRM_MEMORY_ARGS=(--firm-memory-file "$FIRM_MEMORY_FILE")
 fi
 
+OVERLAY_ARGS=()
+if [ -n "$BUSINESS_DIR" ]; then
+    OVERLAY_ARGS=(--business-overlay-root "$BUSINESS_DIR")
+fi
+
 # Bundle BEFORE override generation: with --teams the bundle carries a
 # filtered .paperclip.yaml, and adapter overrides must be generated from that
 # filtered sidecar so no override references an agent outside the subset.
 INLINE_FILE="$(mktemp -t possiblaw-inline.XXXXXX.json)"
 if ! python3 "$INLINE_PY" --package-root "$PACKAGE" \
         ${DEMO_ARGS+"${DEMO_ARGS[@]}"} ${TEAMS_ARGS+"${TEAMS_ARGS[@]}"} \
-        ${FIRM_MEMORY_ARGS+"${FIRM_MEMORY_ARGS[@]}"} \
+        ${FIRM_MEMORY_ARGS+"${FIRM_MEMORY_ARGS[@]}"} ${OVERLAY_ARGS+"${OVERLAY_ARGS[@]}"} \
         > "$INLINE_FILE"; then
     err "inline source bundling failed"
     kill_paperclip_tree "$PAPERCLIP_PID"
@@ -1766,6 +1771,27 @@ fi
 printf '\n'
 printf '  Operator walkthrough: %s/docs/operator-walkthrough.md\n' "$REPO_ROOT"
 printf '======================================================================\n'
+
+maybe_morning_review() {
+    [ -n "$BUSINESS_DIR" ] || return 0
+    local today marker pending
+    today="$(date '+%Y%m%d')"
+    marker="$BUSINESS_DIR/.last-review-$today"
+    [ -e "$marker" ] && return 0
+    pending="$(cd "$REPO_ROOT" && node --import tsx learning-loop/src/cli.ts review-list --business "$BUSINESS_DIR" 2>/dev/null)"
+    if [ "$pending" = "[]" ] || [ -z "$pending" ]; then
+        : # no pending proposals
+    else
+        printf '\n=== Skill-improvement review (%s) ===\n' "$today"
+        ( cd "$REPO_ROOT" && node --import tsx learning-loop/src/cli.ts review-list --business "$BUSINESS_DIR" 2>/dev/null ) \
+            | python3 "$REPO_ROOT/bin/_possiblaw_review_print.py"
+        printf 'Review each in the PossibLaw app or run:\n'
+        printf '  node --import tsx learning-loop/src/cli.ts approve-edit --business "%s" --id <SEP-id>\n' "$BUSINESS_DIR"
+        printf '  node --import tsx learning-loop/src/cli.ts reject-edit  --business "%s" --id <SEP-id>\n' "$BUSINESS_DIR"
+    fi
+    : > "$marker"
+}
+maybe_morning_review
 
 if [ "$NO_BROWSER" != "true" ]; then
     if command -v open >/dev/null 2>&1; then

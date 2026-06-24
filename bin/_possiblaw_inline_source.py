@@ -572,6 +572,11 @@ def main(argv: list[str]) -> int:
         help="path to a firm-memory.md file; overlays its content into the "
         "skills/firm-memory/SKILL.md body between the <!-- FIRM-MEMORY-BODY --> markers",
     )
+    parser.add_argument(
+        "--business-overlay-root",
+        default=None,
+        help="business dir whose skill-overlays/<slug>/SKILL.md replace package skills at import",
+    )
     parser.add_argument("--self-test", action="store_true", help="run built-in tests and exit")
     args = parser.parse_args(argv)
 
@@ -598,6 +603,7 @@ def main(argv: list[str]) -> int:
             Path(args.package_root),
             extra_roots=[Path(p) for p in args.extra_root],
             include_teams=include_teams,
+            business_overlay_root=(Path(args.business_overlay_root) if args.business_overlay_root else None),
         )
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
