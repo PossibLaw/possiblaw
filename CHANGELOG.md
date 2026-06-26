@@ -7,6 +7,26 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.25.1] — 2026-06-24 — Fix: learning-scribe CLI invocations resolve in the agent sandbox
+
+### Fixed
+
+- **Both learning scribes (`learning-scribe`, `skill-improvement-scribe`) could
+  not run the learning-loop CLI in live operation.** Their documented commands
+  used `node --import tsx learning-loop/src/cli.ts …`, which fails with
+  `ERR_MODULE_NOT_FOUND` from the agent's actual sandbox cwd: paperclip starts
+  the server with `process.cwd() = $REPO_ROOT/paperclip` and adapter-spawned
+  agents inherit it, so both the relative `learning-loop/src` path and the
+  `tsx` package (installed under `learning-loop/node_modules`) fail to resolve.
+  The nightly `learning-sweep` and `skill-improvement-sweep` routines would
+  have errored out. (Resolves the carried "UNCONFIRMED — tsx resolution in the
+  adapter sandbox" item.)
+- **Launcher** now injects `POSSIBLAW_REPO_ROOT` into every agent's
+  `adapterConfig.env` alongside `POSSIBLAW_BUSINESS_DIR` (in `bin/possiblaw`,
+  the `--business` env-patch block). Both scribes now `cd
+  "$POSSIBLAW_REPO_ROOT/learning-loop" && node --import tsx src/cli.ts …` —
+  the same cwd-resolving pattern the launcher's morning digest already used.
+
 ## [0.25.0] — 2026-06-23 — Skill-improvement loop (Tier-2 learn-from-edits)
 
 ### Added

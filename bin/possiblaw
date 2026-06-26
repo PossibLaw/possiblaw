@@ -1670,13 +1670,19 @@ if [ "$NO_GATE_PROXY" = "true" ]; then
 else
     printf '{"GATE_PROXY_URL": "%s"}' "$GATE_PROXY_URL" > "$PLAIN_ENV_FILE"
 fi
-# If --business was given, inject POSSIBLAW_BUSINESS_DIR into every agent's env.
+# If --business was given, inject POSSIBLAW_BUSINESS_DIR + POSSIBLAW_REPO_ROOT
+# into every agent's env. POSSIBLAW_REPO_ROOT lets the learning scribes locate
+# and run the learning-loop CLI (node --import tsx src/cli.ts) regardless of the
+# agent's sandbox cwd: the paperclip server starts with process.cwd() =
+# $REPO_ROOT/paperclip, where neither learning-loop/src nor the tsx package
+# resolve. The scribes cd into "$POSSIBLAW_REPO_ROOT/learning-loop" first.
 if [ -n "$BUSINESS_DIR" ]; then
-    python3 - "$PLAIN_ENV_FILE" "$BUSINESS_DIR" <<'PY'
+    python3 - "$PLAIN_ENV_FILE" "$BUSINESS_DIR" "$REPO_ROOT" <<'PY'
 import json, sys
-path, bdir = sys.argv[1], sys.argv[2]
+path, bdir, rroot = sys.argv[1], sys.argv[2], sys.argv[3]
 d = json.load(open(path))
 d["POSSIBLAW_BUSINESS_DIR"] = bdir
+d["POSSIBLAW_REPO_ROOT"] = rroot
 json.dump(d, open(path, "w"))
 PY
 fi
