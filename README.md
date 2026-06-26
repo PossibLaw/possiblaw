@@ -11,6 +11,20 @@
 
 Agents do the legal and business work autonomously. The product is the path that work travels: egress writes cross hard-gated trust boundaries, every gate decision lands in a tamper-evident receipt chain, and humans decide at the boundaries that matter — not on every step. PossibLaw ships this as a *layer* on the paperclip control plane (wired as a pinned git submodule, never modified), not a fork.
 
+## The thesis: atomic units of work
+
+A chat window that drafts a whole contract in one shot gives you one big, opaque output to trust or distrust. PossibLaw is built the other way: **work is decomposed into the smallest reviewable units — one agent, one skill, one gate decision, one receipt — because small units are where control and quality come from.**
+
+- **More control.** You approve at the boundary that matters (a court filing, a signature, a payment), not on every keystroke and not on one monolithic "submit." Each atomic action is independently classified, gated, and logged — so you can allow the routine and stop the consequential.
+- **Better work.** A focused agent doing one bounded task (NDA redline, citation check, diligence summary) is easier to make correct, easier to eval, and easier to swap than a generalist doing everything. The 177 agents / 172 skills are atomic on purpose: composable parts, each with its own evals, each replaceable without touching the rest.
+- **Provenance per unit.** Because the unit is small, its provenance is legible: this output, citing these authorities, approved by this human, recorded in this receipt. That is exactly the slice a regulator or insurer asks to see.
+
+The catalog is the supporting cast. The atomic pipeline — decompose, gate, receipt — is the product.
+
+## Where this sits in the market
+
+Legal AI is sorting into a data layer (law as an API/MCP with provenance), a guardrails layer (the sign-off, audit trail, and hallucination control a regulator needs once AI did the work), and a firm layer (lawyers running an AI backend). **PossibLaw is the open-source guardrails + firm layer** — the audit trail, human gates, anonymization, and receipts wrapped around an atomic agent catalog — with a provenance-backed legal-data layer in progress (see [`docs/builds/`](docs/builds/)). It competes on being *legible and open* where the rest of the market is opaque and closed.
+
 ## The trust pipeline
 
 What a firm actually gets:
@@ -28,6 +42,14 @@ What a firm actually gets:
 | Privacy tier — confidential/privileged payloads sent through the gate | **Enforced at the gate** | Deterministic masker over caller-supplied matter entities + pattern classes, recall measured in the test suite (100% on its labeled fixture; gated at ≥95% with zero entity leaks; fail-closed to block when it cannot vouch, e.g. no entity list) — or routed to a local model when one is configured |
 | Privacy tier — agents' own primary-lane model calls | **Routed, not proxied** | A routing choice: local-model variants per lane (`ollama`, `llamacpp` in `variants.yaml`) plus the advisory `privacy-encoder` skill. Primary-lane calls do not pass the proxy. |
 | Citation verification | **Enforced at the gate (Phase 2)** | Court/third-party egress **carrying legal citations** is **blocked** until a registered, payload-bound, deterministically re-checked citation verification exists for the document being filed or sent. The `legal-citation-checker` agent executes `citation-verification-checklist` (character-by-character quote-fidelity, side-by-side discrepancy tables), then POSTs the result to `POST /quality/citation`; the gate detects citations in the outbound document and calls `CitationRegistry.has(docSha256)` before any dispatch — including the human gate. A document with no detectable citations has nothing to re-check and passes. Fail-closed: a gated payload with no reviewable document text at all is blocked. Caveat: citation verification itself is an agent step — the gate enforces that it was performed and passed, not that the cited authority is authoritative. |
+
+## Confidentiality, privilege, and cloud models
+
+PossibLaw helps a firm take the **reasonable steps** that Rule 1.6 and ABA Formal Opinion 512 (2024) require when AI touches client matter content:
+
+- **Reversible local masking (`privacy-encoder` skill).** Confidential/PII values are substituted with stable opaque placeholders *before* any cloud-capable model call, the substitution key stays on the operator's local disk, and the output is decoded back to plaintext after the call — so confidential matter text need never reach a cloud model in cleartext.
+- **Local-model tier-floor.** Matters tagged `metadata.possiblaw.privacyTier: confidential|privileged` route the sensitive step through a local model lane (`ollama` / `llamacpp`); the launcher warns at startup if no local lane is reachable.
+- **Documented data terms, not marketing claims.** We frame this honestly. Sending matter data to a cloud model under genuine enterprise zero-retention / no-train terms **does not, by itself, waive attorney-client privilege** — and conversely, local-only is a confidentiality and risk-reduction choice, *not* a privilege guarantee. PossibLaw is engineered for "reasonable steps to protect confidentiality and privilege," never "privilege-safe." The full legal posture, the confidentiality-vs-privilege distinction, the 2026 case law, and the do/don't marketing language live in [docs/privilege-and-confidentiality.md](docs/privilege-and-confidentiality.md).
 
 Sharp edges are documented, not hidden — see [docs/known-limitations.md](docs/known-limitations.md): `local_trusted` dev instances accept unauthenticated local board calls (the human gate binds agents via credential isolation; production deployments with auth enabled get the structural gate too); the receipt chain assumes a single writer, and same-user tampering is caught only against an externally anchored head; `share_external` writes (HubSpot, Linear, Clio, iManage, NetDocuments) are visibly refused in v1 rather than silently credentialed; Slack/Teams notification webhooks (operator-configured, no matter content) remain direct in v1. Which connector takes which path: [docs/connectors-inventory.md](docs/connectors-inventory.md).
 
