@@ -18,6 +18,8 @@ CourtListener is a free, public legal-research database maintained by the Free L
 
 **Provisioning path:** wire this connector through the **official CourtListener MCP** at `https://mcp.courtlistener.com` (OAuth; requires a free CourtListener account — exposes case law, PACER, citation network, oral arguments, judges, keyword + semantic search, alerts, and grounded citation verification), fronted by PossibLaw's thin trust-adapter `mcp-servers/legal-data/`. The adapter sanitizes confidential/privileged query args and wraps every upstream result in a provenance envelope with a gate-compatible `sha256`; it is schema-agnostic and discovers upstream tools via `tools/list`. This is the preferred path; the raw-curl REST patterns below remain a fallback. See `mcp-servers/legal-data/README.md`.
 
+Both servers are now **registered once** in `companies/legal-operations/mcp-servers.yaml` (`legal-data` stdio + `courtlistener-official` http/OAuth). The registry is the provisioning path: at launch, `bin/possiblaw` renders these entries into the active variant's runtime CLI MCP config (opencode.json / `~/.codex/config.toml` / `.mcp.json` / `~/.gemini/settings.json`) via `bin/_possiblaw_mcp.py`. The `grantTo` list there (which includes `legal-research-analyst`) is **advisory** — CLI MCP configs are global per runtime, not per-subagent. See `docs/builds/mcp-registry.md`.
+
 ## Required Environment Variables
 
 | Env | Purpose | Default | Source |

@@ -122,6 +122,21 @@ check OpenRouter pins against its public catalog), so "you don't have access
 to this model" surfaces before import, not mid-matter (`--skip-model-probe`
 to bypass).
 
+### MCP registry — declare MCP servers once
+
+Paperclip doesn't manage MCP; each variant's adapter wraps a CLI that reads MCP
+from its own config file in its own schema. PossibLaw makes MCP an atomic,
+declare-once unit: list each server once in
+[`companies/legal-operations/mcp-servers.yaml`](companies/legal-operations/mcp-servers.yaml)
+(`name`, `transport`, `command`/`url`, `auth`, `grantTo`, `privacy`), and the
+launcher renders it into whichever runtime CLI config the chosen variant uses —
+`opencode.json`, `~/.codex/config.toml`, `.mcp.json`, or `~/.gemini/settings.json`
+— via the stdlib-only `bin/_possiblaw_mcp.py`. Only env var **names** pass
+through, never secrets; `oauth` servers stay interactive on first run. Seeded
+with the `legal-data` adapter and the official CourtListener MCP. `grantTo` is
+advisory (CLI MCP configs are global per runtime, not per-subagent); `--skip-mcp`
+bypasses. Build spec: [`docs/builds/mcp-registry.md`](docs/builds/mcp-registry.md).
+
 ---
 
 ## Architecture in 90 seconds

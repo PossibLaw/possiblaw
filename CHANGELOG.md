@@ -15,6 +15,22 @@ under `docs/builds/`.
 
 ### Added
 
+- **MCP-server registry + renderer** (`companies/legal-operations/mcp-servers.yaml`,
+  `bin/_possiblaw_mcp.py`, launcher wiring): declare MCP servers **once** and have
+  the launcher render them into whichever model-runtime CLI config the active
+  variant's adapter uses — `opencode.json` (`mcp` block), `~/.codex/config.toml`
+  (`[mcp_servers.*]` TOML), `.mcp.json` (`mcpServers`), or
+  `~/.gemini/settings.json` (`mcpServers`). The renderer is stdlib-only (mirrors
+  `bin/_possiblaw_variants.py`, ships `--self-test`). `auth` supports `none`,
+  `token-env:<VAR>` (env passthrough by **name** only, never the secret), and
+  `oauth` (http-only, interactive first run). Registration is dry-run-aware,
+  confirm-gated when interactive, on by default and skippable with `--skip-mcp`;
+  a missing registry/helper degrades to a warn, never an error. Seeded with
+  `legal-data` (stdio, `tsx mcp-servers/legal-data/src/server.ts`, `auth: none`)
+  and `courtlistener-official` (http, `mcp.courtlistener.com`, `auth: oauth`).
+  `grantTo` is **advisory** — CLI MCP configs are global per runtime, not
+  per-subagent, so the launcher renders the union. Build spec:
+  `docs/builds/mcp-registry.md`.
 - **CourtListener legal-data MCP adapter** (`mcp-servers/legal-data/`): the
   first slice of the data layer. A thin trust-adapter/proxy in front of
   CourtListener's **official** hosted MCP (`mcp.courtlistener.com`, OAuth) — we
