@@ -51,6 +51,25 @@ This checklist verifies fidelity, not validity. Frame currency and treatment as 
 - Note any later history, vacatur, or negative-treatment signal visible on the face of a retrieved source as a fact, with the follow-up to confirm via a citator.
 - Never report treatment as resolved; the citator check belongs to the operator or responsible attorney.
 
+## Gate Registration
+
+When `GATE_PROXY_URL` is set, the gate proxy blocks a court filing or third-party send of any citation-bearing draft until a passing verification is registered for that exact text. Register only a fully passing table; registration is evidence for the gate, not approval — the human gate still applies.
+
+1. Register only when every row is `Yes`. A table with any `No` / `Partial` / `UNVERIFIED` row is a findings report — deliver it to the operator and do not register.
+2. Build the registration body from the table: one row object per table row — `citation` (verbatim, with pinpoint, as written in the draft), `match` (`Yes`), and for any quoted passage `quoted` (the draft's quoted text) plus `sourcePassage` (the source text it was checked against). The proxy re-checks that each quoted string appears verbatim (after Unicode normalization) in BOTH the source passage and the draft, so `quoted` must be text that is actually in the draft.
+3. The `document` field must be the EXACT text that will be sent or filed — the same body the connector skill puts in its egress payload (`body` for email, `content` for an upload, `documentText` for a court filing). Write the JSON to a temp file; never inline draft text in shell history:
+
+   ```sh
+   curl -sS -X POST -H "Content-Type: application/json" \
+     --data @/tmp/citation-registration.json \
+     "${GATE_PROXY_URL}/quality/citation"
+   ```
+
+   with the temp file holding `{"document":"<exact draft text>","rows":[…],"meta":{"agentId":"$PAPERCLIP_AGENT_ID","issueId":"<issue>"}}`.
+4. `200 {registered:true, documentSha256, citationCount}` — record the `documentSha256` in the completion note. The draft must egress with this exact text; any later edit changes the sha and requires re-verification and re-registration.
+5. `422 {registered:false, reason, details}` — the proxy's deterministic re-check disagrees with the table. `coverage_gap`: the draft cites something with no row (the `details` list the missing citations). `unverified_rows`: a row is not `Yes`. `quote_mismatch`: a `quoted` string is not verbatim in its `sourcePassage` or in the draft. Treat the response as new findings — fix the table or flag the draft to the operator. Never delete citations from the draft to dodge coverage.
+6. `400` — malformed registration body; fix the JSON shape and retry.
+
 ## Boundaries
 
 - Never assert that a citation is good law, controlling, current, or still authoritative; no Shepardizing or KeyCite claims.

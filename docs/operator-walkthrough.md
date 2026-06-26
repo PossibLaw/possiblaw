@@ -369,6 +369,20 @@ and passes them to the proxy only:
 An agent that tries to call a vendor directly using the above vars simply
 has no token — the proxy is the only credentialed egress path out.
 
+**Citation gate (Phase 2).** On the boundaries in `gate-policy.yaml`
+`citationGate.boundaries` (default: court filing + third-party egress), the
+proxy reads the outbound document text and, if it carries detectable legal
+citations, blocks the send with `403 citation_gate_unverified` until the
+citation checker has registered a passing verification for that exact text.
+A citation-free document passes untouched. The agent flow when blocked:
+route the draft to `legal-citation-checker`, which runs the
+`citation-verification-checklist` and registers the result
+(`POST $GATE_PROXY_URL/quality/citation`); the agent then re-sends the
+identical text and it clears. This makes "we verified the citations before it
+left" a code-enforced fact in the receipt trail, not a promise — though the
+extractor covers common citation classes rather than the full Bluebook and
+never judges good-law (see `docs/known-limitations.md` → "Citation gate").
+
 **Agent-side read-only tokens** (not scrubbed — agents use these for read
 and verify operations; must be scoped read-only):
 

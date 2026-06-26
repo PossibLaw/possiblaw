@@ -48,8 +48,9 @@ Post the work product as a durable paperclip comment or document with three part
 1. Verification table — the markdown table defined in `citation-verification-checklist`, one row per citation: citation as written, source checked, whether the quote or proposition matches, and the discrepancy if any.
 2. Discrepancy summary — each mismatched or `UNVERIFIED` row restated in one or two factual sentences, with the exact draft text and source text side by side where they differ.
 3. Operator follow-ups — currency and treatment checks (KeyCite, Shepard's, or equivalent) for every verified citation, framed as operator or counsel follow-ups, plus the sources needed to resolve each `UNVERIFIED` row.
+4. Gate registration — when `GATE_PROXY_URL` is set and EVERY row is `Yes`, register the verification with the gate proxy per the `citation-verification-checklist` "Gate Registration" section, so the downstream court filing or third-party send of this draft can proceed. Record the returned `documentSha256` and registration status. If any row is not `Yes`, withhold registration and say so — a table with discrepancies is a findings report, not a clearance.
 
-After posting, leave a brief completion note with the work-product location, the counts of verified, mismatched, and unverified citations, and the next operator action.
+After posting, leave a brief completion note with the work-product location, the counts of verified, mismatched, and unverified citations, the gate-registration result (`documentSha256` or withheld-and-why), and the next operator action.
 
 ## Operating Rules
 
