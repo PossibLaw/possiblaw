@@ -1,0 +1,27 @@
+[
+  {
+    "citation": "410 U.S. 113",
+    "normalized_citations": ["410 U.S. 113"],
+    "start_index": 0,
+    "end_index": 12,
+    "status": 200,
+    "error_message": "",
+    "clusters": [
+      {
+        "id": 108713,
+        "case_name": "Roe v. Wade",
+        "date_filed": "1973-01-22",
+        "absolute_url": "/opinion/108713/roe-v-wade/",
+        "citations": [
+          { "volume": 410, "reporter": "U.S.", "page": "113", "type": 1 }
+        ],
+        "court": "Supreme Court of the United States",
+        "court_id": "scotus",
+        "precedential_status": "Published",
+        "sub_opinions": [
+          { "id": 108714, "type": "010combined" }
+        ]
+      }
+    ]
+  }
+]

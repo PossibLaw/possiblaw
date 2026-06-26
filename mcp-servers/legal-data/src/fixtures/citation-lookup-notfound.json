@@ -1,0 +1,11 @@
+[
+  {
+    "citation": "999 U.S. 9999",
+    "normalized_citations": ["999 U.S. 9999"],
+    "start_index": 0,
+    "end_index": 13,
+    "status": 404,
+    "error_message": "Citation not found.",
+    "clusters": []
+  }
+]

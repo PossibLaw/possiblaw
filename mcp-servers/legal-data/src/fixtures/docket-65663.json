@@ -1,0 +1,12 @@
+{
+  "id": 65663,
+  "case_name": "Roe v. Wade",
+  "docket_number": "70-18",
+  "court": "https://www.courtlistener.com/api/rest/v4/courts/scotus/",
+  "court_id": "scotus",
+  "date_filed": "1970-06-17",
+  "date_terminated": "1973-01-22",
+  "absolute_url": "/docket/65663/roe-v-wade/",
+  "nature_of_suit": "",
+  "cause": ""
+}
