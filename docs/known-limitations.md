@@ -305,3 +305,37 @@ but not yet shipped. The `skill-improvement-loop` delivers the diff →
 proposal → morning-review → overlay pipeline; SkillOpt would automate the
 review step for recurring patterns. Until SkillOpt lands, every proposal
 requires a manual yes/no/edit decision in the morning digest.
+
+## Citation gate
+
+### The extractor covers curated citation classes, not full Bluebook
+
+The deterministic extractor under the citation gate recognizes common U.S.
+classes — volume-reporter-page citations for a curated reporter set (U.S.,
+S. Ct., F./F.2d/F.3d/F.4th, F. Supp. series, regional and state reporters),
+`U.S.C.`, `C.F.R.`, and the Federal Rules (Civ./Crim./App./Bankr./Evid. P.).
+It does not parse the full Bluebook, does not resolve `id.` / `supra` /
+short-forms, and never judges whether an authority is good law. Because the
+gate only fires on *detected* citations, a citation in an unrecognized format
+reads as "no citations" and the document passes the gate unverified — the
+direction of failure is open, not closed, so the LLM `citation-verification-checklist`
+review (which is not limited to these classes) remains the substantive check;
+the gate is the deterministic floor under it. Normalization strips the common
+invisible-character evasions (NFKC fold, format/combining/control-character
+strip) but a visually-blank-but-non-ignorable code point (e.g. U+2800) is not
+stripped and could still hide a citation from the extractor.
+
+### Registration is an attested floor, not proof of authority
+
+A passing registration proves three deterministic facts about the exact
+document text: every detected citation has an all-`Yes` verification row, each
+attested quote is verbatim in both its claimed source passage and the draft,
+and the verification is attributed to a named agent in the receipt chain. It
+does NOT prove the source passage genuinely came from the cited authority —
+that link is enforced by the `legal-citation-checker` agent's workflow, not
+cryptographically. On a `local_trusted` dev instance, any local process can
+call `POST /quality/citation` to register a verification (the same trust model
+as the human-approval gate — see "Gate proxy" above); production deployments
+with `PAPERCLIP_GATE_API_KEY` enabled get the structural boundary. Good-law
+and currency checks (KeyCite / Shepard's) are never performed by the gate and
+remain operator/counsel follow-ups.

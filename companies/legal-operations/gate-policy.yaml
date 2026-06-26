@@ -35,6 +35,22 @@ boundaries:
   IRREVERSIBLE_EXTERNAL_OP: human
 
 # ---------------------------------------------------------------------------
+# Citation gate (Phase 2 — OUTBOUND_QUALITY)
+# ---------------------------------------------------------------------------
+# Boundaries listed here additionally require a registered, payload-bound
+# citation verification whenever the outbound document carries detectable legal
+# citations. Egress whose text has NO detectable citations passes untouched
+# (nothing to re-check). A gated send/file of a citation-bearing document is
+# blocked 403 until the citation checker registers a passing verification for
+# that exact text (POST /quality/citation). See docs/connectors-inventory.md
+# "Citation gate" for the agent-facing remediation flow.
+#
+# Default covers court filings and any third-party egress. Narrow to
+# [COURT_FILING] to gate only filings; set an empty list to disable the gate.
+citationGate:
+  boundaries: [COURT_FILING, THIRD_PARTY_EGRESS]
+
+# ---------------------------------------------------------------------------
 # Tuning examples
 # ---------------------------------------------------------------------------
 

@@ -31,6 +31,27 @@ All egress writes go through the Gate Proxy (`POST $GATE_PROXY_URL/egress/<tool>
 
 ---
 
+## Citation gate (Phase 2 — OUTBOUND_QUALITY)
+
+On the boundaries listed in `gate-policy.yaml` `citationGate.boundaries` (default `COURT_FILING` + `THIRD_PARTY_EGRESS`), the gate inspects the outbound document text **before** any policy dispatch. If the text carries detectable legal citations, the egress is blocked `403 {reason: "citation_gate_unverified"}` until a passing citation verification has been registered for that exact text. Text with no detectable citations passes untouched. A gated egress whose payload carries no reviewable document text at all is blocked `403 {reason: "citation_gate_no_document"}` (fail-closed — the gate cannot rule out citations it cannot see).
+
+The document text the gate reads, per tool:
+
+| Gate tool | Document field |
+|---|---|
+| `send_email` | `body` |
+| `upload_document` | `content` |
+| `share_external` | `content` |
+| `file_court_document` | `documentText` |
+
+`file_court_document` is not a connector in the egress table above — it is the action-package egress tool for the `COURT_FILING` boundary (the gate produces a local action package for a human to file in v1; see "The Gate Proxy" in the operator walkthrough).
+
+**Agent remediation flow on a `403 citation_gate_unverified`:** do NOT remove or trim the citations to get past the gate. Route the draft to the citation checker (via `research-lead` → `legal-citation-checker`). After the checker registers a passing verification (`POST $GATE_PROXY_URL/quality/citation`, see `citation-verification-checklist` → "Gate Registration"), re-call the same egress endpoint with the identical document text. Editing the text after verification changes its sha and re-blocks.
+
+**Honest scope:** the gate proves every detectable citation has a registered, all-`Yes` verification row bound to this exact text, and that any attested quote is verbatim in the draft. It does not prove the cited authority is good law, nor that the source passage genuinely came from the cited authority — those stay the checker's workflow plus the operator's citator follow-up. Extractor coverage is curated common classes, not full Bluebook (see `docs/known-limitations.md` → "Citation gate").
+
+---
+
 ## Read-only direct (reads go directly to vendor API)
 
 Agents use their own scoped tokens for these connectors. No egress credential lives in the gate proxy for read paths.
