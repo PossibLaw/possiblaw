@@ -7,6 +7,53 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.26.0] — 2026-06-26 — Data layer, sign-off bundle, data-terms tier-floor
+
+Derived from a LegalTechTalk market analysis (legal AI sorting into data /
+guardrails / firm layers). Three independently-shippable builds, each spec'd
+under `docs/builds/`.
+
+### Added
+
+- **CourtListener legal-data MCP** (`mcp-servers/legal-data/`): the first slice
+  of the data layer. U.S. case law (CourtListener REST v4) exposed as MCP tools
+  (`search_opinions`, `get_opinion`, `get_citation`, `get_docket`), each result
+  wrapped in a provenance envelope (`source`, `source_url`, `retrieved_at`,
+  `court`, `decided_date`, `citation`, `sha256`). The `sha256` reuses
+  gate-proxy's `documentSha256`, so data-provenance-in matches the citation
+  gate's output-provenance-out. Failures become structured `unavailable` (never
+  a fabricated opinion); ambiguous cites return ranked candidates;
+  confidential-matter queries are sanitized before egress. 17/17 tests green
+  (network stubbed). Known limit: v4 response shapes reconstructed from API
+  knowledge — `client.ts` parsing is the single adjustment point.
+- **Regulator sign-off bundle** (`gate-proxy/src/quality/signoff.ts` +
+  `GET /receipts/bundle?issueId=…[&format=md]`): projects the hash-chained
+  receipts for one matter into a Matter Trust Report (JSON or Markdown) —
+  ordered gate decisions, anonymization events, citation verifications,
+  tier-floor/data-terms decisions, and an operator attestation block. Payload
+  hashes only, never plaintext; fail-closed on a corrupt chain
+  (`503 receipts_corrupt`).
+- **Data-terms tier-floor** (`gate-proxy/src/gates/tier-floor.ts` +
+  per-variant `dataTerms` in `variants.yaml`): the gate now classifies each
+  cloud lane by its contracted data terms (ZDR / no-train / no-human-review /
+  tenant-isolated) and hard-blocks any training or consumer endpoint for matter
+  data. Encodes `docs/privilege-and-confidentiality.md` (tiered, not binary).
+  Backward compatible when `dataTerms` is absent.
+- **`docs/privilege-and-confidentiality.md`**: authoritative posture doc —
+  cloud egress does not per se waive privilege; confidentiality vs. privilege;
+  ZDR is load-bearing; honest do/don't marketing language. Cited by the README
+  and the tier-floor logic.
+
+### Changed
+
+- **README**: leads with the atomic-units-of-work thesis (more control, better
+  work via the smallest reviewable units); adds market-layer positioning; adds
+  an honest confidentiality/privilege section ("reasonable steps," never
+  "privilege-safe"); marks the sign-off bundle and legal-data MCP as shipped in
+  the enforced/routed/advisory table and architecture diagram.
+
+---
+
 ## [0.25.0] — 2026-06-23 — Skill-improvement loop (Tier-2 learn-from-edits)
 
 ### Added

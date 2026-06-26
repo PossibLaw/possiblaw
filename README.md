@@ -23,7 +23,7 @@ The catalog is the supporting cast. The atomic pipeline — decompose, gate, rec
 
 ## Where this sits in the market
 
-Legal AI is sorting into a data layer (law as an API/MCP with provenance), a guardrails layer (the sign-off, audit trail, and hallucination control a regulator needs once AI did the work), and a firm layer (lawyers running an AI backend). **PossibLaw is the open-source guardrails + firm layer** — the audit trail, human gates, anonymization, and receipts wrapped around an atomic agent catalog — with a provenance-backed legal-data layer in progress (see [`docs/builds/`](docs/builds/)). It competes on being *legible and open* where the rest of the market is opaque and closed.
+Legal AI is sorting into a data layer (law as an API/MCP with provenance), a guardrails layer (the sign-off, audit trail, and hallucination control a regulator needs once AI did the work), and a firm layer (lawyers running an AI backend). **PossibLaw is the open-source guardrails + firm layer** — the audit trail, human gates, anonymization, and receipts wrapped around an atomic agent catalog — and the first slice of the **data layer** is now shipped: a CourtListener legal-data MCP that serves case law with provenance ([`mcp-servers/legal-data/`](mcp-servers/legal-data/)). The guardrails layer is productized end-to-end — every gate decision is hash-chained and exportable as a regulator-readable [Matter Trust Report](#whats-enforced-vs-routed-vs-advisory). It competes on being *legible and open* where the rest of the market is opaque and closed. Build specs: [`docs/builds/`](docs/builds/).
 
 ## The trust pipeline
 
@@ -39,9 +39,11 @@ What a firm actually gets:
 | Surface | Status today | Mechanism |
 |---|---|---|
 | Egress writes (email, upload, signature, payment, court filing, external delete) | **Enforced — structural** | Gate Proxy holds the only egress credentials; the launcher scrubs them from the server/agent env; per-boundary policy + hash-chained receipts on every path |
-| Privacy tier — confidential/privileged payloads sent through the gate | **Enforced at the gate** | Deterministic masker over caller-supplied matter entities + pattern classes, recall measured in the test suite (100% on its labeled fixture; gated at ≥95% with zero entity leaks; fail-closed to block when it cannot vouch, e.g. no entity list) — or routed to a local model when one is configured |
+| Privacy tier — confidential/privileged payloads sent through the gate | **Enforced at the gate** | Deterministic masker over caller-supplied matter entities + pattern classes, recall measured in the test suite (100% on its labeled fixture; gated at ≥95% with zero entity leaks; fail-closed to block when it cannot vouch, e.g. no entity list) — or routed to a local model when one is configured. The tier-floor classifies each cloud lane by its contracted data terms (ZDR / no-train / no-human-review / tenant-isolated) and **hard-blocks any training or consumer endpoint** for matter data — the one configuration the case law condemns ([docs/privilege-and-confidentiality.md](docs/privilege-and-confidentiality.md)) |
 | Privacy tier — agents' own primary-lane model calls | **Routed, not proxied** | A routing choice: local-model variants per lane (`ollama`, `llamacpp` in `variants.yaml`) plus the advisory `privacy-encoder` skill. Primary-lane calls do not pass the proxy. |
 | Citation verification | **Enforced at the gate (Phase 2)** | Court/third-party egress **carrying legal citations** is **blocked** until a registered, payload-bound, deterministically re-checked citation verification exists for the document being filed or sent. The `legal-citation-checker` agent executes `citation-verification-checklist` (character-by-character quote-fidelity, side-by-side discrepancy tables), then POSTs the result to `POST /quality/citation`; the gate detects citations in the outbound document and calls `CitationRegistry.has(docSha256)` before any dispatch — including the human gate. A document with no detectable citations has nothing to re-check and passes. Fail-closed: a gated payload with no reviewable document text at all is blocked. Caveat: citation verification itself is an agent step — the gate enforces that it was performed and passed, not that the cited authority is authoritative. |
+| Regulator sign-off bundle | **Exported on demand** | `GET /receipts/bundle?issueId=…[&format=md]` projects the hash-chained receipts for one matter into a **Matter Trust Report** (JSON or Markdown): ordered gate decisions, anonymization events, citation verifications, tier-floor/data-terms decisions, and an operator attestation block — payload **hashes only, never plaintext**. Fail-closed: a corrupt receipt chain refuses to emit a clean report (`503 receipts_corrupt`). This is the artifact an insurer / SRA / GC asks to see. |
+| Legal data with provenance | **Read via MCP** | [`mcp-servers/legal-data/`](mcp-servers/legal-data/) serves U.S. case law (CourtListener) wrapped in a provenance envelope (`source`, `source_url`, `decided_date`, `citation`, `sha256`). The `sha256` is the **same fingerprint the citation gate checks**, so data-provenance-in lines up with output-provenance-out. Confidential-matter queries are sanitized before egress. |
 
 ## Confidentiality, privilege, and cloud models
 
@@ -132,8 +134,13 @@ to bypass).
 ├─────────────────────────────────────────────────────────┤
 │  gate-proxy/    (loopback egress gate: per-boundary      │
 │                  policy, human approvals, anonymizer,    │
-│                  hash-chained receipts — holds the ONLY  │
-│                  egress credentials)                     │
+│                  data-terms tier-floor, hash-chained     │
+│                  receipts + sign-off bundle export —     │
+│                  holds the ONLY egress credentials)      │
+├─────────────────────────────────────────────────────────┤
+│  mcp-servers/legal-data/  (data layer: case law as an    │
+│                  MCP with a provenance envelope; sha256  │
+│                  matches the citation gate)              │
 ├─────────────────────────────────────────────────────────┤
 │  companies/legal-operations/   (the PossibLaw package)   │
 │  ├── COMPANY.md + .paperclip.yaml + variants.yaml        │

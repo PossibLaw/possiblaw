@@ -1,7 +1,8 @@
 # Build — CourtListener Legal-Data MCP (claim the data layer)
 
 *Standalone build spec. Independent of the sign-off-bundle build; can be
-scheduled and shipped separately. Status: PROPOSED.*
+scheduled and shipped separately. Status: **SHIPPED** — `mcp-servers/legal-data/`,
+17/17 tests green (commit f9986de).*
 
 ## Why
 

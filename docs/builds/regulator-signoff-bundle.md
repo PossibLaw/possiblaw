@@ -1,8 +1,8 @@
 # Build — Regulator Sign-off / Compliance Bundle (productize the guardrails strength)
 
 *Standalone build spec. Independent of the CourtListener-MCP build; can be
-scheduled and shipped separately. Status: PROPOSED. Recommended to ship FIRST —
-lowest risk, no new external dependencies, monetizes a strength already built.*
+scheduled and shipped separately. Status: **SHIPPED** — `gate-proxy` sign-off
+bundle + `GET /receipts/bundle` route, full suite green (commit 52071d2).*
 
 ## Why
 

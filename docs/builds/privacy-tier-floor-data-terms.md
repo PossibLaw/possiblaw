@@ -1,7 +1,8 @@
 # Build — Privacy Tier-Floor by Data Terms (encode the actual privilege law)
 
 *Standalone build spec. Independent of the other two builds; can be scheduled
-and shipped separately. Status: PROPOSED. Small.*
+and shipped separately. Status: **SHIPPED** — `gate-proxy` tier-floor by data
+terms + per-variant `dataTerms` in `variants.yaml`, 241/241 green (commit b58ae02).*
 
 ## Why
 
