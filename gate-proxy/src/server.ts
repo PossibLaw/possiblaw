@@ -24,6 +24,7 @@ import { anonymize, deanonymize } from "./anonymize.ts";
 import { humanGate } from "./gates/human.ts";
 import type { EgressMeta, EgressRequest } from "./types.ts";
 import type { CitationRegistry } from "./quality/citation-registry.ts";
+import { assembleSignoffBundle, renderSignoffMarkdown } from "./quality/signoff.ts";
 import { documentSha256, extractCitations } from "./citations.ts";
 import { extractDocumentText } from "./document-text.ts";
 
@@ -231,6 +232,51 @@ export function createGateServer(deps: GateServerDeps): http.Server {
     if (method === "GET" && url === "/receipts/verify") {
       const result = receipts.verify();
       sendJson(res, 200, result);
+      return;
+    }
+
+    // ------------------------------------------------------------------
+    // GET /receipts/bundle?issueId=POS-123[&format=md]
+    // Assembles a per-matter "Matter Trust Report" from EXISTING receipts —
+    // hashes only, never payloads. JSON by default; Markdown if format=md.
+    // Reuses the server's ReceiptChain. Fail-closed: a corrupt chain throws
+    // ReceiptChainCorruptError and we return 503 receipts_corrupt rather than
+    // a falsely-clean report.
+    // ------------------------------------------------------------------
+    if (method === "GET" && url.startsWith("/receipts/bundle")) {
+      try {
+        const parsedUrl = new URL(url, "http://localhost");
+        const issueId = parsedUrl.searchParams.get("issueId");
+        const format = parsedUrl.searchParams.get("format");
+        if (issueId === null || !SAFE_ID_RE.test(issueId)) {
+          sendJson(res, 400, { error: "invalid_issueId: required query param issueId must match [A-Za-z0-9-]{1,64}" });
+          return;
+        }
+        let bundle;
+        try {
+          bundle = assembleSignoffBundle(receipts, issueId);
+        } catch (err) {
+          if (err instanceof ReceiptChainCorruptError) {
+            sendJson(res, 503, { error: "receipts_corrupt" });
+            return;
+          }
+          throw err;
+        }
+        if (format === "md") {
+          const md = renderSignoffMarkdown(bundle);
+          if (!res.headersSent) {
+            res.writeHead(200, {
+              "content-type": "text/markdown; charset=utf-8",
+              "content-length": Buffer.byteLength(md, "utf8"),
+            });
+            res.end(md);
+          }
+          return;
+        }
+        sendJson(res, 200, bundle);
+      } catch {
+        if (!res.headersSent) sendJson(res, 500, { error: "internal_error" });
+      }
       return;
     }
 

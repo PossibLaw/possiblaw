@@ -1443,4 +1443,97 @@ describe("gate server", () => {
 
     await close();
   });
+
+  // GET /receipts/bundle → JSON Matter Trust Report for one matter
+  it("GET /receipts/bundle?issueId=... → 200 JSON bundle scoped to the matter", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    receipts.append({
+      kind: "egress", tool: "send_email", boundary: "THIRD_PARTY_EGRESS",
+      decision: "human", outcome: "performed", payloadSha256: sha256hex("p"),
+      agentId: "agent-1", issueId: "POS-123", approvalId: "approval-1",
+    });
+    receipts.append({
+      kind: "egress", tool: "send_email", boundary: "THIRD_PARTY_EGRESS",
+      decision: "allow", outcome: "performed", payloadSha256: sha256hex("q"),
+      agentId: "agent-1", issueId: "POS-999",
+    });
+
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY, receipts, client: null, performers: {}, localModelAvailable: false,
+    });
+
+    const res = await fetch(`${baseUrl}/receipts/bundle?issueId=POS-123`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as Record<string, unknown>;
+    assert.equal(body["issueId"], "POS-123");
+    assert.equal((body["receipts"] as unknown[]).length, 1);
+    assert.equal((body["attestations"] as unknown[]).length, 1);
+    assert.equal((body["chain"] as Record<string, unknown>)["ok"], true);
+
+    await close();
+  });
+
+  // GET /receipts/bundle?format=md → Markdown Matter Trust Report
+  it("GET /receipts/bundle?format=md → 200 text/markdown report", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    receipts.append({
+      kind: "egress", tool: "send_email", boundary: "THIRD_PARTY_EGRESS",
+      decision: "allow", outcome: "performed", payloadSha256: sha256hex("p"),
+      agentId: "agent-1", issueId: "POS-123",
+    });
+
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY, receipts, client: null, performers: {}, localModelAvailable: false,
+    });
+
+    const res = await fetch(`${baseUrl}/receipts/bundle?issueId=POS-123&format=md`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /text\/markdown/);
+    const md = await res.text();
+    assert.match(md, /Matter Trust Report/);
+    assert.match(md, /POS-123/);
+
+    await close();
+  });
+
+  // GET /receipts/bundle missing/invalid issueId → 400
+  it("GET /receipts/bundle without issueId → 400", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY, receipts, client: null, performers: {}, localModelAvailable: false,
+    });
+    const res = await fetch(`${baseUrl}/receipts/bundle`);
+    assert.equal(res.status, 400);
+    await close();
+  });
+
+  // GET /receipts/bundle over a corrupt chain → 503 receipts_corrupt (fail-closed)
+  it("GET /receipts/bundle over a corrupt chain → 503 receipts_corrupt", async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "r.jsonl");
+    const receipts = new ReceiptChain(filePath);
+    receipts.append({
+      kind: "egress", tool: "send_email", boundary: "THIRD_PARTY_EGRESS",
+      decision: "allow", outcome: "performed", payloadSha256: sha256hex("p"),
+      agentId: "agent-1", issueId: "POS-123",
+    });
+    // Tamper the body but keep the stored hash → verify() fails.
+    const lines = fs.readFileSync(filePath, "utf8").split("\n").filter(Boolean);
+    const e0 = JSON.parse(lines[0]) as ReceiptEntry;
+    e0.body.outcome = "blocked";
+    lines[0] = JSON.stringify(e0);
+    fs.writeFileSync(filePath, lines.join("\n") + "\n");
+
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY, receipts, client: null, performers: {}, localModelAvailable: false,
+    });
+    const res = await fetch(`${baseUrl}/receipts/bundle?issueId=POS-123`);
+    assert.equal(res.status, 503);
+    const body = await res.json() as Record<string, unknown>;
+    assert.equal(body["error"], "receipts_corrupt");
+    await close();
+  });
 });
