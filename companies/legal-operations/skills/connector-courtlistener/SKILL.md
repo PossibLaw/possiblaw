@@ -62,14 +62,18 @@ On every successful retrieval that yields a citation, the adapter **registers th
 
 Queries themselves can carry privileged facts — a search string like `"Acme Holdings v. Smith arbitration clause 2025"` may identify a matter, client, or strategy. Keep queries to neutral legal terms (e.g. `indemnification software license` rather than the client's name).
 
-For **confidential** or **privileged** matters the adapter **enforces** this: `sanitizeArgs` strips client identifiers (legal-entity names, emails, SSNs, EINs, phones) from the `query` **before** the request leaves the boundary, leaving neutral legal terms. Set the matter tier via env `POSSIBLAW_MATTER_PRIVACY_TIER`. This is enforcement, not just advice — but write neutral queries anyway so the search stays relevant after redaction.
+For **confidential** or **privileged** matters the adapter applies **best-effort redaction**: `sanitizeArgs` strips legal-entity names, emails, SSNs, EINs, and phone numbers from the `query` before the request is sent. Set the tier via env `POSSIBLAW_MATTER_PRIVACY_TIER` (default when unset: `confidential` — fail-closed). Three important caveats apply:
+
+1. **Best-effort only, not enforcement.** Sanitization is regex-based and structurally incomplete — it cannot catch every client-identifying term (e.g. an informal matter nickname, a judge's name tied to a confidential proceeding, or a non-standard entity name). Write neutral queries as a practice discipline; the sanitizer is a safety net, not a guarantee.
+2. **Process-global, not per-matter.** The tier is a startup setting read once from the environment. A single running server cannot vary the tier across different matters — all queries in that process run at the same tier. If you need per-matter tier variation, run separate server processes with distinct env configs.
+3. **Research queries bypass the gate proxy entirely.** Queries to CourtListener are issued as direct HTTPS requests from the MCP server to `https://www.courtlistener.com/api/rest/v4/` — they do **not** route through the gate proxy. This means there is no gate receipt, no human-approval gate, and no tier-floor for research egress. This is a v1 architectural constraint documented in `docs/known-limitations.md`. Firms handling highly sensitive matters should treat research-query privacy as best-effort and prefer neutral query terms, consistent with the read-only-connector query-privacy caveats in `docs/connectors-inventory.md`.
 
 ## Required Environment Variables
 
 | Env | Purpose | Default | Source |
 |---|---|---|---|
 | `COURTLISTENER_API_KEY` | DRF token sent as `Authorization: Token <key>` for higher rate limits. **Optional** — anonymous use works at low volume; when unset the header is omitted entirely. | unset | Free account at https://www.courtlistener.com → Profile → API |
-| `POSSIBLAW_MATTER_PRIVACY_TIER` | `standard` \| `confidential` \| `privileged`; gates query sanitization. | `standard` | Matter context |
+| `POSSIBLAW_MATTER_PRIVACY_TIER` | `standard` \| `confidential` \| `privileged`; gates query sanitization. | `confidential` (fail-closed — unset runs sanitizer; explicit `standard` required for pass-through) | Matter context |
 
 ## When to Invoke
 
@@ -91,7 +95,7 @@ Write the parsed result (case name, citation, court, date filed, `source_url`, a
 
 - **Happy path** — agent calls `search_opinions` with neutral terms; one or more hits return; agent records the top results from each envelope's `citation` / `source_url` in a Paperclip comment.
 - **Edge** — `search_opinions` returns `{ status: "unavailable", reason: "...429..." }` (rate limited); agent notes the coverage gap, posts `[CONNECTOR:COURTLISTENER_RATE_LIMIT]`, and proceeds with degraded coverage. It does not fabricate.
-- **Failure / security** — a confidential matter: the agent writes the client name into the query; the adapter strips it before egress (`sanitizeArgs`), and if the upstream is unreachable the tool returns `unavailable` — the agent records the gap and never invents an authority.
+- **Failure / security** — a confidential matter: the agent writes the client name into the query; the adapter applies best-effort redaction (`sanitizeArgs`) before egress — the query goes directly to CourtListener, not through the gate proxy, so there is no gate receipt. If the upstream is unreachable the tool returns `unavailable` — the agent records the gap and never invents an authority.
 
 ## Fallback (no MCP runtime)
 

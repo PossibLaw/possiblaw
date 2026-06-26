@@ -33,9 +33,17 @@ import type { PrivacyTier, UpstreamCaller } from "./types.ts";
 // is a no-op. Retrieval NEVER depends on the gate being reachable.
 const reportProvenance = createGateProvenanceReporter();
 
+// Fail-closed default: when POSSIBLAW_MATTER_PRIVACY_TIER is unset (or set to
+// an unrecognized value), treat it as "confidential" so the sanitizer runs.
+// Pass-through ("standard") requires an EXPLICIT opt-in. An operator who forgets
+// to configure the env gets redaction, not silent full egress.
 const tierEnv = process.env["POSSIBLAW_MATTER_PRIVACY_TIER"];
 const privacyTier: PrivacyTier =
-  tierEnv === "confidential" || tierEnv === "privileged" ? tierEnv : "standard";
+  tierEnv === "standard"
+    ? "standard"
+    : tierEnv === "privileged"
+      ? "privileged"
+      : "confidential"; // unset OR unrecognized → sanitize (fail-closed)
 
 function asContent(result: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
