@@ -1,8 +1,10 @@
 # Build — CourtListener Legal-Data MCP (claim the data layer)
 
 *Standalone build spec. Independent of the sign-off-bundle build; can be
-scheduled and shipped separately. Status: **SHIPPED** — `mcp-servers/legal-data/`,
-17/17 tests green (commit f9986de).*
+scheduled and shipped separately. Status: **SHIPPED** — `mcp-servers/legal-data/`
+is now a thin trust-adapter/proxy in front of the official CourtListener MCP
+(pivoted away from re-implementing REST v4); 14/14 adapter tests green, typecheck
+clean.*
 
 ## Why
 
@@ -23,23 +25,36 @@ the cheapest path to the property the thesis rewards.
 ## Scope
 
 A standalone MCP server (same posture as `gate-proxy/`, `eval-harness/`,
-`learning-loop/`: standalone TypeScript, node:test) that exposes U.S. case law
-as MCP tools with a provenance envelope on every result.
+`learning-loop/`: standalone TypeScript, node:test) that **consumes the official
+CourtListener MCP via a thin provenance + sanitization adapter**.
 
-**Location:** `mcp-servers/legal-data/` (new top-level component). Wire the
-existing empty `layer/mcp/legal/` and the `connector-courtlistener` skill to
-point at it.
+CourtListener ships an **official hosted MCP** at `https://mcp.courtlistener.com`
+(OAuth auth; in Anthropic's connector directory) exposing case law, PACER, the
+citation network, oral arguments, judges, keyword + semantic search, alerts, and
+a grounded citation-verification tool. Re-implementing its REST v4 API with
+reconstructed response shapes (the original approach) was fragile and redundant,
+so we pivoted: our component is now a **thin trust-adapter / proxy** that, for
+every upstream tool call, (1) sanitizes confidential/privileged query args,
+(2) forwards to the official MCP, and (3) wraps the result in our sha256-aligned
+provenance envelope. The adapter is **schema-agnostic** about upstream result
+shapes — exact tool names/params are confirmed at runtime via `tools/list`, not
+hard-coded.
 
-### Tools
+**Location:** `mcp-servers/legal-data/` (top-level component). Wire the existing
+empty `layer/mcp/legal/` and the `connector-courtlistener` skill to point at it.
 
-| Tool | Input | Output |
-|---|---|---|
-| `search_opinions` | `query`, `court?`, `date_range?` | ranked opinion stubs (id, caption, court, date, snippet) + provenance |
-| `get_opinion` | `id` | full opinion text + parse + provenance |
-| `get_citation` | `cite` (reporter string) | resolved opinion + **decided_date + court + citation** + provenance |
-| `get_docket` | `id` | docket metadata + provenance |
+### Shape
 
-Backed by CourtListener REST v4 (`/api/rest/v4/`).
+- `src/adapter.ts` — the pure, fully-tested core: `sanitizeArgs`,
+  `wrapWithProvenance`, `proxyToolCall`.
+- `src/upstream.ts` — `createCourtListenerUpstream(config)`: the real, thin MCP
+  **client** (Streamable-HTTP + OAuth) to `https://mcp.courtlistener.com`. Needs
+  a CourtListener account + OAuth; not unit-tested.
+- `src/server.ts` — thin stdio MCP **proxy**: connect upstream, `tools/list`,
+  re-expose each tool as a `proxyToolCall` pass-through.
+
+The upstream MCP is injected as `UpstreamCaller`, so tests run with a stub and
+make zero network/OAuth calls.
 
 ### Provenance envelope (the differentiator)
 
@@ -62,12 +77,12 @@ Agents get the slice **and** where it came from, version, and a fingerprint.
 
 ### Reuse (close the provenance loop)
 
-- Import `extractCitations()` and `documentSha256()` from
-  `gate-proxy/src/citations.ts` so a fetched authority's fingerprint is the
-  **same** sha the citation gate checks against. Data-provenance in →
-  output-provenance out, one hashing scheme.
-- Local cache keyed by `sha256` to absorb CourtListener rate limits and make
-  results deterministic for tests.
+- `documentSha256()` / `normalizeText()` are copied verbatim from
+  `gate-proxy/src/citations.ts` into `src/hash.ts` so a fetched authority's
+  fingerprint is the **same** sha the citation gate checks against.
+  Data-provenance in → output-provenance out, one hashing scheme.
+- Local cache keyed by `sha256` to absorb upstream rate limits and make results
+  deterministic for tests.
 
 ### Privacy
 
@@ -78,16 +93,25 @@ outbound `query` before the search. Document this in the server README.
 
 ## Evals (TDD — happy / edge / failure, per repo contract)
 
-- **Happy:** `get_citation("410 U.S. 113")` → returns the Roe v. Wade opinion
-  with `decided_date: 1973-01-22`, a `source_url`, and a stable `sha256`.
-- **Edge:** ambiguous / parallel cite with multiple matches → returns ranked
-  candidates; never silently picks one.
-- **Failure/security:** CourtListener 5xx/timeout → structured `unavailable`
-  error, never a fabricated opinion; and a confidential-matter query path
-  strips client identifiers before the outbound search.
+Driven by `src/adapter.test.ts` against a **stubbed** `UpstreamCaller` (zero
+network, zero OAuth):
 
-Write the failing tests first (node:test under `mcp-servers/legal-data/src/`),
-then implement to green.
+- **Happy:** an opinion-like upstream result → `wrapWithProvenance` yields an
+  envelope with a stable `sha256`, best-effort-extracted `decided_date` +
+  `source_url` + `citation`, and the upstream `payload` preserved verbatim.
+- **Edge:** confidential tier → `sanitizeArgs` strips a client identifier (e.g.
+  `ACME Inc.`) from the forwarded query *before the stub upstream sees it*; and a
+  result MISSING provenance fields still gets a `sha256` and simply **omits** the
+  absent facets (no fabrication).
+- **Failure/security:** the upstream caller throws / rejects / times out →
+  `proxyToolCall` returns `{ status: "unavailable", tool, reason }`, never a
+  fabricated opinion; and a confidential query is never forwarded containing the
+  raw client identifier (asserted even when the upstream then fails).
+
+Tests were written first (node:test under `mcp-servers/legal-data/src/`), then
+implemented to green. The live OAuth upstream wiring (`src/upstream.ts`,
+`src/server.ts`) is intentionally thin and **not** covered by the suite — no
+OAuth credentials in CI.
 
 ## Out of scope (follow-ons)
 
@@ -98,9 +122,11 @@ then implement to green.
 
 ## Effort & risk
 
-~1 focused sprint. Read-only, no credentials, no gate changes. Main risk is
-CourtListener rate limits → the `sha256` cache mitigates. Lowest-risk way to
-make the strategic data-layer claim.
+~1 focused sprint. Read-only, no gate changes. The live upstream now requires a
+CourtListener account + OAuth (the official MCP is OAuth-gated), but the adapter
+core stays credential-free and fully tested with a stubbed upstream. Main risk is
+upstream rate limits → the `sha256` cache mitigates. Lowest-risk way to make the
+strategic data-layer claim.
 
 ## Dependencies
 

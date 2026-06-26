@@ -1,70 +1,75 @@
 // mcp-servers/legal-data/src/types.ts
-// Public shapes for the legal-data MCP: provenance envelope, tool results,
-// the injectable fetch dependency, and the cache contract.
+// Public shapes for the legal-data MCP trust-adapter: the provenance envelope,
+// the structured-unavailable result, the upstream injection point, and the
+// cache contract.
+//
+// This component is a THIN proxy in front of the OFFICIAL CourtListener MCP
+// (https://mcp.courtlistener.com). We do NOT re-implement CourtListener's REST
+// API and we do NOT pin upstream tool schemas — the adapter is intentionally
+// schema-agnostic about what an upstream tool returns. The only thing we add is
+// (a) a sha256 provenance envelope aligned with gate-proxy's citation gate, and
+// (b) confidential-query sanitization before anything leaves the boundary.
 
-/** Injectable HTTP fetch. Tests stub this; production passes node's global fetch. */
-export type FetchFn = (
-  url: string,
-  init?: { method?: string; headers?: Record<string, string>; body?: string },
-) => Promise<FetchResponse>;
-
-/** Minimal subset of the WHATWG Response surface we depend on. */
-export interface FetchResponse {
-  ok: boolean;
-  status: number;
-  json(): Promise<unknown>;
-  text(): Promise<string>;
-}
+export type PrivacyTier = "standard" | "confidential" | "privileged";
 
 /**
- * Provenance envelope wrapped around EVERY successful tool result.
- * Agents get the slice AND where it came from, when, and a fingerprint.
+ * The injection point for the official CourtListener MCP. Production wires a
+ * real Streamable-HTTP + OAuth MCP client (see ./upstream.ts); tests pass a
+ * deterministic stub. We deliberately type the result as `unknown` — the
+ * adapter must not assume an upstream schema.
  */
-export interface ProvenanceEnvelope<T = unknown> {
+export type UpstreamCaller = (
+  toolName: string,
+  args: Record<string, unknown>,
+) => Promise<UpstreamResult>;
+
+/** Whatever the upstream MCP tool returns. Opaque on purpose. */
+export type UpstreamResult = unknown;
+
+/**
+ * Provenance envelope wrapped around EVERY successful proxied tool result.
+ * Agents get the upstream slice AND a fingerprint + best-effort provenance.
+ *
+ * Provenance fields (source_url/court/decided_date/citation) are BEST-EFFORT:
+ * extracted from common field names if present, omitted (undefined) if absent.
+ * They are NEVER invented. `sha256` is ALWAYS computed.
+ */
+export interface ProvenanceEnvelope<T = UpstreamResult> {
   source: "courtlistener";
-  source_url: string;
-  retrieved_at: string; // ISO 8601 UTC
-  court: string | null;
-  decided_date: string | null; // YYYY-MM-DD
-  citation: string | null;
-  sha256: string; // documentSha256 of the normalized fingerprint text
+  source_url?: string;
+  retrieved_at: string; // ISO 8601 UTC (injected — never Date.now() in the pure core)
+  court?: string;
+  decided_date?: string; // YYYY-MM-DD when extractable
+  citation?: string;
+  sha256: string; // documentSha256 over the result's canonical fingerprint text
   payload: T;
 }
 
-/** Structured failure — NEVER a fabricated opinion. */
+/**
+ * Structured failure — returned when the upstream throws, rejects, or times out.
+ * NEVER a fabricated opinion, never an envelope with invented fields.
+ */
 export interface UnavailableResult {
   source: "courtlistener";
   status: "unavailable";
+  tool: string;
   reason: string;
-  http_status?: number;
-  source_url?: string;
 }
 
-/** Ambiguous citation -> ranked candidates; the resolver never silently picks one. */
-export interface AmbiguousResult {
-  source: "courtlistener";
-  status: "ambiguous";
-  citation: string;
-  candidates: ProvenanceEnvelope[];
+export type ProxyResult<T = UpstreamResult> = ProvenanceEnvelope<T> | UnavailableResult;
+
+/**
+ * Context for wrapWithProvenance / proxyToolCall. `now` is injected so the pure
+ * core is deterministic in tests (no Date.now() inside the pure functions).
+ */
+export interface ProxyContext {
+  toolName: string;
+  args: Record<string, unknown>;
+  tier: PrivacyTier;
+  now: string; // ISO 8601 UTC timestamp, injected by the caller
 }
 
-export type ToolResult<T = unknown> =
-  | ProvenanceEnvelope<T>
-  | AmbiguousResult
-  | UnavailableResult;
-
-export interface ClientOptions {
-  fetchFn: FetchFn;
-  apiKey?: string;
-  cache?: Cache;
-  baseUrl?: string; // default https://www.courtlistener.com/api/rest/v4
-  /** Injectable clock for deterministic retrieved_at in tests. */
-  now?: () => Date;
-  /** Privacy tier of the originating matter. Drives query sanitization. */
-  privacyTier?: "standard" | "confidential" | "privileged";
-}
-
-/** sha256-keyed cache so we absorb rate limits and tests stay deterministic. */
+/** sha256-keyed cache so we absorb upstream rate limits and tests stay deterministic. */
 export interface Cache {
   get(key: string): unknown | undefined;
   set(key: string, value: unknown): void;

@@ -1,0 +1,9 @@
+{
+  "_comment": "ILLUSTRATIVE sample of what an upstream CourtListener MCP tool result MIGHT look like — NOT a pinned upstream contract. The official tool schemas are schema-agnostic to this adapter and should be confirmed at runtime via tools/list. Used only to drive adapter.test.ts.",
+  "case_name": "Roe v. Wade",
+  "citation": "410 U.S. 113",
+  "date_filed": "1973-01-22",
+  "court": "Supreme Court of the United States",
+  "absolute_url": "/opinion/108713/roe-v-wade/",
+  "snippet": "We forthwith acknowledge our awareness of the sensitive and emotional nature of the abortion controversy."
+}

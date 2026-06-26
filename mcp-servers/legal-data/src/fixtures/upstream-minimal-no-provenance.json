@@ -1,0 +1,5 @@
+{
+  "_comment": "ILLUSTRATIVE minimal upstream result that is MISSING provenance fields (no url/court/date/citation). The adapter must still produce a sha256 and simply OMIT the absent fields — never fabricate them. Used only to drive adapter.test.ts.",
+  "note": "alerts subscription created",
+  "ok": true
+}

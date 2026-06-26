@@ -16,7 +16,7 @@ metadata:
 
 CourtListener is a free, public legal-research database maintained by the Free Law Project. It exposes opinions, dockets, oral arguments, and PACER-sourced documents through a REST API at `https://www.courtlistener.com/api/rest/v4/`. Agents use it as the open-access stand-in for paid platforms (Westlaw, Lexis) during the PoC and for any matter where free coverage is sufficient.
 
-**Provisioning path:** the `mcp-servers/legal-data/` MCP server (`search_opinions`, `get_opinion`, `get_citation`, `get_docket`, each wrapped in a provenance envelope with a gate-compatible `sha256`) is the preferred way to wire this connector into paperclip; this skill remains the raw-curl fallback. See `mcp-servers/legal-data/README.md`.
+**Provisioning path:** wire this connector through the **official CourtListener MCP** at `https://mcp.courtlistener.com` (OAuth; requires a free CourtListener account — exposes case law, PACER, citation network, oral arguments, judges, keyword + semantic search, alerts, and grounded citation verification), fronted by PossibLaw's thin trust-adapter `mcp-servers/legal-data/`. The adapter sanitizes confidential/privileged query args and wraps every upstream result in a provenance envelope with a gate-compatible `sha256`; it is schema-agnostic and discovers upstream tools via `tools/list`. This is the preferred path; the raw-curl REST patterns below remain a fallback. See `mcp-servers/legal-data/README.md`.
 
 ## Required Environment Variables
 

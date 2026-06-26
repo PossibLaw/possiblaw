@@ -15,17 +15,21 @@ under `docs/builds/`.
 
 ### Added
 
-- **CourtListener legal-data MCP** (`mcp-servers/legal-data/`): the first slice
-  of the data layer. U.S. case law (CourtListener REST v4) exposed as MCP tools
-  (`search_opinions`, `get_opinion`, `get_citation`, `get_docket`), each result
-  wrapped in a provenance envelope (`source`, `source_url`, `retrieved_at`,
-  `court`, `decided_date`, `citation`, `sha256`). The `sha256` reuses
-  gate-proxy's `documentSha256`, so data-provenance-in matches the citation
-  gate's output-provenance-out. Failures become structured `unavailable` (never
-  a fabricated opinion); ambiguous cites return ranked candidates;
-  confidential-matter queries are sanitized before egress. 17/17 tests green
-  (network stubbed). Known limit: v4 response shapes reconstructed from API
-  knowledge — `client.ts` parsing is the single adjustment point.
+- **CourtListener legal-data MCP adapter** (`mcp-servers/legal-data/`): the
+  first slice of the data layer. A thin trust-adapter/proxy in front of
+  CourtListener's **official** hosted MCP (`mcp.courtlistener.com`, OAuth) — we
+  consume the data layer rather than reinvent it. For each tool call the adapter
+  (1) sanitizes confidential/privileged query args, (2) forwards to the official
+  MCP, (3) wraps the result in a provenance envelope (`source`, `source_url`,
+  `retrieved_at`, `court`, `decided_date`, `citation`, `sha256`). The `sha256`
+  reuses gate-proxy's `documentSha256`, so data-provenance-in matches the
+  citation gate's output-provenance-out. Schema-agnostic about upstream result
+  shapes (provenance fields extracted best-effort, never fabricated); upstream
+  failures become a structured `unavailable`. The pure adapter core is fully
+  tested with a stubbed upstream (14/14 green, zero network/OAuth); the live
+  OAuth wiring (`upstream.ts`, `server.ts`) is intentionally thin and confirmed
+  against upstream tool schemas via `tools/list` at runtime. (Pivoted from an
+  earlier REST-v4 re-implementation once CourtListener's official MCP was found.)
 - **Regulator sign-off bundle** (`gate-proxy/src/quality/signoff.ts` +
   `GET /receipts/bundle?issueId=…[&format=md]`): projects the hash-chained
   receipts for one matter into a Matter Trust Report (JSON or Markdown) —

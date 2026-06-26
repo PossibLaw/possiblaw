@@ -1,0 +1,17 @@
+{
+  "_comment": "ILLUSTRATIVE sample of an upstream search-like result envelope (a list of hits) — NOT a pinned upstream contract. Used only to drive adapter.test.ts.",
+  "results": [
+    {
+      "case_name": "Roe v. Wade",
+      "citation": "410 U.S. 113",
+      "date_filed": "1973-01-22",
+      "absolute_url": "/opinion/108713/roe-v-wade/"
+    },
+    {
+      "case_name": "Planned Parenthood v. Casey",
+      "citation": "505 U.S. 833",
+      "date_filed": "1992-06-29",
+      "absolute_url": "/opinion/112786/planned-parenthood-v-casey/"
+    }
+  ]
+}
