@@ -16,6 +16,7 @@ import { buildPerformers } from "./connectors.ts";
 import { createGateServer } from "./server.ts";
 import { pollOnce } from "./poller.ts";
 import { CitationRegistry } from "./quality/citation-registry.ts";
+import { AuthorityRegistry } from "./quality/authority-registry.ts";
 
 // ---------------------------------------------------------------------------
 // Env
@@ -60,6 +61,7 @@ const client =
 const performers = buildPerformers(process.env as Record<string, string | undefined>);
 
 const citationRegistry = new CitationRegistry(receipts);
+const authorityRegistry = new AuthorityRegistry(receipts);
 
 const log = (line: string): void => {
   // Safety: never include payload text in log lines — sanitized by contract
@@ -70,7 +72,7 @@ const log = (line: string): void => {
 // Start server
 // ---------------------------------------------------------------------------
 
-const server = createGateServer({ policy, receipts, client, performers, localModelAvailable, citationRegistry, log });
+const server = createGateServer({ policy, receipts, client, performers, localModelAvailable, citationRegistry, authorityRegistry, log });
 
 server.listen(PORT, "127.0.0.1", () => {
   log(

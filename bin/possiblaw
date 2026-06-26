@@ -116,6 +116,10 @@ OPTIONS:
   --skip-model-probe    Skip the preflight per-model CLI probe (codex/claude/
                         gemini variants probe each lane model with a tiny request so
                         "no access to model" errors surface before launch).
+  --skip-mcp            Skip rendering companies/legal-operations/mcp-servers.yaml
+                        into the active variant's runtime CLI config (opencode.json
+                        / ~/.codex/config.toml / .mcp.json / ~/.gemini/settings.json).
+                        MCP registration is on by default; this bypasses it.
   --demo <profile>      Merge a synthetic demo profile's projects/tasks into
                         the import (companies/demos/<profile>): law-firm,
                         inhouse-legal, or biglaw-practice-group. Each profile's
@@ -292,6 +296,7 @@ DRY_RUN="false"
 LIST_VARIANTS_ONLY="false"
 NO_BROWSER="false"
 SKIP_MODEL_PROBE="false"
+SKIP_MCP="false"
 THEME="${POSSIBLAW_THEME:-possiblaw}"
 ONBOARD_EXTRA_ENV=""
 DEMO_PROFILE=""
@@ -315,6 +320,7 @@ while [ "$#" -gt 0 ]; do
         --dry-run) DRY_RUN="true"; shift ;;
         --list-variants) LIST_VARIANTS_ONLY="true"; shift ;;
         --skip-model-probe) SKIP_MODEL_PROBE="true"; shift ;;
+        --skip-mcp) SKIP_MCP="true"; shift ;;
         --theme) [ "$#" -ge 2 ] || { err "--theme requires a value"; exit 2; }; THEME="$2"; shift 2 ;;
         --demo) [ "$#" -ge 2 ] || { err "--demo requires a value"; exit 2; }; DEMO_PROFILE="$2"; shift 2 ;;
         --teams) [ "$#" -ge 2 ] || { err "--teams requires a value"; exit 2; }; TEAMS="$2"; shift 2 ;;
@@ -786,6 +792,123 @@ PY
             fi
         else
             log "ok: OpenCode global config declares provider.$REQUIRES_OPENCODE_PROVIDER"
+        fi
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# MCP-server registration (optional, on by default; --skip-mcp bypasses)
+# ---------------------------------------------------------------------------
+#
+# Operators declare MCP servers once in companies/legal-operations/mcp-servers.yaml.
+# Paperclip does NOT manage MCP — each variant's adapter wraps a CLI that reads
+# its own MCP config file. We render the registry into the right file for the
+# active adapter:
+#   opencode_local -> ~/.config/opencode/opencode.json   (merge "mcp" block)
+#   codex_local    -> ~/.codex/config.toml               (append TOML fragment)
+#   claude_local   -> $REPO_ROOT/.mcp.json               (merge "mcpServers")
+#   gemini_local   -> ~/.gemini/settings.json            (merge "mcpServers")
+# grantTo is advisory only: these configs are GLOBAL per runtime, not per
+# subagent, so the launcher renders the UNION of servers (no --agent filter).
+# Fully optional: a missing registry or helper degrades to a warn, never an error.
+MCP_REGISTRY_YAML="$PACKAGE/mcp-servers.yaml"
+MCP_HELPER="$SCRIPT_DIR/_possiblaw_mcp.py"
+if [ "$SKIP_MCP" = "true" ]; then
+    log "skipping MCP registration (--skip-mcp)"
+elif [ ! -f "$MCP_REGISTRY_YAML" ]; then
+    : # no registry → nothing to do (silent: MCP is optional)
+elif [ ! -f "$MCP_HELPER" ]; then
+    warn "MCP registry present but helper missing: $MCP_HELPER — skipping MCP registration."
+else
+    # Resolve the adapter type for the chosen variant from the variants doc.
+    MCP_ADAPTER="$(python3 - "$VARIANTS_JSON_FILE" "$VARIANT" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    doc = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+v = (doc.get("variants") or {}).get(sys.argv[2]) or {}
+at = (v.get("default") or {}).get("adapterType")
+if at:
+    print(at)
+PY
+)"
+    if [ -z "$MCP_ADAPTER" ]; then
+        warn "could not resolve adapter type for variant '$VARIANT' — skipping MCP registration."
+    else
+        # Convert the registry YAML to JSON (same converter the variants use).
+        MCP_REGISTRY_JSON_FILE="$(mktemp -t possiblaw-mcp.XXXXXX.json)"
+        if ! yaml_to_json "$MCP_REGISTRY_YAML" > "$MCP_REGISTRY_JSON_FILE" 2>/dev/null \
+            || [ ! -s "$MCP_REGISTRY_JSON_FILE" ]; then
+            warn "could not parse $MCP_REGISTRY_YAML — skipping MCP registration."
+            rm -f "$MCP_REGISTRY_JSON_FILE"
+        else
+            # Server names (for log lines), union across the registry.
+            MCP_NAMES="$(python3 - "$MCP_REGISTRY_JSON_FILE" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    doc = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+print(", ".join(s.get("name","?") for s in (doc.get("mcpServers") or []) if isinstance(s, dict)))
+PY
+)"
+            case "$MCP_ADAPTER" in
+                opencode_local) MCP_TARGET="$HOME/.config/opencode/opencode.json" ;;
+                codex_local)    MCP_TARGET="$HOME/.codex/config.toml" ;;
+                claude_local)   MCP_TARGET="$REPO_ROOT/.mcp.json" ;;
+                gemini_local)   MCP_TARGET="$HOME/.gemini/settings.json" ;;
+                *)              MCP_TARGET="" ;;
+            esac
+
+            if [ -z "$MCP_TARGET" ]; then
+                warn "no MCP config target for adapter '$MCP_ADAPTER' — skipping MCP registration."
+            elif [ "$DRY_RUN" = "true" ]; then
+                log "[dry-run] would register MCP servers [$MCP_NAMES] into $MCP_TARGET (adapter: $MCP_ADAPTER)"
+            else
+                MCP_DO_WRITE="true"
+                if [ "$NON_INTERACTIVE" != "true" ] && [ "$ASSUME_YES" != "true" ]; then
+                    if ! confirm "Register MCP servers [$MCP_NAMES] into $MCP_TARGET?"; then
+                        MCP_DO_WRITE="false"
+                        log "skipped MCP registration (declined)"
+                    fi
+                fi
+                if [ "$MCP_DO_WRITE" = "true" ]; then
+                    mkdir -p "$(dirname "$MCP_TARGET")"
+                    if [ "$MCP_ADAPTER" = "codex_local" ]; then
+                        # TOML: render only servers not already present in the target
+                        # file. Passing --existing-toml makes the helper skip any
+                        # [mcp_servers.<name>] table already in the file, so running
+                        # the launcher twice leaves exactly one table per server.
+                        # TOML forbids duplicate table keys; blind-append on a second
+                        # launch would produce an unparseable config.toml.
+                        MCP_FRAGMENT="$(python3 "$MCP_HELPER" \
+                            --registry-json "$MCP_REGISTRY_JSON_FILE" \
+                            --adapter codex_local \
+                            --existing-toml "$MCP_TARGET" \
+                            2>/dev/null || true)"
+                        if [ -z "$MCP_FRAGMENT" ]; then
+                            log "MCP servers [$MCP_NAMES] already present in $MCP_TARGET — skipping write."
+                        else
+                            { [ -s "$MCP_TARGET" ] && printf '\n'; printf '%s\n' "$MCP_FRAGMENT"; } >> "$MCP_TARGET"
+                            log "appended MCP servers [$MCP_NAMES] to $MCP_TARGET"
+                        fi
+                    else
+                        # JSON: merge the rendered block into the existing object (or {} ).
+                        MCP_EXISTING="$(mktemp -t possiblaw-mcp-existing.XXXXXX.json)"
+                        if [ -s "$MCP_TARGET" ]; then cp "$MCP_TARGET" "$MCP_EXISTING"; else printf '{}' > "$MCP_EXISTING"; fi
+                        MCP_MERGED="$(python3 "$MCP_HELPER" --registry-json "$MCP_REGISTRY_JSON_FILE" --adapter "$MCP_ADAPTER" --merge-into "$MCP_EXISTING" 2>/dev/null || true)"
+                        if [ -z "$MCP_MERGED" ]; then
+                            warn "MCP render/merge failed for $MCP_TARGET — left unchanged."
+                        else
+                            printf '%s\n' "$MCP_MERGED" > "$MCP_TARGET"
+                            log "registered MCP servers [$MCP_NAMES] into $MCP_TARGET"
+                        fi
+                        rm -f "$MCP_EXISTING"
+                    fi
+                fi
+            fi
+            rm -f "$MCP_REGISTRY_JSON_FILE"
         fi
     fi
 fi

@@ -56,6 +56,8 @@ The document text the gate reads, per tool:
 
 Agents use their own scoped tokens for these connectors. No egress credential lives in the gate proxy for read paths.
 
+**MCP-registered connectors.** MCP-server connectors are declared once in `companies/legal-operations/mcp-servers.yaml` (seeded with `legal-data` and `courtlistener-official`). At launch, `bin/possiblaw` renders the registry into whichever model-runtime CLI config the chosen variant's adapter uses, via the stdlib-only helper `bin/_possiblaw_mcp.py` (`--self-test` covered). `grantTo` in the registry is **advisory** — CLI MCP configs are global per runtime, not per-subagent. See `docs/builds/mcp-registry.md`.
+
 | Connector | What it reads | Query privacy caveat |
 |---|---|---|
 | `connector-courtlistener` | U.S. federal and state opinions, dockets | Keep queries to neutral terms for confidential/privileged matters; avoid embedding client names or matter identifiers in search strings |

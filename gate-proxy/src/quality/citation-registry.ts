@@ -17,7 +17,7 @@
 // enforced by the checker agent's workflow and attributed via agentId in the
 // receipt.
 import type { ReceiptChain } from "../receipts.ts";
-import { extractCitations, normalizeText, documentSha256 } from "../citations.ts";
+import { extractCitations, normalizeText, documentSha256, comparableCitation } from "../citations.ts";
 import { ReceiptChainCorruptError } from "../receipts.ts";
 
 // ---------------------------------------------------------------------------
@@ -52,15 +52,11 @@ const MAX_ROWS = 500;
 // ---------------------------------------------------------------------------
 
 /**
- * Spacing-insensitive comparison form: the extractor returns as-matched
- * spacing ("410 U. S. 113"), while checker rows may use compact form
- * ("410 U.S. 113"). Collapsing space-after-period on BOTH sides makes
- * coverage containment robust to that variance without touching the
- * sha-binding normalization.
+ * Spacing-insensitive comparison form. Shared with the authority-provenance
+ * registry via citations.ts:comparableCitation so registration and extraction
+ * align across both registries (see that function's doc for the contract).
  */
-function comparable(s: string): string {
-  return normalizeText(s).replace(/\.\s+/g, ".");
-}
+const comparable = comparableCitation;
 
 // ---------------------------------------------------------------------------
 // CitationRegistry
@@ -90,10 +86,19 @@ export class CitationRegistry {
       return;
     }
 
-    // Rebuild verified set from the chain: any quality/performed receipt records
-    // a sha that passed all checks in a prior session.
+    // Rebuild verified set from the chain: only citation_verification quality/
+    // performed receipts may populate the verified set. Authority-provenance
+    // receipts are also kind="quality"/outcome="performed" but use a client-
+    // supplied payloadSha256 (only format-validated) — without the tool check
+    // an attacker could pre-register a target filing's sha via POST /quality/
+    // authority and bypass the Phase 2 citation gate. Fail-closed: any receipt
+    // without tool="citation_verification" is ignored here.
     for (const entry of receipts.entries()) {
-      if (entry.body.kind === "quality" && entry.body.outcome === "performed") {
+      if (
+        entry.body.kind === "quality" &&
+        entry.body.tool === "citation_verification" &&
+        entry.body.outcome === "performed"
+      ) {
         this.verified.add(entry.body.payloadSha256);
       }
     }

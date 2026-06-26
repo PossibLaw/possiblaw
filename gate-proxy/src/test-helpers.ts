@@ -9,6 +9,7 @@ import { DEFAULT_POLICY } from "./policy.ts";
 import type { Performer, PerformerRegistry } from "./connectors.ts";
 import { createGateServer } from "./server.ts";
 import { CitationRegistry } from "./quality/citation-registry.ts";
+import { AuthorityRegistry } from "./quality/authority-registry.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,6 +19,7 @@ export interface TestServer {
   baseUrl: string;
   receipts: ReceiptChain;
   citationRegistry: CitationRegistry;
+  authorityRegistry: AuthorityRegistry;
   close: () => Promise<void>;
 }
 
@@ -40,6 +42,7 @@ export async function startTestServer(): Promise<TestServer> {
   const dir = tmpDir();
   const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
   const citationRegistry = new CitationRegistry(receipts);
+  const authorityRegistry = new AuthorityRegistry(receipts);
 
   // Stub all standard performers so egress paths don't error on missing credentials
   const noOp: Performer = async () => ({});
@@ -61,6 +64,7 @@ export async function startTestServer(): Promise<TestServer> {
     performers,
     localModelAvailable: false,
     citationRegistry,
+    authorityRegistry,
   });
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -72,7 +76,21 @@ export async function startTestServer(): Promise<TestServer> {
       server.close((err) => (err ? reject(err) : resolve())),
     );
 
-  return { baseUrl, receipts, citationRegistry, close };
+  return { baseUrl, receipts, citationRegistry, authorityRegistry, close };
+}
+
+/** Register a retrieved authority for a document via POST /quality/authority. */
+export async function registerAuthority(
+  srv: TestServer,
+  authority: { citation: string; sha256: string; source: string; sourceUrl?: string; retrievedAt?: string },
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const res = await fetch(`${srv.baseUrl}/quality/authority`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(authority),
+  });
+  const body = (await res.json()) as Record<string, unknown>;
+  return { status: res.status, body };
 }
 
 /** POST to /egress/<tool> with payload wrapped in the standard envelope. */

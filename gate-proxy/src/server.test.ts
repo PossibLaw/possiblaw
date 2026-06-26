@@ -18,12 +18,13 @@ import type { PaperclipClient, ApprovalRecord } from "./paperclip-client.ts";
 import { PerformerError, type Performer, type PerformerRegistry } from "./connectors.ts";
 import { createGateServer, type GateServerDeps } from "./server.ts";
 import { CitationRegistry } from "./quality/citation-registry.ts";
+import { AuthorityRegistry } from "./quality/authority-registry.ts";
 
 // Policy with an empty citation gate — used by tests that pre-date Phase 2
 // enforcement and do not register citations before posting egress.
 const POLICY_NO_CITATION_GATE: Policy = {
   ...DEFAULT_POLICY,
-  citationGate: { boundaries: [] },
+  citationGate: { boundaries: [], requireAuthorityProvenance: false },
 };
 
 // ---------------------------------------------------------------------------
@@ -74,11 +75,16 @@ function makeFakeClient(
  * CitationRegistry now fails closed on a corrupt chain (Phase 1 posture) rather than
  * throwing, so no fallback or catch is needed here. */
 async function startServer(
-  deps: Omit<GateServerDeps, "citationRegistry"> & { citationRegistry?: CitationRegistry },
+  deps: Omit<GateServerDeps, "citationRegistry" | "authorityRegistry"> & {
+    citationRegistry?: CitationRegistry;
+    authorityRegistry?: AuthorityRegistry;
+  },
 ): Promise<{ server: http.Server; baseUrl: string; close: () => Promise<void> }> {
   const citationRegistry: CitationRegistry =
     deps.citationRegistry ?? new CitationRegistry(deps.receipts);
-  const fullDeps: GateServerDeps = { ...deps, citationRegistry };
+  const authorityRegistry: AuthorityRegistry =
+    deps.authorityRegistry ?? new AuthorityRegistry(deps.receipts);
+  const fullDeps: GateServerDeps = { ...deps, citationRegistry, authorityRegistry };
   const server = createGateServer(fullDeps);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const addr = server.address() as { address: string; port: number };
@@ -541,7 +547,7 @@ describe("gate server", () => {
     const blockPolicy: Policy = {
       version: 1,
       boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "block" },
-      citationGate: { boundaries: [...DEFAULT_POLICY.citationGate.boundaries] },
+      citationGate: { boundaries: [...DEFAULT_POLICY.citationGate.boundaries], requireAuthorityProvenance: false },
     };
 
     const { baseUrl, close } = await startServer({
@@ -827,7 +833,7 @@ describe("gate server", () => {
     const badPolicy: Policy = {
       version: 1,
       boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "bogus_decision" as unknown as "allow" },
-      citationGate: { boundaries: [] },
+      citationGate: { boundaries: [], requireAuthorityProvenance: false },
     };
 
     const { baseUrl, close } = await startServer({
@@ -1441,6 +1447,375 @@ describe("gate server", () => {
     assert.equal(h["ok"], false);
     assert.ok(String(h["error"]).includes("receipts_corrupt"), `expected receipts_corrupt in error; got: ${JSON.stringify(h)}`);
 
+    await close();
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /quality/authority — authority-provenance registration tests
+  // -------------------------------------------------------------------------
+
+  /** POST a JSON body to /quality/authority and return {status, json}. */
+  async function postAuthority(
+    baseUrl: string,
+    body: unknown,
+  ): Promise<{ status: number; json: unknown }> {
+    const res = await fetch(`${baseUrl}/quality/authority`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    return { status: res.status, json };
+  }
+
+  it("POST /quality/authority: happy registration → 200, ok:true, normalizedCitation; performed receipt appended", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postAuthority(baseUrl, {
+      citation: "Roe v. Wade, 410 U.S. 113 (1973)",
+      sha256: sha256hex("roe-body"),
+      source: "courtlistener",
+      sourceUrl: "https://www.courtlistener.com/opinion/108713/roe-v-wade/",
+      retrievedAt: "2026-06-26T12:00:00.000Z",
+    });
+
+    assert.equal(status, 200);
+    const j = json as Record<string, unknown>;
+    assert.equal(j["ok"], true);
+    assert.equal(typeof j["normalizedCitation"], "string");
+
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "quality");
+    assert.equal(last.body.tool, "authority_provenance");
+    assert.equal(last.body.outcome, "performed");
+    // no authority text in the receipt — only the content sha + audit fields
+    assert.equal(JSON.stringify(last.body).includes("roe-body"), false);
+
+    await close();
+  });
+
+  it("POST /quality/authority: bad input (missing sha256) → 400 + error receipt", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postAuthority(baseUrl, {
+      citation: "Roe v. Wade, 410 U.S. 113 (1973)",
+      source: "courtlistener",
+    });
+    assert.equal(status, 400);
+    assert.ok(String((json as Record<string, unknown>)["error"]).includes("invalid_authority"));
+
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.tool, "authority_provenance");
+    assert.equal(last.body.outcome, "error");
+
+    await close();
+  });
+
+  it("POST /quality/authority: non-hex sha256 → 400 invalid_authority", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status } = await postAuthority(baseUrl, {
+      citation: "410 U.S. 113",
+      sha256: "not-a-sha",
+      source: "courtlistener",
+    });
+    assert.equal(status, 400);
+
+    await close();
+  });
+
+  it("authority-provenance flag-only: an unbacked cite is RECORDED on the egress receipt, NOT blocked (default policy)", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    // THIRD_PARTY_EGRESS=allow + citation gate on it; default requireAuthorityProvenance=false.
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: { share_external: async () => ({ ok: true }) },
+      localModelAvailable: false,
+    });
+
+    // Register Roe as retrieved, but NOT Miranda.
+    await postAuthority(baseUrl, { citation: "410 U.S. 113", sha256: sha256hex("roe-body"), source: "courtlistener" });
+
+    // A document that cites a registered citation verification (so the citation
+    // gate passes) AND two authorities, one retrieved (Roe) one not (Miranda).
+    const document = "We rely on 410 U.S. 113 and on 384 U.S. 436.";
+    await postCitation(baseUrl, {
+      document,
+      rows: [
+        { citation: "410 U.S. 113", match: "Yes" },
+        { citation: "384 U.S. 436", match: "Yes" },
+      ],
+      meta: { agentId: "agent-1", issueId: "POS-1" },
+    });
+
+    const { status } = await postEgress(baseUrl, "share_external", {
+      payload: { content: document },
+      meta: { agentId: "agent-1", issueId: "POS-1" },
+    });
+
+    // Default policy: egress still ALLOWED (flag-only, not blocked).
+    assert.equal(status, 200, "default policy must not block on unbacked citations");
+
+    // The egress receipt RECORDS the unbacked citation.
+    const egressEntry = receipts.entries().reverse().find(
+      (e) => e.body.kind === "egress" && e.body.outcome === "performed",
+    )!;
+    const unbacked = egressEntry.body.meta?.["unbackedCitations"] as string[] | undefined;
+    assert.ok(Array.isArray(unbacked), "egress receipt must record unbackedCitations array");
+    assert.deepEqual(unbacked, ["384 U.S. 436"]);
+
+    await close();
+  });
+
+  it("authority-provenance enforce: requireAuthorityProvenance=true blocks an unbacked cite with a clear reason", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const enforcePolicy: Policy = {
+      ...DEFAULT_POLICY,
+      citationGate: { boundaries: [...DEFAULT_POLICY.citationGate.boundaries], requireAuthorityProvenance: true },
+    };
+    const { baseUrl, close } = await startServer({
+      policy: enforcePolicy,
+      receipts,
+      client: null,
+      performers: { share_external: async () => ({ ok: true }) },
+      localModelAvailable: false,
+    });
+
+    const document = "We rely on 384 U.S. 436.";
+    // Register the citation verification so we reach the authority check.
+    await postCitation(baseUrl, {
+      document,
+      rows: [{ citation: "384 U.S. 436", match: "Yes" }],
+      meta: { agentId: "agent-1", issueId: "POS-1" },
+    });
+    // Note: 384 U.S. 436 was NEVER registered as retrieved.
+
+    const { status, json } = await postEgress(baseUrl, "share_external", {
+      payload: { content: document },
+      meta: { agentId: "agent-1", issueId: "POS-1" },
+    });
+
+    assert.equal(status, 403);
+    const j = json as Record<string, unknown>;
+    assert.equal(j["decision"], "block");
+    assert.ok(String(j["reason"]).includes("authority_provenance"));
+    assert.deepEqual(j["unbackedCitations"], ["384 U.S. 436"]);
+
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.outcome, "blocked");
+    assert.equal(last.body.meta?.["reason"], "authority_provenance_unbacked");
+
+    await close();
+  });
+
+  // FIX 2 — citation field must contain a recognized legal citation
+  it("POST /quality/authority: arbitrary prose (no legal citation) → 400 invalid_authority", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postAuthority(baseUrl, {
+      citation: "arbitrary privileged prose no cite",
+      sha256: sha256hex("some-body"),
+      source: "courtlistener",
+    });
+    assert.equal(status, 400);
+    assert.ok(
+      String((json as Record<string, unknown>)["error"]).includes("invalid_authority"),
+      "error must be invalid_authority for non-citation string",
+    );
+
+    // Must still write an error receipt (fail-closed)
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.tool, "authority_provenance");
+    assert.equal(last.body.outcome, "error");
+
+    await close();
+  });
+
+  it("POST /quality/authority: real legal citation string → 200 accepted", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postAuthority(baseUrl, {
+      citation: "Roe v. Wade, 410 U.S. 113 (1973)",
+      sha256: sha256hex("roe-body"),
+      source: "courtlistener",
+    });
+    assert.equal(status, 200);
+    assert.equal((json as Record<string, unknown>)["ok"], true);
+
+    await close();
+  });
+
+  // FIX 3 — reporterMeta must NOT be stored in the receipt
+  it("POST /quality/authority: reporterMeta is NOT stored in the receipt (ledger pollution fix)", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    await postAuthority(baseUrl, {
+      citation: "Roe v. Wade, 410 U.S. 113 (1973)",
+      sha256: sha256hex("roe-body"),
+      source: "courtlistener",
+      meta: { arbitrary: "privileged data", nested: { secret: true } },
+    });
+
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.outcome, "performed");
+    // reporterMeta must NOT appear in the receipt body
+    assert.equal(
+      JSON.stringify(last.body).includes("reporterMeta"),
+      false,
+      "reporterMeta must not be stored in the receipt",
+    );
+    // No caller-supplied meta values either
+    assert.equal(
+      JSON.stringify(last.body).includes("privileged data"),
+      false,
+      "caller meta values must not appear in the receipt",
+    );
+
+    await close();
+  });
+
+  // GET /receipts/bundle → JSON Matter Trust Report for one matter
+  it("GET /receipts/bundle?issueId=... → 200 JSON bundle scoped to the matter", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    receipts.append({
+      kind: "egress", tool: "send_email", boundary: "THIRD_PARTY_EGRESS",
+      decision: "human", outcome: "performed", payloadSha256: sha256hex("p"),
+      agentId: "agent-1", issueId: "POS-123", approvalId: "approval-1",
+    });
+    receipts.append({
+      kind: "egress", tool: "send_email", boundary: "THIRD_PARTY_EGRESS",
+      decision: "allow", outcome: "performed", payloadSha256: sha256hex("q"),
+      agentId: "agent-1", issueId: "POS-999",
+    });
+
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY, receipts, client: null, performers: {}, localModelAvailable: false,
+    });
+
+    const res = await fetch(`${baseUrl}/receipts/bundle?issueId=POS-123`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as Record<string, unknown>;
+    assert.equal(body["issueId"], "POS-123");
+    assert.equal((body["receipts"] as unknown[]).length, 1);
+    assert.equal((body["attestations"] as unknown[]).length, 1);
+    assert.equal((body["chain"] as Record<string, unknown>)["ok"], true);
+
+    await close();
+  });
+
+  // GET /receipts/bundle?format=md → Markdown Matter Trust Report
+  it("GET /receipts/bundle?format=md → 200 text/markdown report", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    receipts.append({
+      kind: "egress", tool: "send_email", boundary: "THIRD_PARTY_EGRESS",
+      decision: "allow", outcome: "performed", payloadSha256: sha256hex("p"),
+      agentId: "agent-1", issueId: "POS-123",
+    });
+
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY, receipts, client: null, performers: {}, localModelAvailable: false,
+    });
+
+    const res = await fetch(`${baseUrl}/receipts/bundle?issueId=POS-123&format=md`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /text\/markdown/);
+    const md = await res.text();
+    assert.match(md, /Matter Trust Report/);
+    assert.match(md, /POS-123/);
+
+    await close();
+  });
+
+  // GET /receipts/bundle missing/invalid issueId → 400
+  it("GET /receipts/bundle without issueId → 400", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY, receipts, client: null, performers: {}, localModelAvailable: false,
+    });
+    const res = await fetch(`${baseUrl}/receipts/bundle`);
+    assert.equal(res.status, 400);
+    await close();
+  });
+
+  // GET /receipts/bundle over a corrupt chain → 503 receipts_corrupt (fail-closed)
+  it("GET /receipts/bundle over a corrupt chain → 503 receipts_corrupt", async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "r.jsonl");
+    const receipts = new ReceiptChain(filePath);
+    receipts.append({
+      kind: "egress", tool: "send_email", boundary: "THIRD_PARTY_EGRESS",
+      decision: "allow", outcome: "performed", payloadSha256: sha256hex("p"),
+      agentId: "agent-1", issueId: "POS-123",
+    });
+    // Tamper the body but keep the stored hash → verify() fails.
+    const lines = fs.readFileSync(filePath, "utf8").split("\n").filter(Boolean);
+    const e0 = JSON.parse(lines[0]) as ReceiptEntry;
+    e0.body.outcome = "blocked";
+    lines[0] = JSON.stringify(e0);
+    fs.writeFileSync(filePath, lines.join("\n") + "\n");
+
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY, receipts, client: null, performers: {}, localModelAvailable: false,
+    });
+    const res = await fetch(`${baseUrl}/receipts/bundle?issueId=POS-123`);
+    assert.equal(res.status, 503);
+    const body = await res.json() as Record<string, unknown>;
+    assert.equal(body["error"], "receipts_corrupt");
     await close();
   });
 });

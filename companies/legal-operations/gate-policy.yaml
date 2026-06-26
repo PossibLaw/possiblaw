@@ -60,6 +60,19 @@ citationGate:
 # boundaries:
 #   THIRD_PARTY_EGRESS: human
 
+# Citation gate + authority provenance (anti-hallucination). Retrieved
+# authorities are registered with the gate (POST /quality/authority); the gate
+# flags any authority CITED in an outbound filing that was never RETRIEVED. By
+# default this is RECORD/FLAG only (logged on the egress receipt as
+# meta.unbackedCitations) and does NOT block. Set requireAuthorityProvenance:
+# true to BLOCK an outbound document on a citation-gated boundary when it cites
+# one or more never-retrieved authorities. Defaults: boundaries
+# [COURT_FILING, THIRD_PARTY_EGRESS], requireAuthorityProvenance false.
+#
+# citationGate:
+#   boundaries: [COURT_FILING, THIRD_PARTY_EGRESS]
+#   requireAuthorityProvenance: true
+
 # ---------------------------------------------------------------------------
 # Out-of-scope in v1
 # ---------------------------------------------------------------------------

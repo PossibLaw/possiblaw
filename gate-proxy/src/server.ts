@@ -24,6 +24,8 @@ import { anonymize, deanonymize } from "./anonymize.ts";
 import { humanGate } from "./gates/human.ts";
 import type { EgressMeta, EgressRequest } from "./types.ts";
 import type { CitationRegistry } from "./quality/citation-registry.ts";
+import type { AuthorityRegistry } from "./quality/authority-registry.ts";
+import { assembleSignoffBundle, renderSignoffMarkdown } from "./quality/signoff.ts";
 import { documentSha256, extractCitations } from "./citations.ts";
 import { extractDocumentText } from "./document-text.ts";
 
@@ -38,6 +40,7 @@ export interface GateServerDeps {
   performers: PerformerRegistry;
   localModelAvailable: boolean;
   citationRegistry: CitationRegistry;
+  authorityRegistry: AuthorityRegistry;
   log?: (line: string) => void; // NEVER log payload text
 }
 
@@ -129,6 +132,8 @@ interface PerformAndReceiptInput {
   meta: EgressMeta;
   approvalId?: string; // may differ from meta.approvalId (e.g. gate result)
   useLocal: boolean;
+  /** Which data-terms posture the tier-floor relied on; recorded into receipt meta. */
+  dataTermsTier?: string;
   egressReq: EgressRequest;
   /** For the anonymize path: de-token the model response string before sending. */
   deanonymizeMap?: Record<string, string>;
@@ -136,13 +141,20 @@ interface PerformAndReceiptInput {
   log: (line: string) => void;
   /** The decision label to return in the JSON response (allow | anonymize | human). */
   responseDecisionLabel: string;
+  /**
+   * Extra non-payload audit fields merged into the egress receipt meta — e.g.
+   * the citation gate's unbackedCitations (anti-hallucination flag). Recorded
+   * verbatim per the ReceiptBody contract; callers must not place payload text
+   * here (citation strings are public legal identifiers, not payloads).
+   */
+  extraReceiptMeta?: Record<string, unknown>;
 }
 
 async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
   const {
     performers, receipts, tool, boundary, decision, payloadSha256,
-    meta, approvalId, useLocal, egressReq, deanonymizeMap, res,
-    log: _log, responseDecisionLabel,
+    meta, approvalId, useLocal, dataTermsTier, egressReq, deanonymizeMap, res,
+    log: _log, responseDecisionLabel, extraReceiptMeta,
   } = opts;
 
   // I5: claimedConfidentiality in every egress receipt meta
@@ -153,8 +165,12 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
     const result = await performer(egressReq, { useLocal });
 
     // Build extra receipt meta
-    const receiptMeta: Record<string, unknown> = { claimedConfidentiality };
+    const receiptMeta: Record<string, unknown> = { claimedConfidentiality, ...(extraReceiptMeta ?? {}) };
     if (useLocal) receiptMeta["routedLocal"] = true;
+    // Record which data-terms posture the tier-floor relied on (the field the
+    // sign-off bundle reads) so a regulator can see *why* a cloud lane was
+    // acceptable for a sensitive matter. See docs/privilege-and-confidentiality.md.
+    if (dataTermsTier !== undefined) receiptMeta["dataTermsTier"] = dataTermsTier;
     if (deanonymizeMap) receiptMeta["maskedTokenCount"] = Object.keys(deanonymizeMap).length;
 
     receipts.append({
@@ -203,6 +219,10 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
 export function createGateServer(deps: GateServerDeps): http.Server {
   const { policy, receipts, client, performers, localModelAvailable } = deps;
   const log = deps.log ?? noop;
+  const SAFE_SHA_RE = /^[0-9a-f]{64}$/;
+  /** Bounded, single-line audit string (no payload text) — citation/source/url. */
+  const isSafeAuthorityString = (v: unknown, max: number): boolean =>
+    typeof v === "string" && v.length >= 1 && v.length <= max && !/[\r\n]/.test(v);
 
   const server = http.createServer(async (req, res) => {
     const url = req.url ?? "/";
@@ -231,6 +251,51 @@ export function createGateServer(deps: GateServerDeps): http.Server {
     if (method === "GET" && url === "/receipts/verify") {
       const result = receipts.verify();
       sendJson(res, 200, result);
+      return;
+    }
+
+    // ------------------------------------------------------------------
+    // GET /receipts/bundle?issueId=POS-123[&format=md]
+    // Assembles a per-matter "Matter Trust Report" from EXISTING receipts —
+    // hashes only, never payloads. JSON by default; Markdown if format=md.
+    // Reuses the server's ReceiptChain. Fail-closed: a corrupt chain throws
+    // ReceiptChainCorruptError and we return 503 receipts_corrupt rather than
+    // a falsely-clean report.
+    // ------------------------------------------------------------------
+    if (method === "GET" && url.startsWith("/receipts/bundle")) {
+      try {
+        const parsedUrl = new URL(url, "http://localhost");
+        const issueId = parsedUrl.searchParams.get("issueId");
+        const format = parsedUrl.searchParams.get("format");
+        if (issueId === null || !SAFE_ID_RE.test(issueId)) {
+          sendJson(res, 400, { error: "invalid_issueId: required query param issueId must match [A-Za-z0-9-]{1,64}" });
+          return;
+        }
+        let bundle;
+        try {
+          bundle = assembleSignoffBundle(receipts, issueId);
+        } catch (err) {
+          if (err instanceof ReceiptChainCorruptError) {
+            sendJson(res, 503, { error: "receipts_corrupt" });
+            return;
+          }
+          throw err;
+        }
+        if (format === "md") {
+          const md = renderSignoffMarkdown(bundle);
+          if (!res.headersSent) {
+            res.writeHead(200, {
+              "content-type": "text/markdown; charset=utf-8",
+              "content-length": Buffer.byteLength(md, "utf8"),
+            });
+            res.end(md);
+          }
+          return;
+        }
+        sendJson(res, 200, bundle);
+      } catch {
+        if (!res.headersSent) sendJson(res, 500, { error: "internal_error" });
+      }
       return;
     }
 
@@ -362,6 +427,107 @@ export function createGateServer(deps: GateServerDeps): http.Server {
     }
 
     // ------------------------------------------------------------------
+    // POST /quality/authority — register a RETRIEVED legal authority.
+    // The legal-data MCP posts one of these per fetched authority. We index the
+    // NORMALIZED citation and append a hash-chained quality receipt
+    // (tool=authority_provenance). Later, an outbound filing that CITES an
+    // authority never registered here is flagged (and, if
+    // requireAuthorityProvenance is on, blocked) as a hallucination signal.
+    // Receipts carry the normalized citation + content sha + source only —
+    // never authority text, and never caller-supplied meta (reporterMeta was
+    // dropped in FIX 3: it stored arbitrary caller JSON in the hash-chained
+    // ledger and is never read back by verifyDocument or the sign-off bundle).
+    // ------------------------------------------------------------------
+    if (method === "POST" && url === "/quality/authority") {
+      try {
+        const { body: rawBody, limitExceeded } = await readBody(req);
+        if (limitExceeded) {
+          sendJson(res, 413, { error: "request_too_large" });
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(rawBody);
+        } catch {
+          deps.receipts.append({
+            kind: "quality",
+            tool: "authority_provenance",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_json" });
+          return;
+        }
+        const b = parsed as Record<string, unknown>;
+        const metaOk =
+          b["meta"] === undefined ||
+          (b["meta"] !== null && typeof b["meta"] === "object" && !Array.isArray(b["meta"]));
+        if (
+          !isSafeAuthorityString(b["citation"], 512) ||
+          typeof b["sha256"] !== "string" ||
+          !SAFE_SHA_RE.test(b["sha256"] as string) ||
+          !isSafeAuthorityString(b["source"], 128) ||
+          (b["sourceUrl"] !== undefined && !isSafeAuthorityString(b["sourceUrl"], 2048)) ||
+          (b["retrievedAt"] !== undefined && !isSafeAuthorityString(b["retrievedAt"], 64)) ||
+          !metaOk
+        ) {
+          deps.receipts.append({
+            kind: "quality",
+            tool: "authority_provenance",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_authority: requires non-empty 'citation', 64-hex 'sha256', 'source'[, 'sourceUrl', 'retrievedAt', 'meta']" });
+          return;
+        }
+        // FIX 2 (S1): validate that citation actually contains a recognized
+        // legal citation — reject arbitrary prose strings that could contaminate
+        // the regulator-facing sign-off bundle. Mirror the error-receipt pattern.
+        if (extractCitations(b["citation"] as string).length === 0) {
+          deps.receipts.append({
+            kind: "quality",
+            tool: "authority_provenance",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_authority: citation does not contain a recognized legal citation" });
+          return;
+        }
+        let result;
+        try {
+          result = deps.authorityRegistry.register({
+            citation: b["citation"] as string,
+            sha256: b["sha256"] as string,
+            source: b["source"] as string,
+            sourceUrl: b["sourceUrl"] as string | undefined,
+            retrievedAt: b["retrievedAt"] as string | undefined,
+          });
+        } catch (err) {
+          deps.receipts.append({
+            kind: "quality",
+            tool: "authority_provenance",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: `authority_rejected: ${err instanceof Error ? err.message : "invalid input"}` });
+          return;
+        }
+        sendJson(res, 200, { ok: true, normalizedCitation: result.normalizedCitation });
+      } catch {
+        if (!res.headersSent) sendJson(res, 500, { error: "internal_error" });
+      }
+      return;
+    }
+
+    // ------------------------------------------------------------------
     // POST /egress/{tool}
     // ------------------------------------------------------------------
     const egressMatch = url.match(/^\/egress\/([^/?#]+)(?:\?.*)?$/);
@@ -369,7 +535,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
       const tool = decodeURIComponent(egressMatch[1]);
       // C2 (a): entire egress handler wrapped in try/catch
       try {
-        await handleEgress(tool, req, res, { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, log });
+        await handleEgress(tool, req, res, { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, authorityRegistry: deps.authorityRegistry, log });
       } catch (outerErr) {
         // Best-effort: try to append an error receipt; if the chain itself is
         // corrupt, log a no-payload line and continue — process stays alive.
@@ -413,7 +579,7 @@ async function handleEgress(
   res: http.ServerResponse,
   deps: Required<GateServerDeps>,
 ): Promise<void> {
-  const { policy, receipts, client, performers, localModelAvailable, citationRegistry, log } = deps;
+  const { policy, receipts, client, performers, localModelAvailable, citationRegistry, authorityRegistry, log } = deps;
 
   // 1. Read raw body (with size cap)
   const { body: rawBody, limitExceeded } = await readBody(req);
@@ -600,6 +766,12 @@ async function handleEgress(
   // I5: claimedConfidentiality in every egress receipt meta
   const claimedConfidentiality = meta.confidentiality ?? "unspecified";
 
+  // Authority-provenance signal computed in the citation gate (5b) and threaded
+  // onto whatever egress receipt the dispatch (step 6) ultimately writes, so the
+  // hallucination flag rides on the SAME receipt as the egress decision. Empty
+  // by default; set only on a citation-gated boundary that carries a document.
+  let authorityReceiptMeta: Record<string, unknown> = {};
+
   // 5b. Citation gate (OUTBOUND_QUALITY): on configured boundaries, egress that
   // CARRIES LEGAL CITATIONS must have a registered, passing citation verification
   // bound to the document's sha before any dispatch (including the human gate).
@@ -627,6 +799,38 @@ async function handleEgress(
       });
       sendJson(res, 403, { decision: "block", reason: "citation_gate: no registered citation verification for this document" });
       return;
+    }
+
+    // 5c. Authority provenance (anti-hallucination): partition the document's
+    // citations into those that were RETRIEVED (registered via POST
+    // /quality/authority) and those that were NOT. `unbacked` is cited-but-
+    // never-retrieved — a hallucination signal.
+    //
+    // Default behavior is RECORD/FLAG only: we stash unbackedCitations so it is
+    // written onto the egress receipt the dispatch step produces — existing
+    // pass/block behavior is UNCHANGED. When the policy opts in
+    // (requireAuthorityProvenance) AND there is at least one unbacked citation,
+    // we block here with a clear reason.
+    const authority = authorityRegistry.verifyDocument(documentText);
+    if (authority.unbacked.length > 0) {
+      authorityReceiptMeta = {
+        unbackedCitations: authority.unbacked,
+        backedCitationCount: authority.backed.length,
+        documentSha256: docSha,
+      };
+      if (policy.citationGate.requireAuthorityProvenance) {
+        receipts.append({
+          kind: "egress", tool, boundary, decision, outcome: "blocked",
+          payloadSha256, agentId: meta.agentId, issueId: meta.issueId, approvalId: meta.approvalId,
+          meta: { reason: "authority_provenance_unbacked", ...authorityReceiptMeta, claimedConfidentiality },
+        });
+        sendJson(res, 403, {
+          decision: "block",
+          reason: "authority_provenance: document cites authorities that were never retrieved",
+          unbackedCitations: authority.unbacked,
+        });
+        return;
+      }
     }
   }
 
@@ -656,12 +860,16 @@ async function handleEgress(
         performers, receipts, tool, boundary, decision, payloadSha256,
         meta, useLocal: false, egressReq, res, log,
         responseDecisionLabel: "allow",
+        extraReceiptMeta: authorityReceiptMeta,
       });
       return;
     }
 
     // -----------------------------------------------------------------------
     case "anonymize": {
+      // FIX 4 (honesty): dataTerms is NOT yet threaded here (staged — not wired
+      // into the live egress path). The ZDR branches in tier-floor.ts are
+      // unreachable at runtime until dataTerms is added as a parameter.
       const tierResult = evaluateTierFloor({
         confidentiality: meta.confidentiality,
         targetTier: "cloud",
@@ -679,7 +887,11 @@ async function handleEgress(
           agentId: meta.agentId,
           issueId: meta.issueId,
           approvalId: meta.approvalId,
-          meta: { reason: tierResult.reason, claimedConfidentiality },
+          meta: {
+            reason: tierResult.reason,
+            claimedConfidentiality,
+            ...(tierResult.dataTermsTier !== undefined ? { dataTermsTier: tierResult.dataTermsTier } : {}),
+          },
         });
         sendJson(res, 403, { decision: "block", reason: tierResult.reason });
         return;
@@ -689,8 +901,10 @@ async function handleEgress(
         // Route local (useLocal:true) with UNMASKED payload
         await performAndReceipt({
           performers, receipts, tool, boundary, decision, payloadSha256,
-          meta, useLocal: tierResult.useLocal, egressReq, res, log,
+          meta, useLocal: tierResult.useLocal, dataTermsTier: tierResult.dataTermsTier,
+          egressReq, res, log,
           responseDecisionLabel: "allow",
+          extraReceiptMeta: authorityReceiptMeta,
         });
         return;
       }
@@ -744,6 +958,7 @@ async function handleEgress(
         meta, useLocal: false, egressReq: maskedReq, res, log,
         deanonymizeMap: anonResult.map,
         responseDecisionLabel: "anonymize",
+        extraReceiptMeta: authorityReceiptMeta,
       });
       return;
     }
@@ -801,7 +1016,7 @@ async function handleEgress(
             agentId: meta.agentId,
             issueId: meta.issueId,
             approvalId: gateResult.approvalId,
-            meta: { claimedConfidentiality },
+            meta: { claimedConfidentiality, ...authorityReceiptMeta },
           });
           sendJson(res, 202, {
             status: "pending_approval",
@@ -817,6 +1032,7 @@ async function handleEgress(
             meta, approvalId: gateResult.approvalId, useLocal: false,
             egressReq, res, log,
             responseDecisionLabel: "human",
+            extraReceiptMeta: authorityReceiptMeta,
           });
           return;
         }

@@ -7,6 +7,122 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.27.0] — 2026-06-26 — Data layer, sign-off bundle, data-terms tier-floor
+
+Derived from a LegalTechTalk market analysis (legal AI sorting into data /
+guardrails / firm layers). Three independently-shippable builds, each spec'd
+under `docs/builds/`.
+
+### Added
+
+- **Authority provenance — real anti-hallucination guardrail**
+  (`gate-proxy/src/quality/authority-registry.ts`, `POST /quality/authority`,
+  `mcp-servers/legal-data/` reporter). Turns the legal-data adapter's
+  previously-inert provenance `sha256` into a closed trust loop. On a successful
+  retrieval that yields a citation, the legal-data adapter **registers the
+  authority with the gate** via a best-effort `ProvenanceReporter`
+  (`createGateProvenanceReporter`, `GATE_PROXY_URL`): `POST /quality/authority {
+  citation, sha256, source, sourceUrl?, retrievedAt? }` → the gate's new
+  `AuthorityRegistry` appends a hash-chained `quality` receipt
+  (tool=`authority_provenance`) and indexes the **normalized** citation
+  (shared `comparableCitation` from `citations.ts`, so registration and outbound
+  extraction align). The citation gate then runs
+  `AuthorityRegistry.verifyDocument(...)` on a court-filing / third-party egress
+  and **flags any cited authority that was never retrieved** — the hallucination
+  signal — recording `unbackedCitations` on the egress receipt. **Default is
+  flag/record, not block** (existing pass/block behavior unchanged); blocking is
+  policy-opt-in via the new `citationGate.requireAuthorityProvenance` knob in
+  `gate-policy.yaml`. The Matter Trust Report (`GET /receipts/bundle`) gains an
+  **Authority Provenance** section listing retrieved-authority registrations and
+  any unbacked citations (hashes + public citation identifiers only, never
+  payloads). Reporting is **best-effort by contract**: a missing
+  `GATE_PROXY_URL`, gate downtime, or network error is swallowed — retrieval
+  never depends on the gate. Build context: `docs/builds/courtlistener-legal-data-mcp.md`.
+- **Headless token-REST upstream for legal-data — research CourtListener
+  end-to-end with no OAuth** (`mcp-servers/legal-data/src/upstream.ts`
+  `createCourtListenerRestUpstream`, `src/server.ts`, `src/rest-upstream.test.ts`).
+  The legal-data adapter's **default** upstream is now plain HTTPS GETs against
+  **CourtListener REST v4** (`https://www.courtlistener.com/api/rest/v4/`) — no
+  OAuth, no browser redirect, no account required, so a filed matter can research
+  CourtListener headless. In REST mode the server EXPOSES a **fixed 4-tool set**
+  with proper MCP inputSchemas: `search_opinions({query, court?, filed_after?,
+  filed_before?})` → `GET /search/?type=o`, `get_opinion({id})` →
+  `GET /opinions/<id>/`, `get_citation({cite})` →
+  `GET /search/?q="<cite>"&type=o`, `get_docket({id})` → `GET /dockets/<id>/`.
+  `COURTLISTENER_API_KEY` is **optional** — sent as `Authorization: Token <key>`
+  when set, **omitted entirely** when unset (anonymous works at low volume). Each
+  invocation still runs `proxyToolCall` (sanitize → forward → wrap) with the gate
+  provenance reporter wired, so `confidential`/`privileged` matters get client
+  identifiers stripped from the query before egress and retrieved authorities are
+  registered with the gate. Non-2xx (401/403/429/5xx) or network error **throws**
+  → structured `unavailable` (never a fabricated opinion). `fetchFn` is injected
+  so the suite stubs it (zero network); test count 18 → **26**. The original
+  **OAuth-MCP upstream** (`createCourtListenerUpstream`,
+  `https://mcp.courtlistener.com`) remains available, opt-in behind
+  `POSSIBLAW_CL_UPSTREAM=mcp`. The `connector-courtlistener` skill is rewritten
+  **MCP-first** (the agent calls the 4 tools by name; raw curl is demoted to a
+  labeled fallback) and the `legal-data` registry entry's auth is now
+  `token-env:COURTLISTENER_API_KEY` (optional). Build context:
+  `docs/builds/courtlistener-legal-data-mcp.md`.
+- **MCP-server registry + renderer** (`companies/legal-operations/mcp-servers.yaml`,
+  `bin/_possiblaw_mcp.py`, launcher wiring): declare MCP servers **once** and have
+  the launcher render them into whichever model-runtime CLI config the active
+  variant's adapter uses — `opencode.json` (`mcp` block), `~/.codex/config.toml`
+  (`[mcp_servers.*]` TOML), `.mcp.json` (`mcpServers`), or
+  `~/.gemini/settings.json` (`mcpServers`). The renderer is stdlib-only (mirrors
+  `bin/_possiblaw_variants.py`, ships `--self-test`). `auth` supports `none`,
+  `token-env:<VAR>` (env passthrough by **name** only, never the secret), and
+  `oauth` (http-only, interactive first run). Registration is dry-run-aware,
+  confirm-gated when interactive, on by default and skippable with `--skip-mcp`;
+  a missing registry/helper degrades to a warn, never an error. Seeded with
+  `legal-data` (stdio, `tsx mcp-servers/legal-data/src/server.ts`, `auth: none`)
+  and `courtlistener-official` (http, `mcp.courtlistener.com`, `auth: oauth`).
+  `grantTo` is **advisory** — CLI MCP configs are global per runtime, not
+  per-subagent, so the launcher renders the union. Build spec:
+  `docs/builds/mcp-registry.md`.
+- **CourtListener legal-data MCP adapter** (`mcp-servers/legal-data/`): the
+  first slice of the data layer. A thin trust-adapter/proxy in front of
+  CourtListener's **official** hosted MCP (`mcp.courtlistener.com`, OAuth) — we
+  consume the data layer rather than reinvent it. For each tool call the adapter
+  (1) sanitizes confidential/privileged query args, (2) forwards to the official
+  MCP, (3) wraps the result in a provenance envelope (`source`, `source_url`,
+  `retrieved_at`, `court`, `decided_date`, `citation`, `sha256`). The `sha256`
+  reuses gate-proxy's `documentSha256`, so data-provenance-in matches the
+  citation gate's output-provenance-out. Schema-agnostic about upstream result
+  shapes (provenance fields extracted best-effort, never fabricated); upstream
+  failures become a structured `unavailable`. The pure adapter core is fully
+  tested with a stubbed upstream (14/14 green, zero network/OAuth); the live
+  OAuth wiring (`upstream.ts`, `server.ts`) is intentionally thin and confirmed
+  against upstream tool schemas via `tools/list` at runtime. (Pivoted from an
+  earlier REST-v4 re-implementation once CourtListener's official MCP was found.)
+- **Regulator sign-off bundle** (`gate-proxy/src/quality/signoff.ts` +
+  `GET /receipts/bundle?issueId=…[&format=md]`): projects the hash-chained
+  receipts for one matter into a Matter Trust Report (JSON or Markdown) —
+  ordered gate decisions, anonymization events, citation verifications,
+  tier-floor/data-terms decisions, and an operator attestation block. Payload
+  hashes only, never plaintext; fail-closed on a corrupt chain
+  (`503 receipts_corrupt`).
+- **Data-terms tier-floor** (`gate-proxy/src/gates/tier-floor.ts` +
+  per-variant `dataTerms` in `variants.yaml`): the gate now classifies each
+  cloud lane by its contracted data terms (ZDR / no-train / no-human-review /
+  tenant-isolated) and hard-blocks any training or consumer endpoint for matter
+  data. Encodes `docs/privilege-and-confidentiality.md` (tiered, not binary).
+  Backward compatible when `dataTerms` is absent.
+- **`docs/privilege-and-confidentiality.md`**: authoritative posture doc —
+  cloud egress does not per se waive privilege; confidentiality vs. privilege;
+  ZDR is load-bearing; honest do/don't marketing language. Cited by the README
+  and the tier-floor logic.
+
+### Changed
+
+- **README**: leads with the atomic-units-of-work thesis (more control, better
+  work via the smallest reviewable units); adds market-layer positioning; adds
+  an honest confidentiality/privilege section ("reasonable steps," never
+  "privilege-safe"); marks the sign-off bundle and legal-data MCP as shipped in
+  the enforced/routed/advisory table and architecture diagram.
+
+---
+
 ## [0.26.0] — 2026-06-25 — Citation gate: agent-facing contract (Phase 2 completion)
 
 The Phase 2 citation gate has been enforced in the proxy since 0.22.0, but the
@@ -69,6 +185,8 @@ agent-facing half so the gate is usable end to end.
   the `--business` env-patch block). Both scribes now `cd
   "$POSSIBLAW_REPO_ROOT/learning-loop" && node --import tsx src/cli.ts …` —
   the same cwd-resolving pattern the launcher's morning digest already used.
+
+---
 
 ## [0.25.0] — 2026-06-23 — Skill-improvement loop (Tier-2 learn-from-edits)
 

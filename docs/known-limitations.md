@@ -141,6 +141,52 @@ Westlaw, midpage, iManage (upload), and NetDocuments (upload) are flagged
 `UNCONFIRMED` and need operator verification against current vendor docs
 before live use.
 
+## Legal-data MCP / research-query privacy
+
+### Research queries egress directly to CourtListener — not through the gate proxy
+
+The `legal-data` MCP server issues research queries (all four tools: `search_opinions`,
+`get_opinion`, `get_citation`, `get_docket`) as direct HTTPS requests from the server
+process to `https://www.courtlistener.com/api/rest/v4/`. They do **not** route through
+the gate proxy. This means:
+
+- No gate receipt is written for research egress.
+- No human-approval gate applies to what leaves the boundary in a query.
+- The gate's tier-floor and per-connector policy controls do not fire on the research path.
+
+This is a deliberate v1 architectural choice (read-only research traffic is treated
+differently from write egress), documented here as a residual risk for operators handling
+sensitive matters.
+
+**Workaround:** Use neutral query terms — describe the legal issue, not the client,
+matter caption, or strategy. The sanitizer (see below) is a safety net, not a substitute
+for query hygiene.
+
+### Privacy tier is process-global, read once at startup
+
+`POSSIBLAW_MATTER_PRIVACY_TIER` is read from the environment at process start and
+applies uniformly to every query handled by that running server. A single `legal-data`
+process cannot vary the tier across different matters. If a firm needs different tiers
+for different matters simultaneously, run separate server processes with distinct env
+configurations.
+
+### Sanitization is best-effort regex redaction, not a guarantee
+
+For `confidential` and `privileged` tiers the server runs `sanitizeArgs`, which strips
+legal-entity names, emails, SSNs, EINs, and phone numbers from the query before egress.
+This is structurally incomplete:
+
+- Informal matter nicknames, judge names, or non-standard entity forms are not caught.
+- Redaction quality depends on the regex patterns matching the identifier's format.
+- The sanitizer is a safety net; neutral query term discipline remains required.
+
+### Fail-closed default (as of this fix)
+
+When `POSSIBLAW_MATTER_PRIVACY_TIER` is unset or set to an unrecognized value, the
+server now defaults to `confidential` (sanitizer active). Pass-through behavior requires
+an **explicit** `POSSIBLAW_MATTER_PRIVACY_TIER=standard`. This reverses the prior
+behavior where an unset env silently applied full pass-through.
+
 ## Gate proxy
 
 ### local_trusted accepts unauthenticated local board calls

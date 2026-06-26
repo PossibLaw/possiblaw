@@ -263,7 +263,10 @@ describe("shipped gate-policy.yaml", () => {
     const expected: Policy = {
       version: 1,
       boundaries: { ...DEFAULT_POLICY.boundaries },
-      citationGate: { boundaries: [...DEFAULT_POLICY.citationGate.boundaries] },
+      citationGate: {
+        boundaries: [...DEFAULT_POLICY.citationGate.boundaries],
+        requireAuthorityProvenance: DEFAULT_POLICY.citationGate.requireAuthorityProvenance,
+      },
     };
     assert.deepEqual(policy, expected);
   });

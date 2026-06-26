@@ -11,6 +11,20 @@
 
 Agents do the legal and business work autonomously. The product is the path that work travels: egress writes cross hard-gated trust boundaries, every gate decision lands in a tamper-evident receipt chain, and humans decide at the boundaries that matter — not on every step. PossibLaw ships this as a *layer* on the paperclip control plane (wired as a pinned git submodule, never modified), not a fork.
 
+## The thesis: atomic units of work
+
+A chat window that drafts a whole contract in one shot gives you one big, opaque output to trust or distrust. PossibLaw is built the other way: **work is decomposed into the smallest reviewable units — one agent, one skill, one gate decision, one receipt — because small units are where control and quality come from.**
+
+- **More control.** You approve at the boundary that matters (a court filing, a signature, a payment), not on every keystroke and not on one monolithic "submit." Each atomic action is independently classified, gated, and logged — so you can allow the routine and stop the consequential.
+- **Better work.** A focused agent doing one bounded task (NDA redline, citation check, diligence summary) is easier to make correct, easier to eval, and easier to swap than a generalist doing everything. The 177 agents / 172 skills are atomic on purpose: composable parts, each with its own evals, each replaceable without touching the rest.
+- **Provenance per unit.** Because the unit is small, its provenance is legible: this output, citing these authorities, approved by this human, recorded in this receipt. That is exactly the slice a regulator or insurer asks to see.
+
+The catalog is the supporting cast. The atomic pipeline — decompose, gate, receipt — is the product.
+
+## Where this sits in the market
+
+Legal AI is sorting into a data layer (law as an API/MCP with provenance), a guardrails layer (the sign-off, audit trail, and hallucination control a regulator needs once AI did the work), and a firm layer (lawyers running an AI backend). **PossibLaw is the open-source guardrails + firm layer** — the audit trail, human gates, anonymization, and receipts wrapped around an atomic agent catalog — and the first slice of the **data layer** is now shipped: a trust-adapter that fronts CourtListener's official MCP (`mcp.courtlistener.com`) and **registers every retrieved authority with the gate**, so the gate can flag any authority an agent cites in an outbound filing that was never retrieved — an anti-hallucination check, not just a metadata wrapper ([`mcp-servers/legal-data/`](mcp-servers/legal-data/)). The guardrails layer is productized end-to-end — every gate decision is hash-chained and exportable as a regulator-readable [Matter Trust Report](#whats-enforced-vs-routed-vs-advisory). It competes on being *legible and open* where the rest of the market is opaque and closed. Build specs: [`docs/builds/`](docs/builds/).
+
 ## The trust pipeline
 
 What a firm actually gets:
@@ -25,9 +39,19 @@ What a firm actually gets:
 | Surface | Status today | Mechanism |
 |---|---|---|
 | Egress writes (email, upload, signature, payment, court filing, external delete) | **Enforced — structural** | Gate Proxy holds the only egress credentials; the launcher scrubs them from the server/agent env; per-boundary policy + hash-chained receipts on every path |
-| Privacy tier — confidential/privileged payloads sent through the gate | **Enforced at the gate** | Deterministic masker over caller-supplied matter entities + pattern classes, recall measured in the test suite (100% on its labeled fixture; gated at ≥95% with zero entity leaks; fail-closed to block when it cannot vouch, e.g. no entity list) — or routed to a local model when one is configured |
+| Privacy tier — confidential/privileged payloads sent through the gate | **Enforced at the gate** | Deterministic masker over caller-supplied matter entities + pattern classes, recall measured in the test suite (100% on its labeled fixture; gated at ≥95% with zero entity leaks; fail-closed to block when it cannot vouch, e.g. no entity list) — or routed to a local model when one is configured. The tier-floor classifies each cloud lane by its contracted data terms (ZDR / no-train / no-human-review / tenant-isolated) and **hard-blocks any training or consumer endpoint** for matter data — the one configuration the case law condemns ([docs/privilege-and-confidentiality.md](docs/privilege-and-confidentiality.md)) |
 | Privacy tier — agents' own primary-lane model calls | **Routed, not proxied** | A routing choice: local-model variants per lane (`ollama`, `llamacpp` in `variants.yaml`) plus the advisory `privacy-encoder` skill. Primary-lane calls do not pass the proxy. |
 | Citation verification | **Enforced at the gate (Phase 2)** | Court/third-party egress **carrying legal citations** is **blocked** until a registered, payload-bound, deterministically re-checked citation verification exists for the document being filed or sent. The `legal-citation-checker` agent executes `citation-verification-checklist` (character-by-character quote-fidelity, side-by-side discrepancy tables), then POSTs the result to `POST /quality/citation`; the gate detects citations in the outbound document and calls `CitationRegistry.has(docSha256)` before any dispatch — including the human gate. A document with no detectable citations has nothing to re-check and passes. Fail-closed: a gated payload with no reviewable document text at all is blocked. Caveat: citation verification itself is an agent step — the gate enforces that it was performed and passed, not that the cited authority is authoritative. |
+| Regulator sign-off bundle | **Exported on demand** | `GET /receipts/bundle?issueId=…[&format=md]` projects the hash-chained receipts for one matter into a **Matter Trust Report** (JSON or Markdown): ordered gate decisions, anonymization events, citation verifications, tier-floor/data-terms decisions, and an operator attestation block — payload **hashes only, never plaintext**. Fail-closed: a corrupt receipt chain refuses to emit a clean report (`503 receipts_corrupt`). This is the artifact an insurer / SRA / GC asks to see. |
+| Legal data with provenance | **Proxied via MCP; provenance flagged at the gate (block is opt-in)** | [`mcp-servers/legal-data/`](mcp-servers/legal-data/) is a thin trust-adapter in front of CourtListener's **official** MCP (`mcp.courtlistener.com`, OAuth): it forwards each tool call and wraps the result in a provenance envelope (`source`, `source_url`, `decided_date`, `citation`, `sha256`). The `sha256` is the **same fingerprint the citation gate checks**. On a successful retrieval the adapter **registers the authority with the gate** (`POST /quality/authority`, best-effort); the gate then **flags any authority cited in an outbound filing that was never retrieved** (anti-hallucination), recording `unbackedCitations` on the egress receipt. Default is **flag/record, not block** — blocking is policy-opt-in via `citationGate.requireAuthorityProvenance`. Confidential-matter queries are sanitized before egress. We consume the data layer rather than reinvent it. |
+
+## Confidentiality, privilege, and cloud models
+
+PossibLaw helps a firm take the **reasonable steps** that Rule 1.6 and ABA Formal Opinion 512 (2024) require when AI touches client matter content:
+
+- **Reversible local masking (`privacy-encoder` skill).** Confidential/PII values are substituted with stable opaque placeholders *before* any cloud-capable model call, the substitution key stays on the operator's local disk, and the output is decoded back to plaintext after the call — so confidential matter text need never reach a cloud model in cleartext.
+- **Local-model tier-floor.** Matters tagged `metadata.possiblaw.privacyTier: confidential|privileged` route the sensitive step through a local model lane (`ollama` / `llamacpp`); the launcher warns at startup if no local lane is reachable.
+- **Documented data terms, not marketing claims.** We frame this honestly. Sending matter data to a cloud model under genuine enterprise zero-retention / no-train terms **does not, by itself, waive attorney-client privilege** — and conversely, local-only is a confidentiality and risk-reduction choice, *not* a privilege guarantee. PossibLaw is engineered for "reasonable steps to protect confidentiality and privilege," never "privilege-safe." The full legal posture, the confidentiality-vs-privilege distinction, the 2026 case law, and the do/don't marketing language live in [docs/privilege-and-confidentiality.md](docs/privilege-and-confidentiality.md).
 
 Sharp edges are documented, not hidden — see [docs/known-limitations.md](docs/known-limitations.md): `local_trusted` dev instances accept unauthenticated local board calls (the human gate binds agents via credential isolation; production deployments with auth enabled get the structural gate too); the receipt chain assumes a single writer, and same-user tampering is caught only against an externally anchored head; `share_external` writes (HubSpot, Linear, Clio, iManage, NetDocuments) are visibly refused in v1 rather than silently credentialed; Slack/Teams notification webhooks (operator-configured, no matter content) remain direct in v1. Which connector takes which path: [docs/connectors-inventory.md](docs/connectors-inventory.md).
 
@@ -98,6 +122,21 @@ check OpenRouter pins against its public catalog), so "you don't have access
 to this model" surfaces before import, not mid-matter (`--skip-model-probe`
 to bypass).
 
+### MCP registry — declare MCP servers once
+
+Paperclip doesn't manage MCP; each variant's adapter wraps a CLI that reads MCP
+from its own config file in its own schema. PossibLaw makes MCP an atomic,
+declare-once unit: list each server once in
+[`companies/legal-operations/mcp-servers.yaml`](companies/legal-operations/mcp-servers.yaml)
+(`name`, `transport`, `command`/`url`, `auth`, `grantTo`, `privacy`), and the
+launcher renders it into whichever runtime CLI config the chosen variant uses —
+`opencode.json`, `~/.codex/config.toml`, `.mcp.json`, or `~/.gemini/settings.json`
+— via the stdlib-only `bin/_possiblaw_mcp.py`. Only env var **names** pass
+through, never secrets; `oauth` servers stay interactive on first run. Seeded
+with the `legal-data` adapter and the official CourtListener MCP. `grantTo` is
+advisory (CLI MCP configs are global per runtime, not per-subagent); `--skip-mcp`
+bypasses. Build spec: [`docs/builds/mcp-registry.md`](docs/builds/mcp-registry.md).
+
 ---
 
 ## Architecture in 90 seconds
@@ -110,8 +149,14 @@ to bypass).
 ├─────────────────────────────────────────────────────────┤
 │  gate-proxy/    (loopback egress gate: per-boundary      │
 │                  policy, human approvals, anonymizer,    │
-│                  hash-chained receipts — holds the ONLY  │
-│                  egress credentials)                     │
+│                  data-terms tier-floor, hash-chained     │
+│                  receipts + sign-off bundle export —     │
+│                  holds the ONLY egress credentials)      │
+├─────────────────────────────────────────────────────────┤
+│  mcp-servers/legal-data/  (data layer: trust-adapter in  │
+│                  front of CourtListener's official MCP;  │
+│                  registers retrieved authorities with    │
+│                  the gate → flags unbacked citations)    │
 ├─────────────────────────────────────────────────────────┤
 │  companies/legal-operations/   (the PossibLaw package)   │
 │  ├── COMPANY.md + .paperclip.yaml + variants.yaml        │

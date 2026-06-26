@@ -1,0 +1,61 @@
+# PossibLaw MCP-server registry
+# =============================================================================
+# Declare MCP servers ONCE here; the launcher (`bin/possiblaw`) renders each
+# entry into whichever model-runtime CLI config the chosen variant's adapter
+# uses. See docs/builds/mcp-registry.md for the full build spec.
+#
+# Render targets (one per paperclip adapter type):
+#   opencode_local (opencode/ollama/llamacpp/openrouter) -> ~/.config/opencode/opencode.json  ("mcp" block)
+#   codex_local    (codex/codex-api)                     -> ~/.codex/config.toml              ([mcp_servers.<name>])
+#   claude_local   (claude/claude-api)                   -> .mcp.json                         ({"mcpServers": {...}})
+#   gemini_local   (gemini/gemini-api)                   -> ~/.gemini/settings.json           ({"mcpServers": {...}})
+#
+# Schema (each entry under `mcpServers:`):
+#   name        string, unique          Server id used as the config key.
+#   transport   stdio | http            stdio launches a local command; http is a remote URL.
+#   command     string (stdio only)     Launch command, e.g. "tsx mcp-servers/legal-data/src/server.ts".
+#   url         string (http only)      Remote endpoint, e.g. "https://mcp.courtlistener.com".
+#   auth        none | token-env:<VAR> | oauth
+#                                       none          -> no credential rendered.
+#                                       token-env:VAR -> the runtime gets an env passthrough by NAME only
+#                                                        (never the secret value).
+#                                       oauth         -> http only; first run is interactive in the CLI.
+#   grantTo     list of agent slugs     ADVISORY scoping only. CLI MCP configs are GLOBAL per runtime,
+#                                       not per-subagent, so grantTo CANNOT be enforced at the CLI layer
+#                                       today. The launcher renders the UNION of granted servers; grantTo
+#                                       documents intent and is a forward hook. (See docs/builds/mcp-registry.md.)
+#   privacy     short string tag        Documentation / forward-hook posture tag (e.g. sanitize-queries,
+#                                       gate-routed, standard). No enforcement today.
+#   description one line                Human summary.
+#
+# To add the Nth MCP: append a new `- name: ...` block. No code changes needed.
+# =============================================================================
+
+mcpServers:
+  - name: legal-data
+    transport: stdio
+    # Real start command from mcp-servers/legal-data/package.json ("start": "tsx src/server.ts").
+    command: tsx mcp-servers/legal-data/src/server.ts
+    # The legal-data adapter's DEFAULT upstream is now headless token-REST against
+    # CourtListener REST v4 (no OAuth, no account required). COURTLISTENER_API_KEY
+    # is OPTIONAL — it raises rate limits; anonymous access works at low volume, so
+    # the env passthrough is by NAME only and never required. (The optional OAuth-MCP
+    # upstream is available behind POSSIBLAW_CL_UPSTREAM=mcp; see courtlistener-official.)
+    auth: token-env:COURTLISTENER_API_KEY
+    grantTo:
+      - legal-research-analyst
+      - case-law-summarizer
+      - legal-citation-checker
+      - litigation-docket-monitor
+      - ip-infringement-analyst
+    privacy: sanitize-queries
+    description: Thin trust-adapter MCP over CourtListener (provenance envelope + query sanitization).
+
+  - name: courtlistener-official
+    transport: http
+    url: https://mcp.courtlistener.com
+    auth: oauth
+    grantTo:
+      - legal-research-analyst
+    privacy: standard
+    description: Official hosted CourtListener MCP (case law, PACER, citation network, semantic search).
