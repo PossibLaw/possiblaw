@@ -14,9 +14,51 @@
 
 schema: possiblaw/variants/v1
 
+# ---------------------------------------------------------------------------
+# dataTerms — privacy posture of each variant's egress lane.
+# ---------------------------------------------------------------------------
+# Consumed by the gate-proxy tier-floor (gate-proxy/src/gates/tier-floor.ts).
+# Legal basis: docs/privilege-and-confidentiality.md. The gate reasons about a
+# cloud lane's CONTRACTED DATA TERMS, not just binary cloud-vs-local:
+#
+#   dataTerms:
+#     tier: cloud            # cloud | local
+#     zdr: true              # zero data retention contracted (the load-bearing term)
+#     trains: false          # provider trains on inputs/outputs → HARD BLOCK if true
+#     humanReview: false     # provider human-review of content
+#     tenantIsolated: true   # tenant-isolated deployment
+#     consumerEndpoint: false# consumer-subscription endpoint → HARD BLOCK if true
+#
+# Policy (tier-floor.ts):
+#   - standard     → cloud OK under enterprise terms.
+#   - confidential → cloud OK ONLY if zdr && !trains && !humanReview &&
+#                    tenantIsolated; else prefer local / anonymize.
+#   - privileged   → local, OR strict-ZDR cloud under explicit counsel direction.
+#   - ANY tier on trains:true OR consumerEndpoint:true → HARD BLOCK (cannot be
+#     overridden by tier or counsel direction). This is the only configuration
+#     the case law condemns (U.S. v. Heppner).
+#
+# The operator ASSERTS these terms (we trust + record, we do not verify the
+# underlying contract). Defaults below are deliberately CONSERVATIVE: an unknown
+# or under-asserted cloud lane must NOT silently qualify as confidential-capable.
+# zdr is only set true where the provider's enterprise/API contract documents
+# zero data retention by default; set it false (or leave it) for any lane whose
+# ZDR terms the operator has not confirmed.
+
 variants:
   codex:
     label: "Codex CLI (subscription)"
+    # ChatGPT-subscription lane: enterprise ZDR terms are NOT asserted for the
+    # subscription account, so it does not qualify as confidential-capable. Not a
+    # consumer training endpoint (Codex CLI rides API-style no-train), so it is
+    # not hard-blocked — but confidential/privileged matters route local/anonymize.
+    dataTerms:
+      tier: cloud
+      zdr: false
+      trains: false
+      humanReview: false
+      tenantIsolated: true
+      consumerEndpoint: false
     requires_cli: codex
     notes: >
       ChatGPT-subscription accounts only get the default model lineup — probed
@@ -48,6 +90,16 @@ variants:
 
   codex-api:
     label: "Codex CLI (API key)"
+    # OpenAI API key lane: no-train by default since Mar 2023; ZDR available to
+    # API/Enterprise customers (docs/privilege-and-confidentiality.md). Operator
+    # asserts the ZDR contract is in place → confidential-capable.
+    dataTerms:
+      tier: cloud
+      zdr: true
+      trains: false
+      humanReview: false
+      tenantIsolated: true
+      consumerEndpoint: false
     requires_cli: codex
     secret_env:
       OPENAI_API_KEY: "OpenAI API Key"
@@ -84,6 +136,16 @@ variants:
 
   claude:
     label: "Claude CLI (subscription)"
+    # Claude subscription lane: ZDR terms not asserted for the subscription
+    # account → not confidential-capable. No-train default holds, so it is not a
+    # hard-blocked consumer training endpoint.
+    dataTerms:
+      tier: cloud
+      zdr: false
+      trains: false
+      humanReview: false
+      tenantIsolated: true
+      consumerEndpoint: false
     requires_cli: claude
     default:
       adapterType: claude_local
@@ -107,6 +169,17 @@ variants:
 
   claude-api:
     label: "Claude CLI (API key)"
+    # Anthropic API key lane: API traffic is not used for model training by
+    # default and ZDR is contractable for enterprise/API customers
+    # (docs/privilege-and-confidentiality.md). Operator asserts ZDR is in place →
+    # confidential-capable.
+    dataTerms:
+      tier: cloud
+      zdr: true
+      trains: false
+      humanReview: false
+      tenantIsolated: true
+      consumerEndpoint: false
     requires_cli: claude
     secret_env:
       ANTHROPIC_API_KEY: "Anthropic API Key"
@@ -140,6 +213,14 @@ variants:
 
   ollama:
     label: "Ollama (fully local — via OpenCode)"
+    # Fully local: nothing leaves the machine → trivially compliant.
+    dataTerms:
+      tier: local
+      zdr: true
+      trains: false
+      humanReview: false
+      tenantIsolated: true
+      consumerEndpoint: false
     requires_cli: opencode
     requires_ollama: true
     requires_opencode_provider: ollama
@@ -172,6 +253,14 @@ variants:
 
   llamacpp:
     label: "llama.cpp (fully local — HF GGUF via OpenCode)"
+    # Fully local: nothing leaves the machine → trivially compliant.
+    dataTerms:
+      tier: local
+      zdr: true
+      trains: false
+      humanReview: false
+      tenantIsolated: true
+      consumerEndpoint: false
     requires_cli: opencode
     requires_endpoint: "http://127.0.0.1:8080/v1/models"
     endpoint_hint: "start llama-server first, e.g.: llama-server -hf <org>/<model>-GGUF --port 8080"
@@ -204,6 +293,18 @@ variants:
 
   opencode:
     label: "OpenCode Zen (OpenCode's model gateway, API key)"
+    # Third-party gateway (OpenCode Zen) in front of upstream model providers.
+    # ZDR across the gateway + upstream chain is NOT operator-confirmed →
+    # conservative zdr:false (not confidential-capable). Not a consumer training
+    # endpoint by default, so not hard-blocked. Operator may set zdr:true only
+    # after confirming Zen's contracted retention terms end-to-end.
+    dataTerms:
+      tier: cloud
+      zdr: false
+      trains: false
+      humanReview: false
+      tenantIsolated: true
+      consumerEndpoint: false
     requires_cli: opencode
     secret_env:
       OPENCODE_API_KEY: "OpenCode Zen API Key"
@@ -238,6 +339,18 @@ variants:
 
   openrouter:
     label: "OpenRouter (multi-vendor cloud catalog, API key)"
+    # Multi-vendor catalog: traffic may route across many upstream providers
+    # whose retention/training terms vary per model. ZDR cannot be asserted
+    # uniformly → conservative zdr:false (not confidential-capable). Default
+    # OpenRouter does not train, so trains:false / not hard-blocked; but operators
+    # routing confidential matters should prefer a single-provider ZDR lane.
+    dataTerms:
+      tier: cloud
+      zdr: false
+      trains: false
+      humanReview: false
+      tenantIsolated: false
+      consumerEndpoint: false
     requires_cli: opencode
     secret_env:
       OPENROUTER_API_KEY: "OpenRouter API Key"
@@ -273,6 +386,19 @@ variants:
 
   gemini:
     label: "Gemini CLI (subscription)"
+    # Gemini subscription lane (OAuth login): consumer/subscription Gemini terms
+    # historically reserve content for product improvement / human review unless
+    # the operator is on a no-train enterprise tier. Conservative zdr:false and
+    # humanReview:true → not confidential-capable. NOT flagged consumerEndpoint
+    # here (would hard-block standard work too); operators with confidential
+    # matters must use gemini-api under enterprise ZDR terms.
+    dataTerms:
+      tier: cloud
+      zdr: false
+      trains: false
+      humanReview: true
+      tenantIsolated: true
+      consumerEndpoint: false
     requires_cli: gemini
     notes: >
       Rides paperclip's gemini_local adapter. Auth via the gemini CLI's stored
@@ -303,6 +429,16 @@ variants:
 
   gemini-api:
     label: "Gemini CLI (API key)"
+    # Gemini API / Vertex enterprise lane: paid API traffic is not used for
+    # training and ZDR / no-human-review is contractable for enterprise customers.
+    # Operator asserts the enterprise ZDR contract → confidential-capable.
+    dataTerms:
+      tier: cloud
+      zdr: true
+      trains: false
+      humanReview: false
+      tenantIsolated: true
+      consumerEndpoint: false
     requires_cli: gemini
     secret_env:
       GEMINI_API_KEY: "Gemini API Key"

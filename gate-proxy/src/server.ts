@@ -130,6 +130,8 @@ interface PerformAndReceiptInput {
   meta: EgressMeta;
   approvalId?: string; // may differ from meta.approvalId (e.g. gate result)
   useLocal: boolean;
+  /** Which data-terms posture the tier-floor relied on; recorded into receipt meta. */
+  dataTermsTier?: string;
   egressReq: EgressRequest;
   /** For the anonymize path: de-token the model response string before sending. */
   deanonymizeMap?: Record<string, string>;
@@ -142,7 +144,7 @@ interface PerformAndReceiptInput {
 async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
   const {
     performers, receipts, tool, boundary, decision, payloadSha256,
-    meta, approvalId, useLocal, egressReq, deanonymizeMap, res,
+    meta, approvalId, useLocal, dataTermsTier, egressReq, deanonymizeMap, res,
     log: _log, responseDecisionLabel,
   } = opts;
 
@@ -156,6 +158,10 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
     // Build extra receipt meta
     const receiptMeta: Record<string, unknown> = { claimedConfidentiality };
     if (useLocal) receiptMeta["routedLocal"] = true;
+    // Record which data-terms posture the tier-floor relied on (the field the
+    // sign-off bundle reads) so a regulator can see *why* a cloud lane was
+    // acceptable for a sensitive matter. See docs/privilege-and-confidentiality.md.
+    if (dataTermsTier !== undefined) receiptMeta["dataTermsTier"] = dataTermsTier;
     if (deanonymizeMap) receiptMeta["maskedTokenCount"] = Object.keys(deanonymizeMap).length;
 
     receipts.append({
@@ -725,7 +731,11 @@ async function handleEgress(
           agentId: meta.agentId,
           issueId: meta.issueId,
           approvalId: meta.approvalId,
-          meta: { reason: tierResult.reason, claimedConfidentiality },
+          meta: {
+            reason: tierResult.reason,
+            claimedConfidentiality,
+            ...(tierResult.dataTermsTier !== undefined ? { dataTermsTier: tierResult.dataTermsTier } : {}),
+          },
         });
         sendJson(res, 403, { decision: "block", reason: tierResult.reason });
         return;
@@ -735,7 +745,8 @@ async function handleEgress(
         // Route local (useLocal:true) with UNMASKED payload
         await performAndReceipt({
           performers, receipts, tool, boundary, decision, payloadSha256,
-          meta, useLocal: tierResult.useLocal, egressReq, res, log,
+          meta, useLocal: tierResult.useLocal, dataTermsTier: tierResult.dataTermsTier,
+          egressReq, res, log,
           responseDecisionLabel: "allow",
         });
         return;
