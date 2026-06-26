@@ -423,16 +423,37 @@ export function renderSignoffMarkdown(bundle: SignoffBundle): string {
   // Tier-floor decisions
   out.push("## Tier-Floor Decisions");
   out.push("");
+  // FIX 4 (honesty): data-terms tiering (dataTermsTier column) is staged — the
+  // live egress path does not thread dataTerms into evaluateTierFloor yet, so
+  // dataTermsTier will always be absent from receipts. The column is only shown
+  // when at least one decision actually carries the field.
+  const hasDataTermsTier = bundle.tierFloorDecisions.some((d) => d.dataTermsTier !== undefined);
   if (bundle.tierFloorDecisions.length === 0) {
     out.push("_None._");
   } else {
-    out.push("| seq | ts | tool | routedLocal | claimedConfidentiality | dataTermsTier | payloadSha256 |");
-    out.push("| --- | --- | --- | --- | --- | --- | --- |");
+    if (!hasDataTermsTier) {
+      out.push("_Note: data-terms tiering is staged and not yet active in the live egress path._");
+      out.push("");
+    }
+    if (hasDataTermsTier) {
+      out.push("| seq | ts | tool | routedLocal | claimedConfidentiality | dataTermsTier | payloadSha256 |");
+      out.push("| --- | --- | --- | --- | --- | --- | --- |");
+    } else {
+      out.push("| seq | ts | tool | routedLocal | claimedConfidentiality | payloadSha256 |");
+      out.push("| --- | --- | --- | --- | --- | --- |");
+    }
     for (const d of bundle.tierFloorDecisions) {
-      out.push(
-        `| ${d.seq} | ${cell(d.ts)} | ${cell(d.tool)} | ${d.routedLocal ? "yes" : "no"} ` +
-          `| ${cell(d.claimedConfidentiality)} | ${cell(d.dataTermsTier)} | \`${cell(d.payloadSha256)}\` |`,
-      );
+      if (hasDataTermsTier) {
+        out.push(
+          `| ${d.seq} | ${cell(d.ts)} | ${cell(d.tool)} | ${d.routedLocal ? "yes" : "no"} ` +
+            `| ${cell(d.claimedConfidentiality)} | ${cell(d.dataTermsTier)} | \`${cell(d.payloadSha256)}\` |`,
+        );
+      } else {
+        out.push(
+          `| ${d.seq} | ${cell(d.ts)} | ${cell(d.tool)} | ${d.routedLocal ? "yes" : "no"} ` +
+            `| ${cell(d.claimedConfidentiality)} | \`${cell(d.payloadSha256)}\` |`,
+        );
+      }
     }
   }
   out.push("");

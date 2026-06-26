@@ -86,10 +86,19 @@ export class CitationRegistry {
       return;
     }
 
-    // Rebuild verified set from the chain: any quality/performed receipt records
-    // a sha that passed all checks in a prior session.
+    // Rebuild verified set from the chain: only citation_verification quality/
+    // performed receipts may populate the verified set. Authority-provenance
+    // receipts are also kind="quality"/outcome="performed" but use a client-
+    // supplied payloadSha256 (only format-validated) — without the tool check
+    // an attacker could pre-register a target filing's sha via POST /quality/
+    // authority and bypass the Phase 2 citation gate. Fail-closed: any receipt
+    // without tool="citation_verification" is ignored here.
     for (const entry of receipts.entries()) {
-      if (entry.body.kind === "quality" && entry.body.outcome === "performed") {
+      if (
+        entry.body.kind === "quality" &&
+        entry.body.tool === "citation_verification" &&
+        entry.body.outcome === "performed"
+      ) {
         this.verified.add(entry.body.payloadSha256);
       }
     }

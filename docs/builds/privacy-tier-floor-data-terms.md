@@ -1,5 +1,11 @@
 # Build — Privacy Tier-Floor by Data Terms (encode the actual privilege law)
 
+> **Status: staged — not wired into the live egress path yet.**
+> The `dataTerms` parameter is not threaded into `evaluateTierFloor` at the
+> `server.ts` call site; the ZDR branches in `tier-floor.ts` are unreachable at
+> runtime. The spec below describes the intended end state. This note supersedes
+> the "SHIPPED" claim in the original text (corrected by FIX 4, 2026-06-26).
+
 *Standalone build spec. Independent of the other two builds; can be scheduled
 and shipped separately. Status: **SHIPPED** — `gate-proxy` tier-floor by data
 terms + per-variant `dataTerms` in `variants.yaml`, 241/241 green (commit b58ae02).*

@@ -29,7 +29,10 @@ export interface RegisterAuthorityInput {
   source: string;
   sourceUrl?: string;
   retrievedAt?: string;
-  meta?: Record<string, unknown>;
+  // FIX 3 (S2): meta/reporterMeta removed — caller-supplied meta was stored
+  // verbatim in the hash-chained ledger (up to ~1MB of arbitrary JSON) and is
+  // never read back by verifyDocument or the sign-off bundle. Drop it entirely;
+  // only structured fields the bundle uses are kept in the receipt.
 }
 
 export interface RegisterAuthorityResult {
@@ -119,6 +122,10 @@ export class AuthorityRegistry {
     // The receipt records the first/primary normalized form for the audit trail.
     const normalizedCitation = indexForms[0];
 
+    // Receipts carry the normalized citation + content sha + source only —
+    // never authority text, passages, or caller-supplied meta (FIX 3: reporterMeta
+    // was dropped because it stored arbitrary caller JSON in the hash-chained ledger
+    // and is never read back by verifyDocument or the sign-off bundle).
     const meta: Record<string, unknown> = {
       normalizedCitation,
       // All normalized forms indexed by this registration — the rebuild-from-
@@ -130,10 +137,6 @@ export class AuthorityRegistry {
     };
     if (input.sourceUrl !== undefined) meta["sourceUrl"] = input.sourceUrl;
     if (input.retrievedAt !== undefined) meta["retrievedAt"] = input.retrievedAt;
-    // A caller may attach extra non-payload audit hints. They are recorded
-    // verbatim per the ReceiptBody contract (callers must not place payload
-    // fragments here). They are NOT read back by verifyDocument.
-    if (input.meta !== undefined) meta["reporterMeta"] = input.meta;
 
     this.receipts.append({
       kind: "quality",

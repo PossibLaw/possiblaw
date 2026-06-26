@@ -434,7 +434,9 @@ export function createGateServer(deps: GateServerDeps): http.Server {
     // authority never registered here is flagged (and, if
     // requireAuthorityProvenance is on, blocked) as a hallucination signal.
     // Receipts carry the normalized citation + content sha + source only —
-    // never authority text.
+    // never authority text, and never caller-supplied meta (reporterMeta was
+    // dropped in FIX 3: it stored arbitrary caller JSON in the hash-chained
+    // ledger and is never read back by verifyDocument or the sign-off bundle).
     // ------------------------------------------------------------------
     if (method === "POST" && url === "/quality/authority") {
       try {
@@ -482,6 +484,21 @@ export function createGateServer(deps: GateServerDeps): http.Server {
           sendJson(res, 400, { error: "invalid_authority: requires non-empty 'citation', 64-hex 'sha256', 'source'[, 'sourceUrl', 'retrievedAt', 'meta']" });
           return;
         }
+        // FIX 2 (S1): validate that citation actually contains a recognized
+        // legal citation — reject arbitrary prose strings that could contaminate
+        // the regulator-facing sign-off bundle. Mirror the error-receipt pattern.
+        if (extractCitations(b["citation"] as string).length === 0) {
+          deps.receipts.append({
+            kind: "quality",
+            tool: "authority_provenance",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_authority: citation does not contain a recognized legal citation" });
+          return;
+        }
         let result;
         try {
           result = deps.authorityRegistry.register({
@@ -490,7 +507,6 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             source: b["source"] as string,
             sourceUrl: b["sourceUrl"] as string | undefined,
             retrievedAt: b["retrievedAt"] as string | undefined,
-            meta: b["meta"] as Record<string, unknown> | undefined,
           });
         } catch (err) {
           deps.receipts.append({
@@ -851,6 +867,9 @@ async function handleEgress(
 
     // -----------------------------------------------------------------------
     case "anonymize": {
+      // FIX 4 (honesty): dataTerms is NOT yet threaded here (staged — not wired
+      // into the live egress path). The ZDR branches in tier-floor.ts are
+      // unreachable at runtime until dataTerms is added as a parameter.
       const tierResult = evaluateTierFloor({
         confidentiality: meta.confidentiality,
         targetTier: "cloud",

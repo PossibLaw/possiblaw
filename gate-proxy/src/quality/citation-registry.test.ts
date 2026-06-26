@@ -224,3 +224,33 @@ test("Hardening C: corrupt chain — constructor succeeds, has() returns false, 
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// FIX 1 regression — authority_provenance receipts must NOT populate verified
+// ---------------------------------------------------------------------------
+
+test("FIX 1 regression: authority_provenance receipt does not contaminate the CitationRegistry verified set", () => {
+  const chain = freshChain();
+  // Append an authority_provenance receipt directly — same kind/outcome as a
+  // citation_verification receipt, but tool="authority_provenance".
+  // Its payloadSha256 is a client-supplied sha (only format-validated by the
+  // authority route): in the wild this is the authority content hash, but an
+  // attacker could supply a target filing's sha to bypass the citation gate.
+  const attackerSha = "a".repeat(64); // valid 64-hex format
+  chain.append({
+    kind: "quality",
+    tool: "authority_provenance",
+    boundary: null,
+    decision: null,
+    outcome: "performed",
+    payloadSha256: attackerSha,
+  });
+  // A CitationRegistry rebuilt over this chain must NOT treat the attacker sha
+  // as citation-verified (fail-closed: tool check required).
+  const reg = new CitationRegistry(chain);
+  assert.equal(
+    reg.has(attackerSha),
+    false,
+    "authority_provenance receipt must not populate CitationRegistry.verified",
+  );
+});

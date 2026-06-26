@@ -1636,6 +1636,96 @@ describe("gate server", () => {
     await close();
   });
 
+  // FIX 2 — citation field must contain a recognized legal citation
+  it("POST /quality/authority: arbitrary prose (no legal citation) → 400 invalid_authority", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postAuthority(baseUrl, {
+      citation: "arbitrary privileged prose no cite",
+      sha256: sha256hex("some-body"),
+      source: "courtlistener",
+    });
+    assert.equal(status, 400);
+    assert.ok(
+      String((json as Record<string, unknown>)["error"]).includes("invalid_authority"),
+      "error must be invalid_authority for non-citation string",
+    );
+
+    // Must still write an error receipt (fail-closed)
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.tool, "authority_provenance");
+    assert.equal(last.body.outcome, "error");
+
+    await close();
+  });
+
+  it("POST /quality/authority: real legal citation string → 200 accepted", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postAuthority(baseUrl, {
+      citation: "Roe v. Wade, 410 U.S. 113 (1973)",
+      sha256: sha256hex("roe-body"),
+      source: "courtlistener",
+    });
+    assert.equal(status, 200);
+    assert.equal((json as Record<string, unknown>)["ok"], true);
+
+    await close();
+  });
+
+  // FIX 3 — reporterMeta must NOT be stored in the receipt
+  it("POST /quality/authority: reporterMeta is NOT stored in the receipt (ledger pollution fix)", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    await postAuthority(baseUrl, {
+      citation: "Roe v. Wade, 410 U.S. 113 (1973)",
+      sha256: sha256hex("roe-body"),
+      source: "courtlistener",
+      meta: { arbitrary: "privileged data", nested: { secret: true } },
+    });
+
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.outcome, "performed");
+    // reporterMeta must NOT appear in the receipt body
+    assert.equal(
+      JSON.stringify(last.body).includes("reporterMeta"),
+      false,
+      "reporterMeta must not be stored in the receipt",
+    );
+    // No caller-supplied meta values either
+    assert.equal(
+      JSON.stringify(last.body).includes("privileged data"),
+      false,
+      "caller meta values must not appear in the receipt",
+    );
+
+    await close();
+  });
+
   // GET /receipts/bundle → JSON Matter Trust Report for one matter
   it("GET /receipts/bundle?issueId=... → 200 JSON bundle scoped to the matter", async () => {
     const dir = tmpDir();
