@@ -86,7 +86,9 @@ For `confidential` or `privileged` matter content, set `meta.confidentiality` ac
 
 **200** — page created; receipt written; response includes `id`.
 
-**403** — blocked by policy (reason in body); post the reason as a comment and mark blocked.
+**403 `{reason:"citation_gate_unverified"}`** — the outbound text carries legal citations with no registered verification. Do NOT remove or trim the citations to get past the gate. Route the draft to `legal-citation-checker` (via `research-lead`); after it registers a passing verification (see `citation-verification-checklist` → "Gate Registration"), re-call this endpoint with the IDENTICAL document text. A `403 {reason:"citation_gate_no_document"}` means the gate found no reviewable text on a citation-gated boundary — include the document text in the payload field this connector sends.
+
+**403 (other reason)** — blocked by policy; post the reason as a comment and mark blocked.
 
 **502 `credential_missing: NOTION_API_KEY`** — the proxy lacks the credential; the operator must set `NOTION_API_KEY` in the launcher environment (never agent env).
 

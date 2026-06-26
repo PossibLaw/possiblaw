@@ -7,6 +7,69 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.26.0] — 2026-06-25 — Citation gate: agent-facing contract (Phase 2 completion)
+
+The Phase 2 citation gate has been enforced in the proxy since 0.22.0, but the
+agents and operators had no documented path to satisfy it — a citation-bearing
+send/file would block with no taught remediation. This release wires the
+agent-facing half so the gate is usable end to end.
+
+### Added
+
+- **`citation-verification-checklist` skill** — new "Gate Registration" section:
+  the checker builds a registration body from its all-`Yes` verification table and
+  registers it via `POST $GATE_PROXY_URL/quality/citation`, binding the exact draft
+  text; documents the 200 / 422 (`coverage_gap` / `unverified_rows` /
+  `quote_mismatch`) / 400 responses and the rule "never trim citations to dodge
+  coverage."
+- **`legal-citation-checker` agent** — Output Format gains a gate-registration step:
+  register only when every row is `Yes`, record the returned `documentSha256`.
+- **`gate-policy.yaml`** — documented `citationGate.boundaries` section (default
+  `[COURT_FILING, THIRD_PARTY_EGRESS]`; narrow to court-only or empty to disable).
+- **Six live-egress connector skills** (`connector-gmail`, `connector-outlook`,
+  `connector-google-drive`, `connector-onedrive`, `connector-notion`,
+  `output-delivery-playbook`) — the `403 citation_gate_unverified` /
+  `citation_gate_no_document` remediation contract: route the draft to
+  `legal-citation-checker`, register, re-call with identical text.
+- **`docs/connectors-inventory.md`** — "Citation gate" section: the tool→document-field
+  table (`send_email`→`body`, `upload_document`→`content`, `share_external`→`content`,
+  `file_court_document`→`documentText`), the 403 contract, and honest scope.
+- **`docs/known-limitations.md`** — "Citation gate" section: extractor covers curated
+  citation classes (not full Bluebook, no `id.`/`supra`, no good-law); registration is
+  an attested deterministic floor, not proof of source authority; `local_trusted`
+  registration caveat.
+- **`docs/operator-walkthrough.md`** — citation-gate paragraph in "The Gate Proxy."
+
+### Validated
+
+- Live e2e on a disposable proxy (port 3899, shipped policy): citation-bearing send →
+  `403 citation_gate_unverified`; register → `200` + `documentSha256`; identical text →
+  past the gate; edited text → `403` (sha-binding); citation-free → past the gate;
+  court filing with no document text → `403 citation_gate_no_document`;
+  `/receipts/verify` ok over a 6-event hash chain with zero payload text in receipts.
+- `gate-proxy` 215/215 tests + typecheck clean; launcher dry-run regression
+  `agents=177 skills=172 projects=3 issues=3 warnings=0 errors=0`.
+
+## [0.25.1] — 2026-06-24 — Fix: learning-scribe CLI invocations resolve in the agent sandbox
+
+### Fixed
+
+- **Both learning scribes (`learning-scribe`, `skill-improvement-scribe`) could
+  not run the learning-loop CLI in live operation.** Their documented commands
+  used `node --import tsx learning-loop/src/cli.ts …`, which fails with
+  `ERR_MODULE_NOT_FOUND` from the agent's actual sandbox cwd: paperclip starts
+  the server with `process.cwd() = $REPO_ROOT/paperclip` and adapter-spawned
+  agents inherit it, so both the relative `learning-loop/src` path and the
+  `tsx` package (installed under `learning-loop/node_modules`) fail to resolve.
+  The nightly `learning-sweep` and `skill-improvement-sweep` routines would
+  have errored out. (Resolves the carried "UNCONFIRMED — tsx resolution in the
+  adapter sandbox" item.)
+- **Launcher** now injects `POSSIBLAW_REPO_ROOT` into every agent's
+  `adapterConfig.env` alongside `POSSIBLAW_BUSINESS_DIR` (in `bin/possiblaw`,
+  the `--business` env-patch block). Both scribes now `cd
+  "$POSSIBLAW_REPO_ROOT/learning-loop" && node --import tsx src/cli.ts …` —
+  the same cwd-resolving pattern the launcher's morning digest already used.
+
 ## [0.25.0] — 2026-06-23 — Skill-improvement loop (Tier-2 learn-from-edits)
 
 ### Added
