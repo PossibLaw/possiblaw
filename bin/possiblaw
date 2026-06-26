@@ -876,10 +876,19 @@ PY
                 if [ "$MCP_DO_WRITE" = "true" ]; then
                     mkdir -p "$(dirname "$MCP_TARGET")"
                     if [ "$MCP_ADAPTER" = "codex_local" ]; then
-                        # TOML: append the rendered fragment (helper prints TOML text).
-                        MCP_FRAGMENT="$(python3 "$MCP_HELPER" --registry-json "$MCP_REGISTRY_JSON_FILE" --adapter codex_local 2>/dev/null || true)"
+                        # TOML: render only servers not already present in the target
+                        # file. Passing --existing-toml makes the helper skip any
+                        # [mcp_servers.<name>] table already in the file, so running
+                        # the launcher twice leaves exactly one table per server.
+                        # TOML forbids duplicate table keys; blind-append on a second
+                        # launch would produce an unparseable config.toml.
+                        MCP_FRAGMENT="$(python3 "$MCP_HELPER" \
+                            --registry-json "$MCP_REGISTRY_JSON_FILE" \
+                            --adapter codex_local \
+                            --existing-toml "$MCP_TARGET" \
+                            2>/dev/null || true)"
                         if [ -z "$MCP_FRAGMENT" ]; then
-                            warn "MCP render produced no codex fragment — skipping write."
+                            log "MCP servers [$MCP_NAMES] already present in $MCP_TARGET — skipping write."
                         else
                             { [ -s "$MCP_TARGET" ] && printf '\n'; printf '%s\n' "$MCP_FRAGMENT"; } >> "$MCP_TARGET"
                             log "appended MCP servers [$MCP_NAMES] to $MCP_TARGET"

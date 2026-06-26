@@ -38,10 +38,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from typing import Any
 
 ADAPTERS = ("opencode_local", "codex_local", "claude_local", "gemini_local")
+
+# Valid TOML bare-key characters only. Brackets, newlines, spaces, etc. would
+# allow injection into [mcp_servers.<name>] table headers.
+_VALID_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 def _read_json(path: str) -> Any:
@@ -91,6 +96,13 @@ def select_servers(
         name = srv.get("name")
         if not name:
             warn("skipping mcpServers entry with no name")
+            continue
+        if not _VALID_SERVER_NAME_RE.match(name):
+            warn(
+                f"skipping mcpServers entry with invalid name {name!r} "
+                "(only [A-Za-z0-9._-] allowed — brackets, spaces, and newlines "
+                "could inject arbitrary TOML)"
+            )
             continue
         if name in seen:
             warn(f"duplicate server name '{name}' — keeping the first")
@@ -182,10 +194,35 @@ def _toml_array(items: list[str]) -> str:
     return "[" + ", ".join(_toml_str(i) for i in items) + "]"
 
 
-def render_codex(servers: list[dict]) -> str:
-    """Render TOML [mcp_servers.<name>] tables. The launcher appends this text
-    to ~/.codex/config.toml. (TOML can't be 'merged' as a parsed object the way
-    JSON can, so --merge-into is rejected for codex_local.)
+def _codex_already_registered(name: str, existing_toml: str) -> bool:
+    """Return True if [mcp_servers.<name>] already appears as a table header in
+    existing_toml. Used to make re-launches idempotent: TOML forbids duplicate
+    table keys, so appending a header that is already present would corrupt the
+    file."""
+    header = f"[mcp_servers.{name}]"
+    for line in existing_toml.splitlines():
+        stripped = line.strip()
+        if stripped == header:
+            return True
+    return False
+
+
+def render_codex(
+    servers: list[dict],
+    existing_toml: str = "",
+    warn=lambda msg: print(f"warning: {msg}", file=sys.stderr),
+) -> str:
+    """Render TOML [mcp_servers.<name>] tables for servers not already in the
+    target file. The launcher appends this text to ~/.codex/config.toml.
+
+    Pass existing_toml (the current content of config.toml, or "") to enable
+    idempotency: servers whose [mcp_servers.<name>] header already appears in
+    existing_toml are skipped so that running the launcher twice leaves exactly
+    one table per server. TOML forbids duplicate table keys; blind-append on a
+    second launch would produce an unparseable file.
+
+    (TOML can't be 'merged' as a parsed object the way JSON can, so --merge-into
+    is rejected for codex_local.)
 
     UNCONFIRMED: codex config.toml uses [mcp_servers.<name>] with `command`/
     `args` for stdio and `url` for streamable-HTTP servers, plus an `env` table.
@@ -194,6 +231,9 @@ def render_codex(servers: list[dict]) -> str:
     blocks: list[str] = []
     for srv in servers:
         name = srv["name"]
+        if existing_toml and _codex_already_registered(name, existing_toml):
+            warn(f"skipping '{name}' — [mcp_servers.{name}] already present in target file")
+            continue
         lines = [f"[mcp_servers.{name}]"]
         if srv.get("transport") == "http":
             lines.append(f"url = {_toml_str(srv.get('url'))}")
@@ -225,7 +265,12 @@ def _deep_merge(base: dict, overlay: dict) -> dict:
     return out
 
 
-def render(registry: dict, adapter: str, agent: str | None) -> Any:
+def render(
+    registry: dict,
+    adapter: str,
+    agent: str | None,
+    existing_toml: str = "",
+) -> Any:
     if adapter not in ADAPTERS:
         raise ValueError(
             f"unknown adapter '{adapter}'. Valid: {', '.join(ADAPTERS)}"
@@ -238,7 +283,7 @@ def render(registry: dict, adapter: str, agent: str | None) -> Any:
     if adapter == "gemini_local":
         return render_gemini(servers)
     if adapter == "codex_local":
-        return render_codex(servers)
+        return render_codex(servers, existing_toml=existing_toml)
     raise ValueError(f"unhandled adapter '{adapter}'")  # unreachable
 
 
@@ -368,6 +413,73 @@ def _self_test() -> int:
     else:
         raise AssertionError("expected ValueError for missing mcpServers")
 
+    # S2: name validation — malicious names are skipped, valid names pass.
+    bad_names = [
+        "evil]\ninjected = \"x\"\n[mcp_servers.evil",  # newline + bracket escape
+        "bad name",        # space
+        "bad]name",        # closing bracket
+        "bad[name",        # opening bracket
+        # Note: "" (empty name) is caught by the pre-existing no-name guard
+        # before reaching name validation; tested separately below.
+    ]
+    good_names = ["legal-data", "my.server", "server_1", "A-B-C"]
+    for bad in bad_names:
+        warnings_seen: list[str] = []
+        registry_bad = {
+            "mcpServers": [
+                {"name": bad, "transport": "stdio", "command": "node serve.js"},
+                {"name": "good-server", "transport": "stdio", "command": "node serve.js"},
+            ]
+        }
+        servers_filtered = select_servers(registry_bad, None, warn=lambda m: warnings_seen.append(m))
+        names_out = {s["name"] for s in servers_filtered}
+        assert "good-server" in names_out, f"good-server should pass; bad={bad!r}"
+        assert bad not in names_out, f"bad name {bad!r} should be rejected"
+        assert any("invalid name" in w for w in warnings_seen), \
+            f"expected invalid-name warning for {bad!r}, got: {warnings_seen}"
+    for good in good_names:
+        registry_good = {"mcpServers": [{"name": good, "transport": "stdio", "command": "node x"}]}
+        servers_good = select_servers(registry_good, None, warn=lambda m: None)
+        assert len(servers_good) == 1 and servers_good[0]["name"] == good, \
+            f"valid name {good!r} was incorrectly rejected"
+
+    # S1: codex idempotency — second registration must not duplicate the table.
+    # Simulate first registration.
+    registry_cd = {
+        "mcpServers": [
+            {"name": "legal-data", "transport": "stdio",
+             "command": "tsx mcp-servers/legal-data/src/server.ts"},
+            {"name": "second-server", "transport": "stdio", "command": "node s.js"},
+        ]
+    }
+    first_run = render(registry_cd, "codex_local", None, existing_toml="")
+    assert first_run.count("[mcp_servers.legal-data]") == 1
+    assert first_run.count("[mcp_servers.second-server]") == 1
+    # Simulate second registration: existing_toml already contains first_run.
+    second_run = render(registry_cd, "codex_local", None, existing_toml=first_run)
+    # Nothing new should be emitted (all servers already present).
+    assert second_run == "", \
+        f"expected empty fragment on second run, got: {second_run!r}"
+    # Combined file has exactly one copy of each header.
+    combined = first_run + second_run
+    assert combined.count("[mcp_servers.legal-data]") == 1
+    assert combined.count("[mcp_servers.second-server]") == 1
+    # Basic TOML duplicate-key check: no header appears more than once.
+    headers_seen: set[str] = set()
+    for line in combined.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[mcp_servers."):
+            assert stripped not in headers_seen, \
+                f"duplicate TOML table header: {stripped}"
+            headers_seen.add(stripped)
+    # Partial idempotency: one new server + one already-present server.
+    partial_existing = "[theme]\nfoo = \"bar\"\n\n[mcp_servers.legal-data]\ncommand = \"tsx\"\nargs = []\n"
+    partial_run = render(registry_cd, "codex_local", None, existing_toml=partial_existing)
+    assert "[mcp_servers.legal-data]" not in partial_run, \
+        "legal-data already in file, should be skipped"
+    assert "[mcp_servers.second-server]" in partial_run, \
+        "second-server not in file, should be appended"
+
     print("OK: _possiblaw_mcp self-test passed")
     return 0
 
@@ -381,6 +493,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--adapter", help="opencode_local | codex_local | claude_local | gemini_local")
     parser.add_argument("--agent", help="optional agent slug; filter by grantTo (advisory)")
     parser.add_argument("--merge-into", help="path to existing config JSON (or '-'); print full merged object")
+    parser.add_argument(
+        "--existing-toml",
+        help="path to the existing ~/.codex/config.toml (codex_local only); "
+             "servers whose [mcp_servers.<name>] header already appears there "
+             "are skipped so the launcher is idempotent across re-launches",
+    )
     parser.add_argument("--self-test", action="store_true", help="run built-in tests and exit")
     args = parser.parse_args(argv)
 
@@ -398,8 +516,22 @@ def main(argv: list[str]) -> int:
 
     registry = _read_json(args.registry_json)
 
+    existing_toml = ""
+    if args.existing_toml:
+        if args.adapter != "codex_local":
+            print(
+                "error: --existing-toml is only applicable to codex_local",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            with open(args.existing_toml, "r", encoding="utf-8") as fh:
+                existing_toml = fh.read()
+        except FileNotFoundError:
+            pass  # target file doesn't exist yet — treat as empty
+
     try:
-        rendered = render(registry, args.adapter, args.agent)
+        rendered = render(registry, args.adapter, args.agent, existing_toml=existing_toml)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
