@@ -20,7 +20,17 @@ export class PolicyError extends Error {
 export interface Policy {
   version: 1;
   boundaries: Record<BoundaryType, Decision>;
-  citationGate: { boundaries: BoundaryType[] };
+  citationGate: {
+    boundaries: BoundaryType[];
+    /**
+     * Authority-provenance enforcement. When false (default), the gate RECORDS
+     * any cited-but-never-retrieved authorities onto the egress receipt
+     * (meta.unbackedCitations) without changing pass/block behavior — a
+     * flag-only anti-hallucination signal. When true, an outbound document on a
+     * citation-gated boundary with one or more unbacked citations is BLOCKED.
+     */
+    requireAuthorityProvenance: boolean;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +72,7 @@ export const DEFAULT_POLICY: Policy = Object.freeze({
   }),
   citationGate: Object.freeze({
     boundaries: Object.freeze(["COURT_FILING", "THIRD_PARTY_EGRESS"] as BoundaryType[]) as BoundaryType[],
+    requireAuthorityProvenance: false,
   }),
 });
 
@@ -69,7 +80,10 @@ function freshDefaults(): Policy {
   return {
     version: 1,
     boundaries: { ...DEFAULT_POLICY.boundaries },
-    citationGate: { boundaries: [...DEFAULT_POLICY.citationGate.boundaries] },
+    citationGate: {
+      boundaries: [...DEFAULT_POLICY.citationGate.boundaries],
+      requireAuthorityProvenance: DEFAULT_POLICY.citationGate.requireAuthorityProvenance,
+    },
   };
 }
 
@@ -101,14 +115,14 @@ function validateBoundariesObject(raw: unknown): Record<BoundaryType, Decision> 
   return obj as Record<BoundaryType, Decision>;
 }
 
-function validateCitationGate(raw: unknown): { boundaries: BoundaryType[] } {
+function validateCitationGate(raw: unknown): Policy["citationGate"] {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new PolicyError(`citationGate must be a mapping with a 'boundaries' list, got: ${Array.isArray(raw) ? "array" : typeof raw}`);
   }
   const obj = raw as Record<string, unknown>;
   for (const key of Object.keys(obj)) {
-    if (key !== "boundaries") {
-      throw new PolicyError(`Unknown citationGate key "${key}". Only "boundaries" is allowed.`);
+    if (key !== "boundaries" && key !== "requireAuthorityProvenance") {
+      throw new PolicyError(`Unknown citationGate key "${key}". Only "boundaries" and "requireAuthorityProvenance" are allowed.`);
     }
   }
   const list = obj["boundaries"];
@@ -122,7 +136,19 @@ function validateCitationGate(raw: unknown): { boundaries: BoundaryType[] } {
       );
     }
   }
-  return { boundaries: list as BoundaryType[] };
+  // requireAuthorityProvenance is optional; defaults false so nothing existing
+  // breaks. When present it must be a boolean.
+  let requireAuthorityProvenance = DEFAULT_POLICY.citationGate.requireAuthorityProvenance;
+  if ("requireAuthorityProvenance" in obj) {
+    const v = obj["requireAuthorityProvenance"];
+    if (typeof v !== "boolean") {
+      throw new PolicyError(
+        `citationGate.requireAuthorityProvenance must be a boolean, got: ${typeof v}`,
+      );
+    }
+    requireAuthorityProvenance = v;
+  }
+  return { boundaries: list as BoundaryType[], requireAuthorityProvenance };
 }
 
 // ---------------------------------------------------------------------------

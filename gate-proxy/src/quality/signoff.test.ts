@@ -234,6 +234,74 @@ test("empty matter → empty sections, chain ok, valid Markdown", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Authority provenance: registered authorities + unbacked citations
+// ---------------------------------------------------------------------------
+
+test("authority provenance: bundle lists retrieved-authority registrations + unbacked citations", () => {
+  const { chain } = freshChainPath();
+
+  // A firm-wide authority registration (matter-agnostic — no issueId).
+  chain.append({
+    kind: "quality", tool: "authority_provenance", boundary: null,
+    decision: null, outcome: "performed", payloadSha256: sha256hex("roe-body"),
+    meta: {
+      normalizedCitation: "410 U.S.113",
+      indexedCitations: ["410 U.S.113"],
+      authoritySha256: sha256hex("roe-body"),
+      source: "courtlistener",
+      sourceUrl: "https://www.courtlistener.com/opinion/108713/roe-v-wade/",
+      retrievedAt: "2026-06-26T12:00:00.000Z",
+    },
+  });
+
+  // An egress for our matter that recorded an unbacked citation (flag-only).
+  chain.append({
+    kind: "egress", tool: "share_external", boundary: "THIRD_PARTY_EGRESS",
+    decision: "allow", outcome: "performed", payloadSha256: sha256hex("brief-doc"),
+    agentId: "agent-1", issueId: "POS-300",
+    meta: { claimedConfidentiality: "standard", unbackedCitations: ["384 U.S. 436"], backedCitationCount: 1 },
+  });
+
+  const bundle = assembleSignoffBundle(chain, "POS-300");
+
+  // Registrations are surfaced (matter-agnostic, so this one shows up).
+  assert.equal(bundle.authorityProvenance.registrations.length, 1);
+  assert.equal(bundle.authorityProvenance.registrations[0].normalizedCitation, "410 U.S.113");
+  assert.equal(bundle.authorityProvenance.registrations[0].source, "courtlistener");
+  assert.equal(bundle.authorityProvenance.registrations[0].authoritySha256, sha256hex("roe-body"));
+
+  // The unbacked citation recorded on this matter's egress receipt is surfaced.
+  assert.equal(bundle.authorityProvenance.unbacked.length, 1);
+  assert.deepEqual(bundle.authorityProvenance.unbacked[0].unbackedCitations, ["384 U.S. 436"]);
+  assert.equal(bundle.authorityProvenance.unbacked[0].tool, "share_external");
+
+  // authority_provenance receipts must NOT pollute the citation-verifications section.
+  assert.equal(bundle.citationVerifications.length, 0);
+
+  // Rendered markdown shows the Authority Provenance section + both rows.
+  const md = renderSignoffMarkdown(bundle);
+  assert.ok(md.includes("## Authority Provenance"));
+  assert.ok(md.includes("Retrieved Authorities"));
+  assert.ok(md.includes("410 U.S.113"));
+  assert.ok(md.includes("384 U.S. 436"));
+});
+
+test("authority provenance: empty matter shows no registrations and no unbacked citations", () => {
+  const { chain } = freshChainPath();
+  chain.append({
+    kind: "egress", tool: "send_email", boundary: "THIRD_PARTY_EGRESS",
+    decision: "allow", outcome: "performed", payloadSha256: sha256hex("p"),
+    agentId: "agent-1", issueId: "POS-CLEAN",
+  });
+  const bundle = assembleSignoffBundle(chain, "POS-CLEAN");
+  assert.deepEqual(bundle.authorityProvenance.registrations, []);
+  assert.deepEqual(bundle.authorityProvenance.unbacked, []);
+  const md = renderSignoffMarkdown(bundle);
+  assert.ok(md.includes("_None registered._"));
+  assert.ok(md.includes("every cited authority"));
+});
+
+// ---------------------------------------------------------------------------
 // shared invariant assertion
 // ---------------------------------------------------------------------------
 

@@ -67,6 +67,13 @@ export interface ProxyContext {
   args: Record<string, unknown>;
   tier: PrivacyTier;
   now: string; // ISO 8601 UTC timestamp, injected by the caller
+  /**
+   * Optional best-effort provenance reporter. When present AND the retrieval
+   * yields a citation, the adapter reports the {citation, sha256, ...} to the
+   * gate. Injected so tests use a stub; omitted → no reporting. Any throw from
+   * the reporter is swallowed: provenance reporting NEVER fails a tool call.
+   */
+  reportProvenance?: ProvenanceReporter;
 }
 
 /** sha256-keyed cache so we absorb upstream rate limits and tests stay deterministic. */
@@ -75,3 +82,27 @@ export interface Cache {
   set(key: string, value: unknown): void;
   has(key: string): boolean;
 }
+
+/**
+ * The provenance facets we report to the gate when an authority is retrieved.
+ * citation + sha256 come straight off the provenance envelope; the rest are
+ * best-effort context. The sha256 here is the SAME documentSha256 the gate's
+ * citation gate computes over agent output — closing the provenance loop.
+ */
+export interface RetrievedAuthority {
+  citation: string;
+  sha256: string;
+  source: string;
+  sourceUrl?: string;
+  retrievedAt?: string;
+}
+
+/**
+ * Injectable best-effort reporter. After a successful retrieval that yields a
+ * citation, the adapter calls this so the gate can register the authority as
+ * RETRIEVED (POST /quality/authority). BEST-EFFORT BY CONTRACT: any failure
+ * (gate down, env unset, network) MUST be swallowed by the caller — retrieval
+ * succeeds regardless. Tests inject a stub; production uses
+ * createGateProvenanceReporter.
+ */
+export type ProvenanceReporter = (authority: RetrievedAuthority) => Promise<void>;

@@ -20,6 +20,7 @@ import { sanitizeQuery } from "./sanitize.ts";
 import type {
   PrivacyTier,
   ProvenanceEnvelope,
+  ProvenanceReporter,
   ProxyContext,
   ProxyResult,
   UnavailableResult,
@@ -259,7 +260,29 @@ export async function proxyToolCall(
   const sanitized = sanitizeArgs(ctx.args, ctx.tier);
   try {
     const result = await upstream(ctx.toolName, sanitized);
-    return wrapWithProvenance(result, { now: ctx.now });
+    const env = wrapWithProvenance(result, { now: ctx.now });
+
+    // Best-effort authority-provenance reporting. We report ONLY when the
+    // envelope carries an extracted citation (a real authority the gate can key
+    // on); a result with no citation is not over-reported. Any reporter failure
+    // is swallowed here — retrieval already succeeded and reporting is additive,
+    // never blocking. We deliberately await so a stub's assertions can observe
+    // the call within the same tick, but a rejection cannot escape.
+    if (ctx.reportProvenance !== undefined && env.citation !== undefined) {
+      try {
+        await ctx.reportProvenance({
+          citation: env.citation,
+          sha256: env.sha256,
+          source: env.source,
+          ...(env.source_url !== undefined ? { sourceUrl: env.source_url } : {}),
+          retrievedAt: env.retrieved_at,
+        });
+      } catch {
+        // swallow — provenance reporting is best-effort and MUST NOT fail the tool call
+      }
+    }
+
+    return env;
   } catch (e) {
     const unavailable: UnavailableResult = {
       source: "courtlistener",
@@ -269,4 +292,41 @@ export async function proxyToolCall(
     };
     return unavailable;
   }
+}
+
+// ---------------------------------------------------------------------------
+// 4. createGateProvenanceReporter — real, best-effort gate registration.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a ProvenanceReporter that POSTs each retrieved authority to the gate's
+ * POST /quality/authority. The gate registers it as RETRIEVED so it can later
+ * flag any authority an agent CITES in an outbound filing that was never
+ * retrieved (anti-hallucination check).
+ *
+ * BEST-EFFORT BY CONTRACT: the returned reporter NEVER throws. A missing
+ * gateUrl, a network error, or a non-2xx gate response is swallowed — retrieval
+ * must succeed even when the gate is unreachable. `gateUrl` defaults to
+ * GATE_PROXY_URL; if neither is set the reporter is a no-op.
+ */
+export function createGateProvenanceReporter(gateUrl?: string): ProvenanceReporter {
+  const base = (gateUrl ?? process.env["GATE_PROXY_URL"] ?? "").replace(/\/+$/, "");
+  return async (authority) => {
+    if (base === "") return; // env unset → no-op, never blocks retrieval
+    try {
+      await fetch(`${base}/quality/authority`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          citation: authority.citation,
+          sha256: authority.sha256,
+          source: authority.source,
+          ...(authority.sourceUrl !== undefined ? { sourceUrl: authority.sourceUrl } : {}),
+          ...(authority.retrievedAt !== undefined ? { retrievedAt: authority.retrievedAt } : {}),
+        }),
+      });
+    } catch {
+      // swallow — gate down / network error must not surface to the agent
+    }
+  };
 }

@@ -17,8 +17,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { createCourtListenerUpstream } from "./upstream.ts";
-import { proxyToolCall } from "./adapter.ts";
+import { proxyToolCall, createGateProvenanceReporter } from "./adapter.ts";
 import type { PrivacyTier } from "./types.ts";
+
+// Best-effort authority-provenance reporter. Reads GATE_PROXY_URL; when unset it
+// is a no-op. Retrieval NEVER depends on the gate being reachable.
+const reportProvenance = createGateProvenanceReporter();
 
 const tierEnv = process.env["POSSIBLAW_MATTER_PRIVACY_TIER"];
 const privacyTier: PrivacyTier =
@@ -80,6 +84,7 @@ async function main(): Promise<void> {
             args: input.args ?? {},
             tier: privacyTier,
             now: new Date().toISOString(),
+            reportProvenance,
           }),
         ),
     );

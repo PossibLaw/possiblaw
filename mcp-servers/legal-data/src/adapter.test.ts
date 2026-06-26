@@ -221,3 +221,76 @@ test("SECURITY a confidential query is NEVER forwarded containing the raw client
   assert.equal((res as { status?: string }).status, "unavailable");
   assert.ok(!isEnvelope(res));
 });
+
+// ---------------------------------------------------------------------------
+// PROVENANCE REPORTING: best-effort registration of retrieved authorities
+// ---------------------------------------------------------------------------
+
+test("PROVENANCE opinion-like retrieval invokes the reporter with the envelope's {citation, sha256}", async () => {
+  const body = fixture("upstream-opinion-like.json");
+  const { upstream } = stubUpstream(body);
+  const reported: Array<{ citation: string; sha256: string; source: string; sourceUrl?: string; retrievedAt?: string }> = [];
+
+  const res = await proxyToolCall(upstream, {
+    toolName: "search-cases",
+    args: { query: "abortion privacy" },
+    tier: "standard",
+    now: FIXED_NOW,
+    reportProvenance: async (a) => { reported.push(a); },
+  });
+
+  assert.ok(isEnvelope(res));
+  const env = res as ProvenanceEnvelope;
+  assert.equal(reported.length, 1, "reporter must be invoked exactly once for a cited authority");
+  assert.equal(reported[0].citation, env.citation);
+  assert.equal(reported[0].sha256, env.sha256);
+  assert.equal(reported[0].source, "courtlistener");
+  assert.equal(reported[0].retrievedAt, FIXED_NOW);
+});
+
+test("PROVENANCE a result with NO citation does not over-report", async () => {
+  const body = fixture("upstream-minimal-no-provenance.json");
+  const { upstream } = stubUpstream(body);
+  let calls = 0;
+
+  const res = await proxyToolCall(upstream, {
+    toolName: "manage-alerts",
+    args: {},
+    tier: "standard",
+    now: FIXED_NOW,
+    reportProvenance: async () => { calls++; },
+  });
+
+  assert.ok(isEnvelope(res));
+  assert.equal((res as ProvenanceEnvelope).citation, undefined);
+  assert.equal(calls, 0, "no citation → reporter must NOT be called");
+});
+
+test("PROVENANCE a reporter that THROWS does not fail the tool call (best-effort)", async () => {
+  const body = fixture("upstream-opinion-like.json");
+  const { upstream } = stubUpstream(body);
+
+  const res = await proxyToolCall(upstream, {
+    toolName: "search-cases",
+    args: { query: "x" },
+    tier: "standard",
+    now: FIXED_NOW,
+    reportProvenance: async () => { throw new Error("gate is down"); },
+  });
+
+  // The tool call STILL returns a valid envelope — reporting failure swallowed.
+  assert.ok(isEnvelope(res), "tool call must succeed even when the reporter throws");
+  assert.match((res as ProvenanceEnvelope).sha256, /^[0-9a-f]{64}$/);
+});
+
+test("PROVENANCE no reporter injected → tool call behaves exactly as before", async () => {
+  const body = fixture("upstream-opinion-like.json");
+  const { upstream } = stubUpstream(body);
+  const res = await proxyToolCall(upstream, {
+    toolName: "search-cases",
+    args: { query: "x" },
+    tier: "standard",
+    now: FIXED_NOW,
+  });
+  assert.ok(isEnvelope(res));
+});

@@ -46,6 +46,14 @@ For **every** proxied tool call (`adapter.proxyToolCall`):
 3. **`wrapWithProvenance(result, { now })`** — wraps the upstream result in a
    **provenance envelope** with a `sha256` aligned with gate-proxy's citation
    gate.
+4. **best-effort authority-provenance reporting** — when the envelope carries a
+   citation, the adapter registers the retrieved authority with the gate
+   (`POST /quality/authority`) so the gate can later flag any authority an agent
+   **cites** in an outbound filing that was **never retrieved**
+   (anti-hallucination). This is **best-effort**: if the gate is down or
+   `GATE_PROXY_URL` is unset, the failure is swallowed and the tool call still
+   succeeds — provenance reporting is additive, never blocking. (See
+   "Authority provenance" below.)
 
 Any upstream throw / rejection / timeout becomes a structured
 `{ status: "unavailable", tool, reason }` — **never** a fabricated opinion and
@@ -92,6 +100,35 @@ Every **successful** result is wrapped:
 - **`retrieved_at`** is **injected** (`now` in `ProxyContext`) — the pure core
   never calls `Date.now()`, so tests are deterministic.
 
+## Authority provenance (anti-hallucination)
+
+The `sha256` is not just a fingerprint — it closes a real trust loop. After a
+successful retrieval that yields a citation, the adapter calls an injectable
+**`ProvenanceReporter`**. The production reporter
+(`createGateProvenanceReporter(gateUrl)`, `gateUrl` from `GATE_PROXY_URL`) does:
+
+```
+POST ${GATE_PROXY_URL}/quality/authority
+{ citation, sha256, source, sourceUrl?, retrievedAt? }
+```
+
+The gate registers that this authority was **actually retrieved** from a real
+source (appending a hash-chained `quality` receipt). Later, when an agent's
+outbound **court filing / third-party egress** is inspected, the gate runs
+`AuthorityRegistry.verifyDocument(...)` and flags any cited authority that was
+**never retrieved** — a strong hallucination signal.
+
+- **Default = flag/record, not block.** The gate records `unbackedCitations` on
+  the egress receipt (surfaced in the Matter Trust Report) without changing
+  pass/block behavior.
+- **Blocking is policy-opt-in** via `citationGate.requireAuthorityProvenance:
+  true` in `gate-policy.yaml`. When on, an outbound document that cites a
+  never-retrieved authority is blocked with a clear reason.
+- **Best-effort by contract.** The reporter never throws: a missing
+  `GATE_PROXY_URL`, gate downtime, or a network error is swallowed. Retrieval
+  succeeds regardless. The reporter is **injected** (`ProxyContext.reportProvenance`)
+  so the test suite uses a stub and makes zero network calls.
+
 ## No fabrication
 
 - Upstream throw / reject / timeout → `{ status: "unavailable", tool, reason }`.
@@ -131,7 +168,7 @@ by the test suite (no OAuth credentials in CI).
 
 ```sh
 pnpm -C mcp-servers/legal-data install     # install deps
-pnpm -C mcp-servers/legal-data test        # node:test suite (14 tests, zero network)
+pnpm -C mcp-servers/legal-data test        # node:test suite (18 tests, zero network)
 pnpm -C mcp-servers/legal-data typecheck   # tsc --noEmit
 pnpm -C mcp-servers/legal-data start        # run the stdio MCP proxy (needs OAuth wiring)
 ```

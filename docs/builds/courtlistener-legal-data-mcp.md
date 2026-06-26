@@ -35,8 +35,11 @@ a grounded citation-verification tool. Re-implementing its REST v4 API with
 reconstructed response shapes (the original approach) was fragile and redundant,
 so we pivoted: our component is now a **thin trust-adapter / proxy** that, for
 every upstream tool call, (1) sanitizes confidential/privileged query args,
-(2) forwards to the official MCP, and (3) wraps the result in our sha256-aligned
-provenance envelope. The adapter is **schema-agnostic** about upstream result
+(2) forwards to the official MCP, (3) wraps the result in our sha256-aligned
+provenance envelope, and (4) best-effort **registers the retrieved authority
+with the gate** (`POST /quality/authority`) so the gate can flag any
+never-retrieved authority an agent later cites in an outbound filing. The
+adapter is **schema-agnostic** about upstream result
 shapes — exact tool names/params are confirmed at runtime via `tools/list`, not
 hard-coded.
 
@@ -75,12 +78,34 @@ Every tool result wraps payload in:
 
 Agents get the slice **and** where it came from, version, and a fingerprint.
 
-### Reuse (close the provenance loop)
+### Reuse (close the provenance loop — for real)
 
 - `documentSha256()` / `normalizeText()` are copied verbatim from
   `gate-proxy/src/citations.ts` into `src/hash.ts` so a fetched authority's
   fingerprint is the **same** sha the citation gate checks against.
   Data-provenance in → output-provenance out, one hashing scheme.
+- **The loop is now closed, not just aligned.** On a successful retrieval that
+  yields a citation, the adapter calls an injectable `ProvenanceReporter`. The
+  production reporter (`createGateProvenanceReporter`, `GATE_PROXY_URL`) POSTs
+  `{ citation, sha256, source, sourceUrl?, retrievedAt? }` to the gate's
+  **`POST /quality/authority`**, which registers the authority as **retrieved**
+  (hash-chained `quality` receipt) and indexes it by normalized citation. The
+  gate then runs `AuthorityRegistry.verifyDocument(...)` on an outbound
+  court-filing / third-party egress and **flags any cited authority that was
+  never retrieved** — `unbacked` is the hallucination signal, recorded on the
+  egress receipt as `meta.unbackedCitations`.
+  - **Default = flag/record, not block.** Existing pass/block behavior is
+    unchanged; the unbacked list is recorded for the Matter Trust Report.
+  - **Blocking is policy-opt-in** via `citationGate.requireAuthorityProvenance:
+    true` in `gate-policy.yaml`.
+  - **Best-effort by contract.** The reporter never throws and the gate is never
+    a retrieval dependency: a missing `GATE_PROXY_URL`, gate downtime, or a
+    network error is swallowed. The reporter is injected so tests use a stub
+    (zero network).
+- Normalization is **shared, not duplicated**: register and verify both go
+  through `gate-proxy`'s `comparableCitation` (citations.ts), so a citation
+  registered on retrieval and the same citation extracted from outbound text
+  compare identically.
 - Local cache keyed by `sha256` to absorb upstream rate limits and make results
   deterministic for tests.
 

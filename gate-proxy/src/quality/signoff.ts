@@ -68,6 +68,33 @@ export interface Attestation {
   boundary: BoundaryType | null;
 }
 
+/** A retrieved-authority registration (from POST /quality/authority). */
+export interface AuthorityRegistration {
+  seq: number;
+  ts: string;
+  normalizedCitation: string;
+  authoritySha256: string;
+  source?: string;
+  sourceUrl?: string;
+  retrievedAt?: string;
+}
+
+/** An egress receipt that recorded one or more cited-but-never-retrieved authorities. */
+export interface UnbackedCitationRecord {
+  seq: number;
+  ts: string;
+  tool: string;
+  outcome: ReceiptOutcome;
+  payloadSha256: string;
+  unbackedCitations: string[];
+}
+
+/** Authority provenance: what was retrieved + which outbound citations were unbacked. */
+export interface AuthorityProvenance {
+  registrations: AuthorityRegistration[];
+  unbacked: UnbackedCitationRecord[];
+}
+
 export interface SignoffBundle {
   issueId: string;
   generatedAt: string;
@@ -75,6 +102,7 @@ export interface SignoffBundle {
   receipts: BundleReceipt[];
   anonymizationEvents: BundleReceipt[];
   citationVerifications: BundleReceipt[];
+  authorityProvenance: AuthorityProvenance;
   tierFloorDecisions: TierFloorDecision[];
   blockedEgress: BlockedEgress[];
   attestations: Attestation[];
@@ -91,6 +119,12 @@ function metaString(body: ReceiptBody, key: string): string | undefined {
 
 function metaBool(body: ReceiptBody, key: string): boolean {
   return body.meta?.[key] === true;
+}
+
+/** Read a string[] from a meta field — non-strings dropped, non-arrays → []. */
+function metaStringArray(body: ReceiptBody, key: string): string[] {
+  const v = body.meta?.[key];
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -160,8 +194,51 @@ export function assembleSignoffBundle(
     .map(projectReceipt);
 
   const citationVerifications = matter
-    .filter((e) => e.body.kind === "quality")
+    .filter((e) => e.body.kind === "quality" && e.body.tool === "citation_verification")
     .map(projectReceipt);
+
+  // Authority provenance.
+  // Registrations (POST /quality/authority) are matter-AGNOSTIC: the legal-data
+  // MCP reports a retrieval once for the firm, not per matter, so they carry no
+  // issueId. We surface ALL retrieved-authority registrations from the chain so
+  // a regulator can see the pool of authorities that back this matter's
+  // citations. Hashes + public citation identifiers + source only — never text.
+  const authorityRegistrations: AuthorityRegistration[] = all
+    .filter((e) => e.body.kind === "quality" && e.body.tool === "authority_provenance" && e.body.outcome === "performed")
+    .map((e) => {
+      const r: AuthorityRegistration = {
+        seq: e.seq,
+        ts: e.ts,
+        normalizedCitation: metaString(e.body, "normalizedCitation") ?? "",
+        authoritySha256: metaString(e.body, "authoritySha256") ?? e.body.payloadSha256,
+      };
+      const source = metaString(e.body, "source");
+      if (source !== undefined) r.source = source;
+      const sourceUrl = metaString(e.body, "sourceUrl");
+      if (sourceUrl !== undefined) r.sourceUrl = sourceUrl;
+      const retrievedAt = metaString(e.body, "retrievedAt");
+      if (retrievedAt !== undefined) r.retrievedAt = retrievedAt;
+      return r;
+    });
+
+  // Unbacked-citation records ride on THIS matter's egress receipts (the gate
+  // recorded meta.unbackedCitations when a filing cited a never-retrieved
+  // authority). These are the matter-scoped hallucination signals.
+  const unbackedRecords: UnbackedCitationRecord[] = matter
+    .filter((e) => e.body.kind === "egress" && metaStringArray(e.body, "unbackedCitations").length > 0)
+    .map((e) => ({
+      seq: e.seq,
+      ts: e.ts,
+      tool: e.body.tool,
+      outcome: e.body.outcome,
+      payloadSha256: e.body.payloadSha256,
+      unbackedCitations: metaStringArray(e.body, "unbackedCitations"),
+    }));
+
+  const authorityProvenance: AuthorityProvenance = {
+    registrations: authorityRegistrations,
+    unbacked: unbackedRecords,
+  };
 
   const tierFloorDecisions: TierFloorDecision[] = matter
     .filter((e) => metaBool(e.body, "routedLocal") || metaString(e.body, "dataTermsTier") !== undefined)
@@ -210,6 +287,7 @@ export function assembleSignoffBundle(
     receipts,
     anonymizationEvents,
     citationVerifications,
+    authorityProvenance,
     tierFloorDecisions,
     blockedEgress,
     attestations,
@@ -298,6 +376,45 @@ export function renderSignoffMarkdown(bundle: SignoffBundle): string {
       out.push(
         `| ${r.seq} | ${cell(r.ts)} | ${cell(r.tool)} | ${cell(r.outcome)} ` +
           `| \`${cell(r.payloadSha256)}\` | ${cell(r.agentId)} |`,
+      );
+    }
+  }
+  out.push("");
+
+  // Authority provenance (anti-hallucination)
+  out.push("## Authority Provenance");
+  out.push("");
+  out.push(
+    "_Retrieved authorities registered with the gate, and any citation in an " +
+      "outbound filing that was never retrieved (the anti-hallucination signal)._",
+  );
+  out.push("");
+  out.push("### Retrieved Authorities");
+  out.push("");
+  if (bundle.authorityProvenance.registrations.length === 0) {
+    out.push("_None registered._");
+  } else {
+    out.push("| seq | ts | citation | source | sourceUrl | authoritySha256 | retrievedAt |");
+    out.push("| --- | --- | --- | --- | --- | --- | --- |");
+    for (const r of bundle.authorityProvenance.registrations) {
+      out.push(
+        `| ${r.seq} | ${cell(r.ts)} | ${cell(r.normalizedCitation)} | ${cell(r.source)} ` +
+          `| ${cell(r.sourceUrl)} | \`${cell(r.authoritySha256)}\` | ${cell(r.retrievedAt)} |`,
+      );
+    }
+  }
+  out.push("");
+  out.push("### Unbacked Citations (cited but never retrieved)");
+  out.push("");
+  if (bundle.authorityProvenance.unbacked.length === 0) {
+    out.push("_None — every cited authority in this matter's outbound documents was retrieved._");
+  } else {
+    out.push("| seq | ts | tool | outcome | unbackedCitations | payloadSha256 |");
+    out.push("| --- | --- | --- | --- | --- | --- |");
+    for (const u of bundle.authorityProvenance.unbacked) {
+      out.push(
+        `| ${u.seq} | ${cell(u.ts)} | ${cell(u.tool)} | ${cell(u.outcome)} ` +
+          `| ${cell(u.unbackedCitations.join("; "))} | \`${cell(u.payloadSha256)}\` |`,
       );
     }
   }

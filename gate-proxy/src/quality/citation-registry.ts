@@ -17,7 +17,7 @@
 // enforced by the checker agent's workflow and attributed via agentId in the
 // receipt.
 import type { ReceiptChain } from "../receipts.ts";
-import { extractCitations, normalizeText, documentSha256 } from "../citations.ts";
+import { extractCitations, normalizeText, documentSha256, comparableCitation } from "../citations.ts";
 import { ReceiptChainCorruptError } from "../receipts.ts";
 
 // ---------------------------------------------------------------------------
@@ -52,15 +52,11 @@ const MAX_ROWS = 500;
 // ---------------------------------------------------------------------------
 
 /**
- * Spacing-insensitive comparison form: the extractor returns as-matched
- * spacing ("410 U. S. 113"), while checker rows may use compact form
- * ("410 U.S. 113"). Collapsing space-after-period on BOTH sides makes
- * coverage containment robust to that variance without touching the
- * sha-binding normalization.
+ * Spacing-insensitive comparison form. Shared with the authority-provenance
+ * registry via citations.ts:comparableCitation so registration and extraction
+ * align across both registries (see that function's doc for the contract).
  */
-function comparable(s: string): string {
-  return normalizeText(s).replace(/\.\s+/g, ".");
-}
+const comparable = comparableCitation;
 
 // ---------------------------------------------------------------------------
 // CitationRegistry

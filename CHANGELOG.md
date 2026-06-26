@@ -15,6 +15,29 @@ under `docs/builds/`.
 
 ### Added
 
+- **Authority provenance — real anti-hallucination guardrail**
+  (`gate-proxy/src/quality/authority-registry.ts`, `POST /quality/authority`,
+  `mcp-servers/legal-data/` reporter). Turns the legal-data adapter's
+  previously-inert provenance `sha256` into a closed trust loop. On a successful
+  retrieval that yields a citation, the legal-data adapter **registers the
+  authority with the gate** via a best-effort `ProvenanceReporter`
+  (`createGateProvenanceReporter`, `GATE_PROXY_URL`): `POST /quality/authority {
+  citation, sha256, source, sourceUrl?, retrievedAt? }` → the gate's new
+  `AuthorityRegistry` appends a hash-chained `quality` receipt
+  (tool=`authority_provenance`) and indexes the **normalized** citation
+  (shared `comparableCitation` from `citations.ts`, so registration and outbound
+  extraction align). The citation gate then runs
+  `AuthorityRegistry.verifyDocument(...)` on a court-filing / third-party egress
+  and **flags any cited authority that was never retrieved** — the hallucination
+  signal — recording `unbackedCitations` on the egress receipt. **Default is
+  flag/record, not block** (existing pass/block behavior unchanged); blocking is
+  policy-opt-in via the new `citationGate.requireAuthorityProvenance` knob in
+  `gate-policy.yaml`. The Matter Trust Report (`GET /receipts/bundle`) gains an
+  **Authority Provenance** section listing retrieved-authority registrations and
+  any unbacked citations (hashes + public citation identifiers only, never
+  payloads). Reporting is **best-effort by contract**: a missing
+  `GATE_PROXY_URL`, gate downtime, or network error is swallowed — retrieval
+  never depends on the gate. Build context: `docs/builds/courtlistener-legal-data-mcp.md`.
 - **MCP-server registry + renderer** (`companies/legal-operations/mcp-servers.yaml`,
   `bin/_possiblaw_mcp.py`, launcher wiring): declare MCP servers **once** and have
   the launcher render them into whichever model-runtime CLI config the active

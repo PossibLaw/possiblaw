@@ -61,6 +61,22 @@ export function documentSha256(text: string): string {
   return sha256hex(normalizeText(text));
 }
 
+/**
+ * Spacing-insensitive comparison form for a single citation. The extractor
+ * returns as-matched spacing ("410 U. S. 113"), while a registered authority or
+ * checker row may use compact form ("410 U.S. 113"). Collapsing space-after-period
+ * on BOTH sides makes equality robust to that variance without touching the
+ * sha-binding normalization. This is the ONE shared normalization that both the
+ * citation-verification registry and the authority-provenance registry use, so a
+ * citation registered on retrieval and the same citation extracted from outbound
+ * text compare identically. Exact comparable-form equality is the contract —
+ * substring containment is intentionally NOT used (a crafted value must not
+ * "cover" a different citation by sharing a common substring).
+ */
+export function comparableCitation(s: string): string {
+  return normalizeText(s).replace(/\.\s+/g, ".");
+}
+
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
