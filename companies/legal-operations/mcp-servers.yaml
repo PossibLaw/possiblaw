@@ -36,9 +36,12 @@ mcpServers:
     transport: stdio
     # Real start command from mcp-servers/legal-data/package.json ("start": "tsx src/server.ts").
     command: tsx mcp-servers/legal-data/src/server.ts
-    # The legal-data adapter's upstream (official CourtListener MCP) is OAuth-based,
-    # not a token/REST upstream — the server reads no COURTLISTENER_API_KEY. So: none.
-    auth: none
+    # The legal-data adapter's DEFAULT upstream is now headless token-REST against
+    # CourtListener REST v4 (no OAuth, no account required). COURTLISTENER_API_KEY
+    # is OPTIONAL — it raises rate limits; anonymous access works at low volume, so
+    # the env passthrough is by NAME only and never required. (The optional OAuth-MCP
+    # upstream is available behind POSSIBLAW_CL_UPSTREAM=mcp; see courtlistener-official.)
+    auth: token-env:COURTLISTENER_API_KEY
     grantTo:
       - legal-research-analyst
       - case-law-summarizer

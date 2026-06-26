@@ -2,9 +2,19 @@
 
 *Standalone build spec. Independent of the sign-off-bundle build; can be
 scheduled and shipped separately. Status: **SHIPPED** — `mcp-servers/legal-data/`
-is now a thin trust-adapter/proxy in front of the official CourtListener MCP
-(pivoted away from re-implementing REST v4); 14/14 adapter tests green, typecheck
+is a thin trust-adapter/proxy over CourtListener; adapter tests green, typecheck
 clean.*
+
+> **Upstream update (0.26.0):** the adapter's **default upstream is now headless
+> token-REST** against CourtListener REST v4
+> (`createCourtListenerRestUpstream`, `COURTLISTENER_API_KEY` optional —
+> anonymous works at low volume), exposing a fixed 4-tool set
+> (`search_opinions` / `get_opinion` / `get_citation` / `get_docket`) so a filed
+> matter can research CourtListener end-to-end with **no OAuth**. The original
+> **OAuth-MCP upstream** (`createCourtListenerUpstream`,
+> `https://mcp.courtlistener.com`) remains available, opt-in behind
+> `POSSIBLAW_CL_UPSTREAM=mcp`. The provenance envelope, query sanitization, and
+> gate authority loop are unchanged across both modes.
 
 ## Why
 

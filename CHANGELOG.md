@@ -38,6 +38,32 @@ under `docs/builds/`.
   payloads). Reporting is **best-effort by contract**: a missing
   `GATE_PROXY_URL`, gate downtime, or network error is swallowed — retrieval
   never depends on the gate. Build context: `docs/builds/courtlistener-legal-data-mcp.md`.
+- **Headless token-REST upstream for legal-data — research CourtListener
+  end-to-end with no OAuth** (`mcp-servers/legal-data/src/upstream.ts`
+  `createCourtListenerRestUpstream`, `src/server.ts`, `src/rest-upstream.test.ts`).
+  The legal-data adapter's **default** upstream is now plain HTTPS GETs against
+  **CourtListener REST v4** (`https://www.courtlistener.com/api/rest/v4/`) — no
+  OAuth, no browser redirect, no account required, so a filed matter can research
+  CourtListener headless. In REST mode the server EXPOSES a **fixed 4-tool set**
+  with proper MCP inputSchemas: `search_opinions({query, court?, filed_after?,
+  filed_before?})` → `GET /search/?type=o`, `get_opinion({id})` →
+  `GET /opinions/<id>/`, `get_citation({cite})` →
+  `GET /search/?q="<cite>"&type=o`, `get_docket({id})` → `GET /dockets/<id>/`.
+  `COURTLISTENER_API_KEY` is **optional** — sent as `Authorization: Token <key>`
+  when set, **omitted entirely** when unset (anonymous works at low volume). Each
+  invocation still runs `proxyToolCall` (sanitize → forward → wrap) with the gate
+  provenance reporter wired, so `confidential`/`privileged` matters get client
+  identifiers stripped from the query before egress and retrieved authorities are
+  registered with the gate. Non-2xx (401/403/429/5xx) or network error **throws**
+  → structured `unavailable` (never a fabricated opinion). `fetchFn` is injected
+  so the suite stubs it (zero network); test count 18 → **26**. The original
+  **OAuth-MCP upstream** (`createCourtListenerUpstream`,
+  `https://mcp.courtlistener.com`) remains available, opt-in behind
+  `POSSIBLAW_CL_UPSTREAM=mcp`. The `connector-courtlistener` skill is rewritten
+  **MCP-first** (the agent calls the 4 tools by name; raw curl is demoted to a
+  labeled fallback) and the `legal-data` registry entry's auth is now
+  `token-env:COURTLISTENER_API_KEY` (optional). Build context:
+  `docs/builds/courtlistener-legal-data-mcp.md`.
 - **MCP-server registry + renderer** (`companies/legal-operations/mcp-servers.yaml`,
   `bin/_possiblaw_mcp.py`, launcher wiring): declare MCP servers **once** and have
   the launcher render them into whichever model-runtime CLI config the active

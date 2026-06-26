@@ -1,37 +1,60 @@
 # Legal-Data MCP (`mcp-servers/legal-data/`)
 
-A thin **trust-adapter / proxy** in front of the **official CourtListener MCP**.
-Same posture as `gate-proxy/`, `eval-harness/`, and `learning-loop/`: standalone
-TypeScript, `node:test`, minimal dependencies, never modifies the pinned
-`paperclip/` submodule.
+A thin **trust-adapter / proxy** over **CourtListener**. Same posture as
+`gate-proxy/`, `eval-harness/`, and `learning-loop/`: standalone TypeScript,
+`node:test`, minimal dependencies, never modifies the pinned `paperclip/`
+submodule.
 
 This is PossibLaw's **data-layer** surface: agents get the legal slice **and**
 where it came from, when, and a fingerprint — not just an opaque vendor read.
 
-## Data source: the official CourtListener MCP
+## Two upstream modes
 
-The data source is **CourtListener's official hosted MCP server** at
-**`https://mcp.courtlistener.com`** (OAuth auth; listed in Anthropic's connector
-directory). It requires a free CourtListener account. It exposes:
+The adapter abstracts its upstream as `UpstreamCaller = (toolName, args) =>
+Promise<unknown>` (`src/types.ts`). Two upstreams are available; the server
+selects one at startup:
 
-- case law and full opinions
-- PACER documents and dockets
-- the citation network
-- oral arguments
-- judges
-- keyword **and** semantic search
-- alerts
-- a **grounded citation-verification** tool
+### Default — headless token-REST (`createCourtListenerRestUpstream`)
 
-We do **not** re-implement CourtListener's REST API (the previous version of this
-component did, with reconstructed v4 response shapes — that was fragile and
-redundant). Instead we **consume** the official MCP and add only our genuine
-value-add.
+The **default**. Plain HTTPS GETs against **CourtListener REST v4**
+(`https://www.courtlistener.com/api/rest/v4/`). **No OAuth, no browser redirect,
+no account required** — a filed matter can research CourtListener end-to-end,
+headless. A `COURTLISTENER_API_KEY` (DRF token) raises rate limits; when unset
+the `Authorization` header is **omitted entirely** and anonymous access works at
+low volume.
 
-> **Schema-agnostic on purpose.** We do not pin the upstream tool names or
-> parameter schemas. Confirm them at runtime via `tools/list`; the adapter
-> forwards args verbatim (after sanitization) and extracts provenance
-> best-effort from the result.
+In this mode the server EXPOSES a **fixed set of 4 tools** with proper MCP
+inputSchemas (so the agent runtime sees them via `tools/list`):
+
+| Tool | Params | Maps to |
+|---|---|---|
+| `search_opinions` | `query`, `court?`, `filed_after?`, `filed_before?` | `GET /search/?q=<query>&type=o[&court=][&filed_after=][&filed_before=]` |
+| `get_opinion` | `id` | `GET /opinions/<id>/` |
+| `get_citation` | `cite` | `GET /search/?q="<cite>"&type=o` |
+| `get_docket` | `id` | `GET /dockets/<id>/` |
+
+The REST upstream is **schema-agnostic**: it returns the parsed JSON verbatim and
+does not reconstruct or validate the response shape beyond what is needed to
+issue the request. On any non-2xx (401/403/429/5xx) or network error it
+**throws** — `proxyToolCall` converts that into a structured `unavailable` result
+(never a fabricated opinion). `fetchFn` is injected so tests stub it (zero
+network).
+
+### Optional — OAuth MCP (`createCourtListenerUpstream`)
+
+The **official hosted CourtListener MCP** at **`https://mcp.courtlistener.com`**
+(OAuth; in Anthropic's connector directory; requires a free CourtListener
+account). Exposes case law, PACER, citation network, oral arguments, judges,
+keyword + semantic search, alerts, and a grounded citation-verification tool.
+**Enable it by setting `POSSIBLAW_CL_UPSTREAM=mcp`** (or by configuring the OAuth
+provider module via `POSSIBLAW_CL_AUTH_PROVIDER_MODULE`). In this mode the server
+discovers the upstream catalog via `tools/list` and re-exposes each tool as a
+schema-agnostic passthrough.
+
+> **Schema-agnostic on purpose.** For the OAuth-MCP upstream we do not pin tool
+> names or parameter schemas — confirm them at runtime via `tools/list`. Either
+> way the adapter forwards args verbatim (after sanitization) and extracts
+> provenance best-effort from the result.
 
 ## What our adapter adds
 
@@ -41,8 +64,8 @@ For **every** proxied tool call (`adapter.proxyToolCall`):
    names, emails, SSNs, EINs, phones) from query/search-like string args for
    `confidential` / `privileged` matters, **before** anything is forwarded
    upstream. Standard tier is a pass-through. (`src/sanitize.ts`.)
-2. **forward** — calls the injected `UpstreamCaller` (the official MCP) with the
-   sanitized args.
+2. **forward** — calls the injected `UpstreamCaller` (the default token-REST
+   upstream, or the optional OAuth MCP) with the sanitized args.
 3. **`wrapWithProvenance(result, { now })`** — wraps the upstream result in a
    **provenance envelope** with a `sha256` aligned with gate-proxy's citation
    gate.
@@ -157,10 +180,12 @@ same authority a previous fetch fingerprinted.
 
 ## Design: injected upstream, no live calls in tests
 
-The upstream MCP is injected as `UpstreamCaller` (`src/types.ts`). The pure,
+The upstream is injected as `UpstreamCaller` (`src/types.ts`). The pure,
 fully-tested core (`src/adapter.ts`) is exercised by `node:test` with a
-**stubbed** `UpstreamCaller` and makes **zero** network calls and uses **no**
-OAuth. The real wiring (`src/upstream.ts`, `src/server.ts`) connects the live
+**stubbed** `UpstreamCaller`, and the default REST upstream
+(`createCourtListenerRestUpstream`, `src/rest-upstream.test.ts`) is exercised
+with a **stubbed `fetchFn`** — both make **zero** network calls and use **no**
+OAuth. The OAuth-MCP wiring (`createCourtListenerUpstream`) connects the live
 OAuth-gated CourtListener MCP and is intentionally thin; it is **not** exercised
 by the test suite (no OAuth credentials in CI).
 
@@ -168,23 +193,31 @@ by the test suite (no OAuth credentials in CI).
 
 ```sh
 pnpm -C mcp-servers/legal-data install     # install deps
-pnpm -C mcp-servers/legal-data test        # node:test suite (18 tests, zero network)
+pnpm -C mcp-servers/legal-data test        # node:test suite (26 tests, zero network)
 pnpm -C mcp-servers/legal-data typecheck   # tsc --noEmit
-pnpm -C mcp-servers/legal-data start        # run the stdio MCP proxy (needs OAuth wiring)
+pnpm -C mcp-servers/legal-data start        # run the stdio MCP proxy (default: headless REST)
 ```
 
 ## MCP wiring
 
-- `src/upstream.ts` — `createCourtListenerUpstream(config)` connects to
-  `https://mcp.courtlistener.com` using the official `@modelcontextprotocol/sdk`
-  **client** over the Streamable-HTTP transport with an injected
-  `OAuthClientProvider`. Thin; forwards `callTool` verbatim. **Requires a
-  CourtListener account + a completed OAuth flow — not unit-tested.**
-- `src/server.ts` — a thin stdio MCP **proxy**: on startup it connects upstream,
-  runs `tools/list`, and re-exposes each upstream tool as a pass-through whose
-  every invocation runs `proxyToolCall`. The OAuth `OAuthClientProvider` is
-  host-supplied via `POSSIBLAW_CL_AUTH_PROVIDER_MODULE` (credential storage is a
-  host concern); the SDK ships no persistent provider.
+- `src/upstream.ts` —
+  - `createCourtListenerRestUpstream({ apiKey?, fetchFn?, baseUrl? })` — the
+    **default headless** upstream. Maps the fixed 4 tools to CourtListener REST
+    v4 GETs, injects `Authorization: Token <key>` **only** when `apiKey` is set,
+    and throws on non-2xx / network error. `fetchFn` is injected for tests.
+  - `createCourtListenerUpstream(config)` — the **optional OAuth-MCP** upstream:
+    connects to `https://mcp.courtlistener.com` using the official
+    `@modelcontextprotocol/sdk` **client** over Streamable-HTTP with an injected
+    `OAuthClientProvider`. Forwards `callTool` verbatim. **Requires a
+    CourtListener account + a completed OAuth flow — not unit-tested.**
+- `src/server.ts` — a thin stdio MCP **proxy** that selects the upstream at
+  startup: **default = headless token-REST** (exposes the fixed 4 tools with real
+  inputSchemas, reads optional `COURTLISTENER_API_KEY`). Set
+  `POSSIBLAW_CL_UPSTREAM=mcp` (or configure
+  `POSSIBLAW_CL_AUTH_PROVIDER_MODULE`) to use the OAuth-MCP upstream instead, in
+  which case it runs `tools/list` and re-exposes each upstream tool as a
+  pass-through. Either way every invocation runs `proxyToolCall`
+  (sanitize → forward → wrap) with the gate provenance reporter wired in.
 
 ## Source-of-truth notes
 
