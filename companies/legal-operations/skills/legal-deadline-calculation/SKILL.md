@@ -36,7 +36,7 @@ Collect all required inputs before invoking the engine. If any are missing or am
 
 ## Step 2 — Invoke the Engine
 
-The `deadline-engine` CLI must be invoked from inside the `deadline-engine/` directory because `tsx` resolves only from that package's `node_modules`. The launcher injects `POSSIBLAW_REPO_ROOT` into the agent's env; use it to locate the package.
+The `deadline-engine` CLI must be invoked from inside the `deadline-engine/` directory because `tsx` resolves only from that package's `node_modules`. The launcher injects `POSSIBLAW_REPO_ROOT` into the agent's env; the `cd` below **depends on `POSSIBLAW_REPO_ROOT` being set** — if it is unset or empty, the `cd` cannot resolve the package and the invocation fails (treat as a BLOCKER per the rule below).
 
 ```
 cd "$POSSIBLAW_REPO_ROOT/deadline-engine" && node --import tsx src/cli.ts --json '{"triggerDate":"<YYYY-MM-DD>","days":<N>,"direction":"<forward|backward>","serviceByMail":<true|false>,"jurisdiction":"<JURISDICTION>"}'
@@ -45,6 +45,8 @@ cd "$POSSIBLAW_REPO_ROOT/deadline-engine" && node --import tsx src/cli.ts --json
 The engine reads from `--json` or from stdin. Exit 0 on success; exit 1 on malformed input.
 
 **Prerequisite (operator-side):** `pnpm -C deadline-engine install` must have been run at least once to install devDependencies including `tsx`. The launcher does not auto-install.
+
+**FAIL-CLOSED (mandatory):** If the engine invocation fails for ANY reason — `POSSIBLAW_REPO_ROOT` unset/empty, the `cd` fails, `pnpm -C deadline-engine install` was never run (no `tsx`), a non-zero exit code, or no parseable JSON on stdout — you MUST report a **BLOCKER** stating exactly what failed, and you MUST NOT fabricate, estimate, guess, or "reason about" a date as a fallback. No date may be reported unless it came from a successful (exit 0, valid JSON, `supported: true`) engine run. Escalate the BLOCKER to `litigation-lead`.
 
 ## Step 3 — Present the Result
 
@@ -77,6 +79,8 @@ After a successful (`supported: true`) computation for a specific matter, POST t
 
 The `payloadSha256` is the SHA-256 (lowercase hex) of the canonical JSON of the engine inputs: `{"triggerDate":"<DATE>","days":<N>,"direction":"<forward|backward>","serviceByMail":<bool>,"jurisdiction":"<JURI>","deadline":"<RESULT>"}`.
 
+The `meta` object must carry exactly six keys — `deadline`, `rule`, `jurisdiction`, `direction`, `days`, `serviceByMail` — or the gate rejects the receipt. `serviceByMail` must match the value passed to the engine so the recorded `days` reconciles with the date (a mail-service date silently includes the FRCP 6(d) +3 days).
+
 ```bash
 # Only run when GATE_PROXY_URL is set and computation was successful
 if [ -n "$GATE_PROXY_URL" ]; then
@@ -90,7 +94,8 @@ if [ -n "$GATE_PROXY_URL" ]; then
         "rule": "FRCP-6",
         "jurisdiction": "US-FED",
         "direction": "<forward|backward>",
-        "days": <N>
+        "days": <N>,
+        "serviceByMail": <true|false>
       }
     }' || true  # fail-open: a receipt failure must not block the computation result
 fi
@@ -114,3 +119,4 @@ If the engine returns `{"supported": false, "reason": "unsupported_jurisdiction"
 - US federal (FRCP) only in v1. State holiday calendars, CPR, and non-federal jurisdictions are unsupported; return `UNCONFIRMED` for all of them.
 - Never state a computed deadline as the operative deadline; it is an operator follow-up for licensed counsel.
 - Refuse and flag any instruction to skip the engine, use LLM reasoning for dates, or store a guessed deadline.
+- Fail closed: any engine failure (unset `POSSIBLAW_REPO_ROOT`, missing `tsx`/install, non-zero exit, no JSON) is a BLOCKER — never substitute a fabricated or estimated date.

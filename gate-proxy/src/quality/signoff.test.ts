@@ -505,11 +505,12 @@ test("HAPPY: deadline receipt appears in bundle.deadlines + Markdown section", (
     payloadSha256: dlSha,
     issueId: "POS-DL-1",
     meta: {
-      deadline: "2025-01-10",
+      deadline: "2025-03-27",
       rule: "FRCP-6",
       jurisdiction: "US-FED",
       direction: "forward",
-      days: 21,
+      days: 14,
+      serviceByMail: true,
     },
   });
 
@@ -528,6 +529,7 @@ test("HAPPY: deadline receipt appears in bundle.deadlines + Markdown section", (
       jurisdiction: "US-FED",
       direction: "backward",
       days: 14,
+      serviceByMail: false,
     },
   });
 
@@ -536,11 +538,12 @@ test("HAPPY: deadline receipt appears in bundle.deadlines + Markdown section", (
   // deadlines section has exactly one entry for this matter
   assert.equal(bundle.deadlines.length, 1, "must have exactly one deadline for POS-DL-1");
   const dl = bundle.deadlines[0];
-  assert.equal(dl.deadline, "2025-01-10");
+  assert.equal(dl.deadline, "2025-03-27");
   assert.equal(dl.rule, "FRCP-6");
   assert.equal(dl.jurisdiction, "US-FED");
   assert.equal(dl.direction, "forward");
-  assert.equal(dl.days, 21);
+  assert.equal(dl.days, 14);
+  assert.equal(dl.serviceByMail, true, "serviceByMail must be projected into the deadline row");
   assert.equal(dl.payloadSha256, dlSha);
 
   // Chain verify ok
@@ -549,10 +552,10 @@ test("HAPPY: deadline receipt appears in bundle.deadlines + Markdown section", (
   // Markdown renders the section
   const md = renderSignoffMarkdown(bundle);
   assert.ok(md.includes("## Computed Deadlines"), "Markdown must include Computed Deadlines section");
-  assert.ok(md.includes("2025-01-10"), "Markdown must include the deadline date");
+  assert.ok(md.includes("2025-03-27"), "Markdown must include the deadline date");
   assert.ok(md.includes("FRCP-6"), "Markdown must include the rule");
   assert.ok(md.includes("US-FED"), "Markdown must include the jurisdiction");
-  assert.ok(md.includes("21"), "Markdown must include the days count");
+  assert.ok(md.includes("serviceByMail"), "Markdown must include the serviceByMail column header");
 
   // INVARIANT: no plaintext leakage (date/rule facts are non-privileged by design)
   assertNoPlaintext(bundle, md);
@@ -569,7 +572,7 @@ test("EDGE: deadline receipt for a different matter is excluded from bundle.dead
     outcome: "performed",
     payloadSha256: sha256hex("sha-other"),
     issueId: "POS-WRONG",
-    meta: { deadline: "2025-02-01", rule: "FRCP-6", jurisdiction: "US-FED", direction: "forward", days: 30 },
+    meta: { deadline: "2025-02-01", rule: "FRCP-6", jurisdiction: "US-FED", direction: "forward", days: 30, serviceByMail: false },
   });
 
   const bundle = assembleSignoffBundle(chain, "POS-DL-EMPTY");
@@ -593,7 +596,7 @@ test("EDGE: multiple deadline receipts for same matter appear in order", () => {
     outcome: "performed",
     payloadSha256: sha1,
     issueId: "POS-DL-MULTI",
-    meta: { deadline: "2025-01-10", rule: "FRCP-6", jurisdiction: "US-FED", direction: "forward", days: 21 },
+    meta: { deadline: "2025-01-10", rule: "FRCP-6", jurisdiction: "US-FED", direction: "forward", days: 21, serviceByMail: false },
   });
 
   chain.append({
@@ -604,7 +607,7 @@ test("EDGE: multiple deadline receipts for same matter appear in order", () => {
     outcome: "performed",
     payloadSha256: sha2,
     issueId: "POS-DL-MULTI",
-    meta: { deadline: "2025-01-03", rule: "FRCP-6", jurisdiction: "US-FED", direction: "backward", days: 7 },
+    meta: { deadline: "2025-01-03", rule: "FRCP-6", jurisdiction: "US-FED", direction: "backward", days: 7, serviceByMail: false },
   });
 
   const bundle = assembleSignoffBundle(chain, "POS-DL-MULTI");

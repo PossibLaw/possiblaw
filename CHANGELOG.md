@@ -33,20 +33,28 @@ Phase 4 of the trust pipeline: a deterministic FRCP Rule 6 deadline engine (US-F
     `/receipts/facade` anti-forgery pattern: `kind:"deadline"` is hard-coded server-side
     (never read from the request body), `issueId` is always set to `matterId` so the
     deadline joins the per-matter bundle. Validates: `matterId` (SAFE_ID_RE), `payloadSha256`
-    (64-hex), and a constrained `meta` with exactly `{deadline, rule, jurisdiction, direction, days}`.
+    (64-hex), and a constrained `meta` with exactly
+    `{deadline, rule, jurisdiction, direction, days, serviceByMail}`.
     Returns `{recorded:true, seq, hash}` on success; structured 4xx on bad body.
+    `serviceByMail` is recorded so a mail-service deadline's `days` reconciles with the
+    date (which silently includes the FRCP 6(d) +3 mail days).
   - `gate-proxy/src/quality/signoff.ts`: `ComputedDeadlineEntry` interface + `deadlines`
     field on `SignoffBundle` projects `kind:"deadline"` receipts for the matter.
-    `renderSignoffMarkdown` adds a "Computed Deadlines (deterministic — FRCP Rule 6)" section.
+    `renderSignoffMarkdown` adds a "Computed Deadlines (deterministic — FRCP Rule 6)" section
+    whose blurb is explicit that the gate attests the record, it does not re-run the computation.
     No matter content is exposed — only date/rule/jurisdiction facts and the computation SHA.
   - `legal-deadline-calculation/SKILL.md` (Step 3b): after a successful computation, the
     skill POSTs a deadline receipt to `$GATE_PROXY_URL/receipts/deadline`; if the gate is
     not running, the deadline is returned unreceipted (fail-open for the computation, not the gate).
+    The skill is also fail-closed on the computation itself: any engine failure
+    (`POSSIBLAW_REPO_ROOT` unset, missing `tsx`/install, non-zero exit, no JSON) is a BLOCKER —
+    the agent never fabricates or estimates a date.
 
 - **Eval cases** (4 cases under `companies/legal-operations/evals/cases/`):
   - `deadline-frcp-answer.md` — happy: 21-day forward answer → 2025-01-10.
   - `deadline-holiday-roll.md` — edge: weekend roll (FRCP 6(a)(1)(C)).
-  - `deadline-backward-mail.md` — edge: backward direction + FRCP 6(d) mail service.
+  - `deadline-backward-mail.md` — edge: backward direction (no mail; the engine's FRCP 6(d)
+    mail rule is forward-only) → 2025-02-24.
   - `deadline-unsupported-jurisdiction.md` — failure/security: CA-CCP → UNCONFIRMED, no date.
 
 - **Docs**:
@@ -59,11 +67,12 @@ Phase 4 of the trust pipeline: a deterministic FRCP Rule 6 deadline engine (US-F
 ### Tests
 
 - `gate-proxy/src/receipts.test.ts`: 1 new test (+1). `kind:"deadline"` round-trip.
-- `gate-proxy/src/server.test.ts`: 8 new tests (+8). Valid receipt, anti-forgery, missing
-  matterId, bad sha, extra meta field, wrong rule, bundle integration, malformed JSON.
+- `gate-proxy/src/server.test.ts`: 10 new tests (+10). Valid receipt, anti-forgery, missing
+  matterId, bad sha, extra meta field, wrong rule, bundle integration, malformed JSON,
+  serviceByMail:true recorded, missing serviceByMail rejected.
 - `gate-proxy/src/quality/signoff.test.ts`: 3 new tests (+3). Deadline in bundle, wrong-matter
   exclusion, multiple deadlines.
-- Gate-proxy total: **283** (was 271 on main before Phase 4).
+- Gate-proxy total: **285** (was 271 on main before Phase 4).
 - `deadline-engine/` node:test suite: **35** (unchanged).
 
 ---

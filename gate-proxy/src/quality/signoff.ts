@@ -137,6 +137,8 @@ export interface ComputedDeadlineEntry {
   direction: string;
   /** Period in calendar days. */
   days: number;
+  /** Whether FRCP 6(d) mail service (+3 days, forward only) was applied. */
+  serviceByMail: boolean;
   /** SHA-256 of the deterministic computation input (from the deadline-calculator skill). */
   payloadSha256: string;
 }
@@ -404,6 +406,7 @@ export function assembleSignoffBundle(
       jurisdiction: metaString(e.body, "jurisdiction") ?? "",
       direction: metaString(e.body, "direction") ?? "",
       days: (typeof e.body.meta?.["days"] === "number" ? e.body.meta["days"] as number : 0),
+      serviceByMail: e.body.meta?.["serviceByMail"] === true,
       payloadSha256: e.body.payloadSha256,
     }));
 
@@ -633,22 +636,23 @@ export function renderSignoffMarkdown(bundle: SignoffBundle): string {
   out.push("## Computed Deadlines (deterministic — FRCP Rule 6)");
   out.push("");
   out.push(
-    "_Deadlines computed by the deadline-engine (FRCP Rule 6, US-FED v1). " +
-      "Carries date/rule/jurisdiction facts and the computation SHA only — no matter content. " +
-      "This section makes deadlines VISIBLE and audited; it does not yet block a late filing " +
-      "(the hard gate is a documented follow-up). State courts and CPR are unsupported; those " +
+    "_Computed Deadlines (deterministic FRCP Rule 6, US-FED v1) — recorded for this matter; " +
+      "the gate attests the record (date/rule/jurisdiction facts + computation SHA, no matter content), " +
+      "it does not re-run the computation. Makes deadlines VISIBLE and audited; it does not yet block a " +
+      "late filing (the hard gate is a documented follow-up). State courts and CPR are unsupported; those " +
       "requests return UNCONFIRMED and do not generate a receipt._",
   );
   out.push("");
   if (bundle.deadlines.length === 0) {
     out.push("_No computed deadlines for this matter._");
   } else {
-    out.push("| seq | ts | deadline | rule | jurisdiction | direction | days | payloadSha256 |");
-    out.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
+    out.push("| seq | ts | deadline | rule | jurisdiction | direction | days | serviceByMail | payloadSha256 |");
+    out.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const d of bundle.deadlines) {
       out.push(
         `| ${d.seq} | ${cell(d.ts)} | ${cell(d.deadline)} | ${cell(d.rule)} ` +
-          `| ${cell(d.jurisdiction)} | ${cell(d.direction)} | ${d.days} | \`${cell(d.payloadSha256)}\` |`,
+          `| ${cell(d.jurisdiction)} | ${cell(d.direction)} | ${d.days} | ${d.serviceByMail ? "yes" : "no"} ` +
+          `| \`${cell(d.payloadSha256)}\` |`,
       );
     }
   }

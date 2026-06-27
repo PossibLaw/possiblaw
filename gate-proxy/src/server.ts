@@ -793,11 +793,13 @@ export function createGateServer(deps: GateServerDeps): http.Server {
         }
         const payloadSha256 = payloadSha256Raw as string;
 
-        // Validate meta — required plain object with EXACTLY the five allowed keys.
-        // Reject extra, missing, or mis-typed fields.
+        // Validate meta — required plain object with EXACTLY the six allowed keys.
+        // Reject extra, missing, or mis-typed fields. serviceByMail is recorded so
+        // a mail-service deadline's `days` reconciles with the date (which silently
+        // includes the FRCP 6(d) +3 mail days).
         const metaRaw = b["meta"];
         const DEADLINE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-        const DEADLINE_EXPECTED_KEYS = "days,deadline,direction,jurisdiction,rule"; // sorted
+        const DEADLINE_EXPECTED_KEYS = "days,deadline,direction,jurisdiction,rule,serviceByMail"; // sorted
         if (metaRaw === null || typeof metaRaw !== "object" || Array.isArray(metaRaw)) {
           deps.receipts.append({
             kind: "deadline",
@@ -808,7 +810,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             payloadSha256: sha256hex(rawBody),
           });
           sendJson(res, 400, {
-            error: "invalid_meta: required plain object {deadline:YYYY-MM-DD, rule:FRCP-6, jurisdiction:US-FED, direction:forward|backward, days:positive-integer}",
+            error: "invalid_meta: required plain object {deadline:YYYY-MM-DD, rule:FRCP-6, jurisdiction:US-FED, direction:forward|backward, days:positive-integer, serviceByMail:boolean}",
           });
           return;
         }
@@ -824,7 +826,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             payloadSha256: sha256hex(rawBody),
           });
           sendJson(res, 400, {
-            error: "invalid_meta: must have exactly {deadline, rule, jurisdiction, direction, days} — no extra or missing fields",
+            error: "invalid_meta: must have exactly {deadline, rule, jurisdiction, direction, days, serviceByMail} — no extra or missing fields",
           });
           return;
         }
@@ -833,7 +835,8 @@ export function createGateServer(deps: GateServerDeps): http.Server {
           meta["rule"] !== "FRCP-6" ||
           meta["jurisdiction"] !== "US-FED" ||
           (meta["direction"] !== "forward" && meta["direction"] !== "backward") ||
-          typeof meta["days"] !== "number" || !Number.isInteger(meta["days"]) || (meta["days"] as number) < 1
+          typeof meta["days"] !== "number" || !Number.isInteger(meta["days"]) || (meta["days"] as number) < 1 ||
+          typeof meta["serviceByMail"] !== "boolean"
         ) {
           deps.receipts.append({
             kind: "deadline",
@@ -844,7 +847,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             payloadSha256: sha256hex(rawBody),
           });
           sendJson(res, 400, {
-            error: "invalid_meta: deadline must be YYYY-MM-DD, rule must be FRCP-6, jurisdiction must be US-FED, direction must be forward|backward, days must be positive integer",
+            error: "invalid_meta: deadline must be YYYY-MM-DD, rule must be FRCP-6, jurisdiction must be US-FED, direction must be forward|backward, days must be positive integer, serviceByMail must be boolean",
           });
           return;
         }
@@ -866,6 +869,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             jurisdiction: meta["jurisdiction"],
             direction: meta["direction"],
             days: meta["days"],
+            serviceByMail: meta["serviceByMail"],
           },
         });
 

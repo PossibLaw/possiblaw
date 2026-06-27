@@ -272,6 +272,10 @@ The engine applies the federal legal public holidays listed in 5 U.S.C. § 6103 
 
 The `deadline-engine` package relies on `tsx` (a devDependency) to run from source. `pnpm -C deadline-engine install` must be run at least once before the `deadline-calculator` agent can invoke the CLI. The launcher does not auto-install it.
 
+### Engine failure is a hard BLOCKER — no fabricated fallback date
+
+The `deadline-calculator` agent invokes the engine via `cd "$POSSIBLAW_REPO_ROOT/deadline-engine" && node --import tsx src/cli.ts ...`, which depends on `POSSIBLAW_REPO_ROOT` being set in the agent env (the launcher injects it). If the engine invocation fails for ANY reason — `POSSIBLAW_REPO_ROOT` unset/empty, the `cd` fails, `tsx` not installed (`pnpm -C deadline-engine install` never run), a non-zero exit, or no parseable JSON — the agent reports a **BLOCKER** and must NOT fabricate, estimate, or guess a date. A date is reported only from a successful (exit 0, valid JSON, `supported: true`) engine run. This fail-closed posture is the whole point of offloading date math to a deterministic engine.
+
 ### Deadline receipt is audit-only; it does not yet block a late filing
 
 `POST /receipts/deadline` makes a computed deadline **visible and audited** in the Matter Trust Report (`GET /receipts/bundle?issueId=<matter>` — the `deadlines` section). It does **not yet** block a filing submitted past its deadline. The hard "block-on-late-filing" gate is a documented follow-up requiring a real-time court-clock comparison at egress time.

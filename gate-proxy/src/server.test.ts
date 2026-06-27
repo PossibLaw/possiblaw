@@ -2087,6 +2087,7 @@ describe("gate server", () => {
     jurisdiction: "US-FED",
     direction: "forward",
     days: 21,
+    serviceByMail: false,
   };
 
   // deadline-1: valid deadline receipt → 200, chain verify ok, kind=deadline, issueId=matterId
@@ -2138,6 +2139,7 @@ describe("gate server", () => {
     assert.equal(last.body.meta?.["jurisdiction"], "US-FED");
     assert.equal(last.body.meta?.["direction"], "forward");
     assert.equal(last.body.meta?.["days"], 21);
+    assert.equal(last.body.meta?.["serviceByMail"], false);
 
     await close();
   });
@@ -2315,6 +2317,7 @@ describe("gate server", () => {
     assert.equal(dl["jurisdiction"], "US-FED");
     assert.equal(dl["direction"], "forward");
     assert.equal(dl["days"], 21);
+    assert.equal(dl["serviceByMail"], false);
     assert.equal(dl["payloadSha256"], dlSha);
 
     // Markdown bundle also shows the section
@@ -2324,6 +2327,7 @@ describe("gate server", () => {
     assert.ok(md.includes("## Computed Deadlines"), "Markdown must include Computed Deadlines section");
     assert.ok(md.includes("2025-01-10"), "Markdown must include the deadline date");
     assert.ok(md.includes("FRCP-6"), "Markdown must include the rule");
+    assert.ok(md.includes("serviceByMail"), "Markdown must include the serviceByMail column");
 
     // Chain must still verify
     const v = receipts.verify();
@@ -2353,6 +2357,67 @@ describe("gate server", () => {
     const j = await httpRes.json() as Record<string, unknown>;
     assert.ok(String(j["error"]).includes("invalid_json"), `expected invalid_json, got ${j["error"]}`);
 
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "deadline");
+    assert.equal(last.body.outcome, "error");
+
+    await close();
+  });
+
+  // deadline-9: serviceByMail:true is recorded (audit completeness — days reconciles with date)
+  it("POST /receipts/deadline: serviceByMail:true is recorded in meta", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const dlSha = sha256hex("mail-deadline-sha");
+    const { status } = await postDeadlineReceipt(baseUrl, {
+      matterId: "matter-DL-9",
+      payloadSha256: dlSha,
+      meta: { ...VALID_DEADLINE_META, deadline: "2025-03-27", days: 14, serviceByMail: true },
+    });
+
+    assert.equal(status, 200);
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "deadline");
+    assert.equal(last.body.meta?.["serviceByMail"], true, "serviceByMail:true must be recorded in the receipt meta");
+    assert.equal(last.body.meta?.["days"], 14);
+
+    // serviceByMail surfaces in the bundle row
+    const bundleRes = await fetch(`${baseUrl}/receipts/bundle?issueId=matter-DL-9`);
+    const bundle = await bundleRes.json() as Record<string, unknown>;
+    const dl = (bundle["deadlines"] as Array<Record<string, unknown>>)[0];
+    assert.equal(dl["serviceByMail"], true);
+
+    await close();
+  });
+
+  // deadline-10: missing serviceByMail (5 keys) → 400 (exact-key validation rejects missing field)
+  it("POST /receipts/deadline: missing serviceByMail → 400 + error receipt", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postDeadlineReceipt(baseUrl, {
+      matterId: "matter-DL-10",
+      payloadSha256: sha256hex("missing-mail"),
+      meta: { deadline: "2025-01-10", rule: "FRCP-6", jurisdiction: "US-FED", direction: "forward", days: 21 },
+    });
+
+    assert.ok(status >= 400 && status < 500, `must be 4xx, got ${status}`);
+    assert.ok(String((json as Record<string, unknown>)["error"]).includes("invalid_meta"));
     const last = receipts.entries().at(-1)!;
     assert.equal(last.body.kind, "deadline");
     assert.equal(last.body.outcome, "error");
