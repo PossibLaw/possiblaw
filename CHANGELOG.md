@@ -11,19 +11,20 @@ Versioning: [SemVer](https://semver.org/).
 
 New `orchestration-eval/` package measuring whether chief-of-staff orchestration (Arm B) outperforms
 the strongest single-agent one-shot (Arm A) on a curated subset of Harvey LAB legal tasks, and at
-what cost. Honest scope: 9 structurally-fitting tasks from a ~1,200-task dataset; live runs are
+what cost. Honest scope: 9 structurally-fitting tasks from a 1,749-task dataset (Harvey's README badges ~1,660 / 24+contracting); live runs are
 operator-gated on a disposable Paperclip instance.
 
 ### Added
 
 - **`orchestration-eval/` package** (Tasks 1–9). Standalone TypeScript CLI (`bin/orchestration-eval`)
-  with six modules: `paperclip-client` (issue create, document put, budget patch, cost summary),
-  `extract` (deliverable fetcher + Harvey `parse_doc` bridge for DOCX/PDF/XLSX/EML via `uv`),
-  `await-completion` (issue-status poller with configurable timeout), `runner` (Arm A single-agent
-  and Arm B chief-of-staff execution), `judge` (Harvey LAB `run_eval` bridge; default judge model
-  `claude-sonnet-4-6`, requires `ANTHROPIC_API_KEY`). Report module aggregates K-run all-pass rates,
-  mean cost, and variance per (task, arm, config) cell and renders a Markdown A-vs-B delta table
-  with a SKIPPED section. 23 node:test tests.
+  with six modules: `paperclip-client` (issue create, document put, budget patch, cost summary,
+  child-issue listing for Arm A decomposition detection), `extract` (deliverable fetcher + Harvey
+  `parse_doc` bridge for DOCX/PDF/XLSX/EML via `uv`), `await-completion` (issue-status poller with
+  configurable timeout), `runner` (Arm A single-agent and Arm B chief-of-staff execution; produces
+  real `.docx` deliverables via injectable pandoc seam; records `childIssueCount` per run),
+  `judge` (Harvey LAB `run_eval` bridge; default judge model `claude-sonnet-4-6`, requires
+  `ANTHROPIC_API_KEY`). Report module aggregates K-run all-pass rates as `passed/total` per cell,
+  mean cost, excluded + errored SKIPPED count in header, and Arm A decomposition warnings. 32 node:test tests.
 
 - **LAB adapter** (`eval-harness/src/adapters/lab.ts`). Maps Harvey LAB `lab-manifest.yaml` entries
   into `Case[]` for the eval harness. Structural inclusion rule only (single parent issue: fixed
@@ -48,15 +49,17 @@ operator-gated on a disposable Paperclip instance.
 - `docs/operator-test-checklist.md` — new section G: Orchestration eval (Harvey LAB) runbook:
   submodule init, prereqs (`uv`, `pandoc`, API keys), disposable-instance launch on port 3199
   (never 3100), ID collection, exact `orchestration-eval run` command, teardown.
-- `docs/known-limitations.md` — new "Orchestration eval" section: curated subset caveats, SKIPPED
-  semantics, non-determinism / K-run averaging, text fidelity caveat vs. native .docx, cost metering
-  scope, Arm A is the ceiling (not a strawman), GLM 5.2 claim UNCONFIRMED.
+- `docs/known-limitations.md` — new "Orchestration eval" section: curated subset caveats (1,749 tasks
+  / 25 practice-area dirs), SKIPPED semantics (excluded + errored, listed with reasons, counted in header),
+  K-run spread shown as passed/total per cell, real `.docx` via pandoc (pandoc required on eval host),
+  Arm A validity threat (decomposition measured + flagged; operators must exclude decomposed runs),
+  cost metering scope, GLM 5.2 claim UNCONFIRMED.
 - `docs/operator-walkthrough.md` — "Measure the thesis (Harvey LAB A/B)" pointer section.
 - `CLAUDE.md` — Code Map: `orchestration-eval/`, `harvey-lab/`, LAB adapter; Commands: test + submodule init.
 
 ### Tests
 
-- `pnpm -C orchestration-eval test`: **23/23 pass**, 0 fail, 0 skip.
+- `pnpm -C orchestration-eval test`: **32/32 pass**, 0 fail, 0 skip.
 - `pnpm -C orchestration-eval typecheck`: tsc clean (no errors).
 - `pnpm -C eval-harness test`: **32/32 pass** (includes 2 new `loadLabCases` tests for the LAB adapter).
 - `python3 bin/_possiblaw_variants.py --self-test`: OK.

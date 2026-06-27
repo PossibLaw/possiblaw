@@ -524,29 +524,31 @@ with unconfigured deployments). The launcher always sets both variables.
 
 ### Curated subset only — not a full Harvey LAB run
 
-The orchestration eval covers a **curated subset of 9 tasks** from Harvey LAB, selected purely on structural fit (one parent issue: fixed document set in, one reconstituted deliverable out). Harvey LAB contains ~1,200 tasks across 24 practice areas; the vast majority do not fit PossibLaw's single-issue model and are explicitly **excluded**. The excluded tasks are logged in `layer/evals/datasets/lab/lab-manifest.yaml` with their exclusion reasons.
+The orchestration eval covers a **curated subset of 9 tasks** from Harvey LAB, selected purely on structural fit (one parent issue: fixed document set in, one reconstituted deliverable out). Harvey LAB contains 1,749 tasks across 25 practice-area directories (Harvey's README badges ~1,660 / 24+contracting); the vast majority do not fit PossibLaw's single-issue model and are explicitly **excluded**. The excluded tasks are logged in `layer/evals/datasets/lab/lab-manifest.yaml` with their exclusion reasons.
 
 Results should be described as "a curated subset of Harvey LAB (9 tasks)" — never as "we ran Harvey LAB" or "Harvey LAB results."
 
 ### Non-fitting tasks are SKIPPED, not failed
 
-Tasks in the curated set whose documents cannot be parsed (unsupported format, parser error) or whose paperclip issue cannot be created are **SKIPPED** and logged in the run report with their skip reason. A SKIPPED task does not count as a failure or a pass — it is excluded from the A/B score computation. The SKIPPED count is surfaced in the report header.
+Tasks that are structurally excluded (listed in the manifest's `excluded` section) or that error during a run (document parse failure, issue creation failure) are **SKIPPED** and listed in the run report with their skip reason. A SKIPPED task does not count as a failure or a pass — it is excluded from the A/B score computation. The SKIPPED count (excluded + errored) is surfaced in the report header and each skipped task is listed with its reason in the SKIPPED section of the report.
 
-### Non-determinism: averaged over K runs with variance
+### Non-determinism: spread over K runs per cell
 
-Each task is run K times (default 3) per arm. The reported score is the **mean all-pass rate** across K runs; variance is included in the report. A single run should not be interpreted as a stable result. Variance above ~0.15 on a task indicates meaningful non-determinism in that agent/document combination.
+Each task is run K times (default 3) per arm. The reported score shows the **all-pass rate as passed/total** across K runs (e.g. `67% (2/3)`) so the per-cell spread is directly visible. A single run should not be interpreted as a stable result. Wide variation (e.g. 1/3 vs 3/3) across runs indicates meaningful non-determinism in that agent/document combination.
 
-### Deliverable quality: text fidelity caveat
+### Deliverable quality: real .docx produced via pandoc
 
-Harvey LAB tasks expect a legal work product. PossibLaw agents write deliverables as Markdown text and the orchestration runner reads the issue's primary work product as UTF-8 text. The Harvey LAB judge also reads UTF-8, so the comparison is structurally sound. However, the judge was designed against native `.docx` outputs; formatting cues (table layout, heading hierarchy, numbered lists) may be rendered differently in the text round-trip. This introduces a **fidelity gap** relative to a native-DOCX submission.
+Harvey LAB tasks expect a legal work product. PossibLaw agents write deliverables as Markdown text. The runner converts Markdown to a real `.docx` file via `pandoc -f markdown -o <file>.docx` before passing the file to Harvey's scorer, which routes `.docx` filenames through pandoc for text extraction. If pandoc is unavailable or fails, the runner falls back to writing the Markdown text directly (fail-soft) — in that case Harvey's scorer will report a pandoc error and the score for that run will be invalid. `pandoc` must be installed on the eval host for valid `.docx` scoring.
 
 ### Cost metering: OpenRouter only (`openrouter-cost` variant)
 
 The `openrouter-cost` variant pins GLM 5.2 (`openrouter/z-ai/glm-5.2`) across all lanes and is the only variant that produces per-token cost data via the OpenRouter usage API. Subscription variants (`codex`, `claude`, `gemini`) are billed at a flat rate and report `costCents: 0`; cost columns in their reports are structurally present but uninformative.
 
-### Arm A is the strongest single-agent one-shot, not a strawman
+### Arm A validity: decomposition is measured, not suppressed
 
-Arm A assigns the highest-capability single agent for each task (the relevant practice-area lead, as declared in the manifest's `arm_a_agent` field). It is not a naive or strawman baseline — it represents the best one-shot single-agent performance PossibLaw can achieve on that task. Arm B (chief-of-staff orchestration) is measured against this ceiling.
+Arm A assigns the highest-capability single agent for each task (the relevant practice-area lead, as declared in the manifest's `arm_a_agent` field). It is not a naive or strawman baseline — it represents the best single-agent performance PossibLaw can achieve on that task. Arm B (chief-of-staff orchestration) is measured against this ceiling.
+
+**VALIDITY THREAT:** Arm A assignees are practice-area leads that CAN delegate (spawn child issues in Paperclip). The harness does NOT hard-suppress decomposition — Paperclip tracks `requestDepth` but does not enforce single-shot behavior. If a lead delegates, the A/B contrast collapses (both arms used orchestration). The harness RECORDS Arm A's child-issue count in `RunArmResult.childIssueCount` and flags any run where `childIssueCount > 0` with a "⚠ Arm A Decomposition Warning" in the report. Operators MUST review and exclude decomposed Arm A runs from the thesis comparison. A run where Arm A decomposed is NOT a valid single-agent one-shot data point.
 
 ### GLM 5.2 quality vs. Claude Opus is UNCONFIRMED
 

@@ -1,6 +1,6 @@
 // orchestration-eval/src/paperclip-client.ts
 // Mirrors mcp-servers/firm-facade/src/paperclip-client.ts; adds putDocument,
-// listAgents, budgets, and per-issue cost readback. Bearer-authed, company-scoped.
+// listAgents, budgets, per-issue cost readback, and child-issue listing. Bearer-authed, company-scoped.
 export interface EvalClientConfig {
   baseUrl: string; companyId: string; apiKey: string; fetchImpl?: typeof fetch;
 }
@@ -50,5 +50,10 @@ export class PaperclipEvalClient {
   }
   getIssueCostSummary(issueId: string) {
     return this.req("GET", `/api/issues/${encodeURIComponent(issueId)}/cost-summary`) as Promise<{ totalCents?: number; [k: string]: unknown }>;
+  }
+  /** List child issues of a parent issue. Used to detect Arm A decomposition.
+   * Calls GET /api/companies/:companyId/issues?parentId=<id> (fail-soft). */
+  listChildIssues(parentIssueId: string): Promise<Array<{ id: string }>> {
+    return this.req("GET", `/api/companies/${this.cfg.companyId}/issues?parentId=${encodeURIComponent(parentIssueId)}`) as Promise<Array<{ id: string }>>;
   }
 }
