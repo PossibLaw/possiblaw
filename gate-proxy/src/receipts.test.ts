@@ -375,6 +375,25 @@ describe("receipts", () => {
     assert.equal(chain.verify().ok, true);
   });
 
+  // firm_facade: kind="firm_facade" receipt round-trips through append/entries/verify
+  it("firm_facade: kind=firm_facade receipt round-trips through append/verify", () => {
+    const dir = tmpDir();
+    const chain = new ReceiptChain(path.join(dir, "receipts.jsonl"));
+    const entry = chain.append({
+      kind: "firm_facade",
+      tool: "create_matter",
+      boundary: null,
+      decision: null,
+      outcome: "performed",
+      payloadSha256: "a".repeat(64),
+    });
+    const result = chain.verify();
+    assert.equal(result.ok, true, `verify must pass but got: ${JSON.stringify(result)}`);
+    const all = chain.entries();
+    assert.equal(all[all.length - 1].body.kind, "firm_facade");
+    assert.equal(all[all.length - 1].seq, entry.seq);
+  });
+
   // M2: verify() reports 1-based line index for a tampered entry claiming a wrong seq
   it("verify() reports 1-based line index for all failure kinds (not entry-claimed seq)", () => {
     const dir = tmpDir();

@@ -12,7 +12,7 @@
 
 import http from "node:http";
 import type { Policy } from "./policy.ts";
-import type { ReceiptChain, ReceiptBody } from "./receipts.ts";
+import type { ReceiptChain, ReceiptBody, ReceiptOutcome } from "./receipts.ts";
 import { ReceiptChainCorruptError, sha256hex, canonicalJson } from "./receipts.ts";
 import type { PaperclipClient } from "./paperclip-client.ts";
 import type { PerformerRegistry } from "./connectors.ts";
@@ -223,6 +223,27 @@ export function createGateServer(deps: GateServerDeps): http.Server {
   /** Bounded, single-line audit string (no payload text) — citation/source/url. */
   const isSafeAuthorityString = (v: unknown, max: number): boolean =>
     typeof v === "string" && v.length >= 1 && v.length <= max && !/[\r\n]/.test(v);
+
+  // POST /receipts/facade (firm-facade audit channel) — hoisted to closure scope
+  // so they are allocated once per server, not per request.
+  /** Fixed allowlist of facade nouns; anything else is rejected (the security property). */
+  const FACADE_TOOL_ALLOWLIST = new Set<string>([
+    "create_matter",
+    "get_matter_status",
+    "list_work_products",
+    "fetch_work_product",
+    "request_approval",
+  ]);
+  /** Valid ReceiptOutcome values accepted on a facade receipt. */
+  const FACADE_VALID_OUTCOMES = new Set<string>([
+    "performed",
+    "anonymized_performed",
+    "pending",
+    "blocked",
+    "error",
+  ]);
+  /** Serialized-size cap for caller-supplied facade receipt meta. */
+  const FACADE_META_MAX_BYTES = 4096;
 
   const server = http.createServer(async (req, res) => {
     const url = req.url ?? "/";
@@ -521,6 +542,178 @@ export function createGateServer(deps: GateServerDeps): http.Server {
           return;
         }
         sendJson(res, 200, { ok: true, normalizedCitation: result.normalizedCitation });
+      } catch {
+        if (!res.headersSent) sendJson(res, 500, { error: "internal_error" });
+      }
+      return;
+    }
+
+    // ------------------------------------------------------------------
+    // POST /receipts/facade — firm-facade audit receipt channel (S6).
+    //
+    // SECURITY INVARIANTS:
+    //   - kind is ALWAYS hard-coded to "firm_facade" server-side.
+    //     The caller cannot forge a "quality"/"egress" receipt by
+    //     putting kind:"quality" in the body — this prevents contamination
+    //     of CitationRegistry.verified and the egress audit spine.
+    //   - tool is validated against a fixed allowlist (facade nouns only).
+    //   - The gate proxy is the sole ReceiptChain writer (S6 contract).
+    // ------------------------------------------------------------------
+    if (method === "POST" && url === "/receipts/facade") {
+      // FACADE_TOOL_ALLOWLIST / FACADE_VALID_OUTCOMES / FACADE_META_MAX_BYTES
+      // are hoisted to the createGateServer() closure scope above.
+      //
+      // Sentinel tool values used ONLY on error receipts where no valid facade
+      // noun is known yet — they are not in the allowlist and are never accepted
+      // as a success: "facade_parse_error" (body is not JSON) and
+      // "facade_unknown_tool" (tool absent or not allowlisted).
+      try {
+        const { body: rawBody, limitExceeded } = await readBody(req);
+        if (limitExceeded) {
+          sendJson(res, 413, { error: "request_too_large" });
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(rawBody);
+        } catch {
+          // Sentinel tool: body did not parse, so no facade noun is known.
+          // kind is always firm_facade.
+          deps.receipts.append({
+            kind: "firm_facade",
+            tool: "facade_parse_error",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_json" });
+          return;
+        }
+        const b = parsed as Record<string, unknown>;
+
+        // SECURITY: NEVER read `kind` from body — always hard-code firm_facade.
+        // Validate `tool` against the fixed facade-noun allowlist
+        const toolRaw = b["tool"];
+        if (typeof toolRaw !== "string" || !FACADE_TOOL_ALLOWLIST.has(toolRaw)) {
+          // Sentinel tool: no valid facade noun supplied.
+          deps.receipts.append({
+            kind: "firm_facade",
+            tool: "facade_unknown_tool",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_tool: must be one of create_matter, get_matter_status, list_work_products, fetch_work_product, request_approval" });
+          return;
+        }
+        const tool = toolRaw as string;
+
+        // Validate outcome
+        const outcomeRaw = b["outcome"];
+        if (typeof outcomeRaw !== "string" || !FACADE_VALID_OUTCOMES.has(outcomeRaw)) {
+          deps.receipts.append({
+            kind: "firm_facade",
+            tool,
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_outcome: must be one of performed, anonymized_performed, pending, blocked, error" });
+          return;
+        }
+        const outcome = outcomeRaw as ReceiptOutcome;
+
+        // Validate payloadSha256 (format: 64-char lowercase hex)
+        const payloadSha256Raw = b["payloadSha256"];
+        if (typeof payloadSha256Raw !== "string" || !SAFE_SHA_RE.test(payloadSha256Raw)) {
+          deps.receipts.append({
+            kind: "firm_facade",
+            tool,
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_payloadSha256: must be 64-char lowercase hex" });
+          return;
+        }
+        const payloadSha256 = payloadSha256Raw as string;
+
+        // Validate optional ID fields (safe-ID pattern if present)
+        const matterId = b["matterId"];
+        const workProductId = b["workProductId"];
+        const approvalId = b["approvalId"];
+        const agentId = b["agentId"];
+        const issueId = b["issueId"];
+        if (
+          !isValidId(matterId) || !isValidId(workProductId) || !isValidId(approvalId) ||
+          !isValidId(agentId) || !isValidId(issueId)
+        ) {
+          deps.receipts.append({
+            kind: "firm_facade",
+            tool,
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_id: optional id fields must match [A-Za-z0-9-]{1,64} if present" });
+          return;
+        }
+
+        // Validate optional meta (must be plain object; serialized size cap)
+        const metaRaw = b["meta"];
+        if (metaRaw !== undefined) {
+          if (metaRaw === null || typeof metaRaw !== "object" || Array.isArray(metaRaw)) {
+            deps.receipts.append({
+              kind: "firm_facade",
+              tool,
+              boundary: null,
+              decision: null,
+              outcome: "error",
+              payloadSha256: sha256hex(rawBody),
+            });
+            sendJson(res, 400, { error: "invalid_meta: must be a plain object if present" });
+            return;
+          }
+          if (JSON.stringify(metaRaw).length > FACADE_META_MAX_BYTES) {
+            deps.receipts.append({
+              kind: "firm_facade",
+              tool,
+              boundary: null,
+              decision: null,
+              outcome: "error",
+              payloadSha256: sha256hex(rawBody),
+            });
+            sendJson(res, 400, { error: `invalid_meta: serialized meta must be <= ${FACADE_META_MAX_BYTES} bytes` });
+            return;
+          }
+        }
+
+        // Build receipt meta: spread caller meta then overlay facade-specific ids
+        const receiptMeta: Record<string, unknown> = {};
+        if (metaRaw !== undefined) Object.assign(receiptMeta, metaRaw as Record<string, unknown>);
+        if (matterId !== undefined) receiptMeta["matterId"] = matterId;
+        if (workProductId !== undefined) receiptMeta["workProductId"] = workProductId;
+
+        // Append receipt — kind ALWAYS firm_facade (never from body)
+        const entry = deps.receipts.append({
+          kind: "firm_facade",
+          tool,
+          boundary: null,
+          decision: null,
+          outcome,
+          payloadSha256,
+          agentId: agentId as string | undefined,
+          issueId: issueId as string | undefined,
+          approvalId: approvalId as string | undefined,
+          ...(Object.keys(receiptMeta).length > 0 ? { meta: receiptMeta } : {}),
+        });
+
+        sendJson(res, 200, { recorded: true, seq: entry.seq, hash: entry.hash });
       } catch {
         if (!res.headersSent) sendJson(res, 500, { error: "internal_error" });
       }

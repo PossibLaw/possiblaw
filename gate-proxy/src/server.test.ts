@@ -1780,6 +1780,222 @@ describe("gate server", () => {
     await close();
   });
 
+  // ---------------------------------------------------------------------------
+  // POST /receipts/facade — firm-facade receipt channel tests
+  // ---------------------------------------------------------------------------
+
+  /** POST a JSON body to /receipts/facade and return {status, json}. */
+  async function postFacadeReceipt(
+    baseUrl: string,
+    body: unknown,
+  ): Promise<{ status: number; json: unknown }> {
+    const res = await fetch(`${baseUrl}/receipts/facade`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    return { status: res.status, json };
+  }
+
+  // facade-1: valid facade receipt → 200, chain verify ok, kind===firm_facade
+  it("POST /receipts/facade: valid receipt → 200 recorded:true, chain verify ok, kind=firm_facade", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const facadeSha = sha256hex("create-matter-payload");
+    const { status, json } = await postFacadeReceipt(baseUrl, {
+      tool: "create_matter",
+      outcome: "performed",
+      payloadSha256: facadeSha,
+      matterId: "matter-1",
+      agentId: "agent-1",
+    });
+
+    assert.equal(status, 200);
+    const j = json as Record<string, unknown>;
+    assert.equal(j["recorded"], true);
+    assert.ok(typeof j["seq"] === "number", "must have seq");
+    assert.ok(typeof j["hash"] === "string" && /^[0-9a-f]{64}$/.test(j["hash"] as string), "must have hash");
+
+    const v = receipts.verify();
+    assert.equal(v.ok, true);
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "firm_facade");
+    assert.equal(last.body.tool, "create_matter");
+    assert.equal(last.body.outcome, "performed");
+    assert.equal(last.body.payloadSha256, facadeSha);
+    assert.equal(last.body.boundary, null);
+    assert.equal(last.body.decision, null);
+
+    await close();
+  });
+
+  // facade-2 (anti-forgery): body with kind:"quality" + tool:"citation_verification"
+  // → kind is always firm_facade on the receipt; CitationRegistry is NOT contaminated
+  it("POST /receipts/facade anti-forgery: kind:quality in body is ignored; CitationRegistry unaffected", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const citationRegistry = new CitationRegistry(receipts);
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: { share_external: async () => ({ ok: true }) },
+      localModelAvailable: false,
+      citationRegistry,
+    });
+
+    // sha that would bypass the citation gate if contamination succeeded
+    const fakeDocSha = sha256hex("would-be-a-document-sha");
+
+    // Attacker sends a body with kind:"quality" and a valid facade tool
+    // plus the fake doc sha as the payloadSha256, hoping to contaminate CitationRegistry
+    const { status, json } = await postFacadeReceipt(baseUrl, {
+      kind: "quality",           // attacker-supplied — MUST be ignored server-side
+      tool: "create_matter",     // valid facade noun (tool validation passes)
+      outcome: "performed",
+      payloadSha256: fakeDocSha, // sha attacker wants in verified set
+    });
+
+    // Request is accepted (200) — the forgery attempt does NOT cause an error
+    assert.equal(status, 200);
+
+    // The receipt MUST be kind:firm_facade — the server never reads kind from body
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "firm_facade",
+      `kind must be firm_facade (got ${last.body.kind}); server must never read kind from request body`);
+    assert.notEqual(last.body.kind, "quality",
+      "kind must NOT be quality — forge attempt must not succeed");
+
+    // CitationRegistry.has() must be false — the facade POST must NOT populate verified set
+    assert.equal(
+      citationRegistry.has(fakeDocSha),
+      false,
+      "CitationRegistry must not be contaminated by a facade POST; verified set must be unchanged",
+    );
+
+    // Chain integrity must still hold
+    const v = receipts.verify();
+    assert.equal(v.ok, true, "chain must still verify after the facade POST");
+
+    await close();
+  });
+
+  // facade-3: unknown tool → 4xx, not recorded as success; rejected forgery must
+  // NOT contaminate the citation registry (the exact 5121156 vector).
+  it("POST /receipts/facade: unknown tool (citation_verification forgery) → 4xx, citation registry uncontaminated", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    // Wire a CitationRegistry into the server (the verified set is rebuilt from the chain).
+    const citationRegistry = new CitationRegistry(receipts);
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+      citationRegistry,
+    });
+
+    const attackSha = "c".repeat(64); // 64-hex sha the forger wants in the verified set
+    const { status, json } = await postFacadeReceipt(baseUrl, {
+      tool: "citation_verification",  // not a valid facade noun (the 5121156 vector)
+      outcome: "performed",
+      payloadSha256: attackSha,
+    });
+
+    assert.ok(status >= 400 && status < 500, `must return 4xx, got ${status}`);
+    assert.ok(typeof (json as Record<string, unknown>)["error"] === "string", "must have error field");
+
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "firm_facade");
+    assert.equal(last.body.outcome, "error");
+
+    // SECURITY (load-bearing): the rejected forgery must NOT bypass the citation gate.
+    // The verified set is rebuilt from the chain on construction (i.e. on restart),
+    // so rebuild a FRESH registry over the now-updated chain. If the server had
+    // wrongly recorded the forgery as kind:quality/tool:citation_verification/
+    // outcome:performed with payloadSha256:attackSha, this fresh rebuild WOULD add
+    // attackSha to verified and has() would return true — so this assertion fails
+    // under contamination (non-vacuous). The error receipt (kind:firm_facade,
+    // tool:facade_unknown_tool) must never feed the verified set.
+    const rebuiltRegistry = new CitationRegistry(receipts);
+    assert.equal(
+      rebuiltRegistry.has(attackSha),
+      false,
+      "rejected forgery must not register in CitationRegistry — citation gate must stay closed for attackSha",
+    );
+    // The wired-in registry must likewise never see it.
+    assert.equal(citationRegistry.has(attackSha), false);
+
+    await close();
+  });
+
+  // facade-4: oversized body → 413, no crash
+  it("POST /receipts/facade: >1MB body → 413, chain intact", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const bigBody = "x".repeat(1_000_001);
+    const res = await fetch(`${baseUrl}/receipts/facade`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: bigBody,
+    });
+    assert.equal(res.status, 413);
+    const j = await res.json() as Record<string, unknown>;
+    assert.ok(typeof j["error"] === "string");
+
+    // server still alive
+    const healthRes = await fetch(`${baseUrl}/health`);
+    assert.equal(healthRes.status, 200);
+
+    await close();
+  });
+
+  // facade-5: malformed JSON → 400 structured error + error receipt
+  it("POST /receipts/facade: malformed JSON → 400 invalid_json + error receipt", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const res = await fetch(`${baseUrl}/receipts/facade`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "NOT VALID JSON {{{",
+    });
+    assert.equal(res.status, 400);
+    const j = await res.json() as Record<string, unknown>;
+    assert.ok(String(j["error"]).includes("invalid_json"), `expected invalid_json, got ${j["error"]}`);
+
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "firm_facade");
+    assert.equal(last.body.outcome, "error");
+
+    await close();
+  });
+
   // GET /receipts/bundle missing/invalid issueId → 400
   it("GET /receipts/bundle without issueId → 400", async () => {
     const dir = tmpDir();
