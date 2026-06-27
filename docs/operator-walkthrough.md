@@ -570,6 +570,25 @@ The package declares two routines in `.paperclip.yaml`:
 
 Routine binding to a specific recurring issue is operator-configurable in the Paperclip UI after import.
 
+### Compute a filing deadline (deterministic)
+
+**Prerequisite:** `pnpm -C deadline-engine install` must be run once before using the deadline-calculator agent (installs `tsx` and other devDependencies).
+
+Create a new issue and ask: "Our client was served on 2024-12-20. What is the FRCP answer deadline (21 days forward, US federal court, personal service)?"
+
+`chief-of-staff` routes to `litigation-lead`, which routes to `deadline-calculator`. The agent invokes the deterministic `deadline-engine` CLI:
+
+```
+cd "$POSSIBLAW_REPO_ROOT/deadline-engine" && node --import tsx src/cli.ts \
+  --json '{"triggerDate":"2024-12-20","days":21,"direction":"forward","serviceByMail":false,"jurisdiction":"US-FED"}'
+```
+
+The engine returns `"deadline":"2025-01-10"` with a full `steps` trace showing which rules were applied (trigger-day exclusion, holiday calendar, weekend roll). The agent reports the exact date, the trace, and a "confirm with licensed counsel" caveat — it never computes the date itself.
+
+If the gate proxy (`$GATE_PROXY_URL`) is running, the skill also posts a `POST /receipts/deadline` receipt so the deadline is audited in the Matter Trust Report (`GET /receipts/bundle?issueId=<matter>`). This makes the deadline **visible and audited** — the hard "block a filing submitted past deadline" gate is a documented follow-up.
+
+For a non-US-FED jurisdiction (e.g., CA-CCP), the engine returns `supported:false` and the agent reports `UNCONFIRMED`, never a date.
+
 ### Privacy encoder
 
 Mark a matter with `metadata.possiblaw.privacyTier: confidential`. `NDA Drafter` invokes the `privacy-encoder` skill before any cloud-capable call. The skill checks Ollama is reachable (`http://localhost:11434/api/version`) and the model is pulled — BLOCKS otherwise. With Ollama up, confidential party names, contact info, money figures, etc. are replaced with stable placeholders, a per-matter key file is written to `$POSSIBLAW_PRIVACY_KEY_DIR/<matter-id>.json` with `600` perms, the cloud model sees only the masked text, and the agent decodes the response before posting.
