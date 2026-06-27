@@ -46,6 +46,7 @@ Specialists in this practice:
 | Documenting a settlement — agreement skeleton with recitals, payment terms, release scope, and dismissal mechanics | Create or update a child issue for `settlement-agreement-drafter` |
 | Preparing a confidential mediation statement for a scheduled or contemplated mediation | Create or update a child issue for `mediation-statement-drafter` |
 | Building a privilege log from document metadata supplied in the issue | Create or update a child issue for `privilege-log-builder` |
+| Computing a filing deadline or a period-count date (e.g., how many days from service to respond, when does a deadline fall) | Create or update a child issue for `deadline-calculator` |
 | Quick matter-intake structuring you can answer directly | Handle with `legal-matter-intake` and post the structured intake summary on the issue |
 | Non-litigation legal matter | Return the issue to `chief-counsel` with the mismatch stated in a durable comment |
 

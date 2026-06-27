@@ -725,6 +725,162 @@ export function createGateServer(deps: GateServerDeps): http.Server {
     }
 
     // ------------------------------------------------------------------
+    // POST /receipts/deadline — deadline receipt audit channel.
+    //
+    // SECURITY INVARIANTS (same anti-forgery property as /receipts/facade):
+    //   - kind is ALWAYS hard-coded to "deadline" server-side.
+    //     The caller cannot forge a different kind by putting kind:"quality"
+    //     or kind:"egress" in the body.
+    //   - issueId is ALWAYS set to matterId (never read from body) so the
+    //     deadline joins the per-matter Matter Trust Report bundle.
+    //   - meta carries NON-privileged computation facts only:
+    //     {deadline, rule, jurisdiction, direction, days}. No matter content.
+    //   - Exact-key validation: extra or missing meta fields are rejected.
+    // ------------------------------------------------------------------
+    if (method === "POST" && url === "/receipts/deadline") {
+      try {
+        const { body: rawBody, limitExceeded } = await readBody(req);
+        if (limitExceeded) {
+          sendJson(res, 413, { error: "request_too_large" });
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(rawBody);
+        } catch {
+          // kind is always "deadline" even on error receipts.
+          deps.receipts.append({
+            kind: "deadline",
+            tool: "deadline_parse_error",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_json" });
+          return;
+        }
+        const b = parsed as Record<string, unknown>;
+
+        // Validate matterId — required, SAFE_ID_RE
+        const matterId = b["matterId"];
+        if (typeof matterId !== "string" || !SAFE_ID_RE.test(matterId)) {
+          deps.receipts.append({
+            kind: "deadline",
+            tool: "deadline_bad_body",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_matterId: required, must match [A-Za-z0-9-]{1,64}" });
+          return;
+        }
+
+        // Validate payloadSha256 — required, 64-hex
+        const payloadSha256Raw = b["payloadSha256"];
+        if (typeof payloadSha256Raw !== "string" || !SAFE_SHA_RE.test(payloadSha256Raw)) {
+          deps.receipts.append({
+            kind: "deadline",
+            tool: "deadline_bad_body",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, { error: "invalid_payloadSha256: must be 64-char lowercase hex" });
+          return;
+        }
+        const payloadSha256 = payloadSha256Raw as string;
+
+        // Validate meta — required plain object with EXACTLY the six allowed keys.
+        // Reject extra, missing, or mis-typed fields. serviceByMail is recorded so
+        // a mail-service deadline's `days` reconciles with the date (which silently
+        // includes the FRCP 6(d) +3 mail days).
+        const metaRaw = b["meta"];
+        const DEADLINE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+        const DEADLINE_EXPECTED_KEYS = "days,deadline,direction,jurisdiction,rule,serviceByMail"; // sorted
+        if (metaRaw === null || typeof metaRaw !== "object" || Array.isArray(metaRaw)) {
+          deps.receipts.append({
+            kind: "deadline",
+            tool: "deadline_bad_body",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, {
+            error: "invalid_meta: required plain object {deadline:YYYY-MM-DD, rule:FRCP-6, jurisdiction:US-FED, direction:forward|backward, days:positive-integer, serviceByMail:boolean}",
+          });
+          return;
+        }
+        const meta = metaRaw as Record<string, unknown>;
+        const metaKeys = Object.keys(meta).sort().join(",");
+        if (metaKeys !== DEADLINE_EXPECTED_KEYS) {
+          deps.receipts.append({
+            kind: "deadline",
+            tool: "deadline_bad_body",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, {
+            error: "invalid_meta: must have exactly {deadline, rule, jurisdiction, direction, days, serviceByMail} — no extra or missing fields",
+          });
+          return;
+        }
+        if (
+          typeof meta["deadline"] !== "string" || !DEADLINE_DATE_RE.test(meta["deadline"] as string) ||
+          meta["rule"] !== "FRCP-6" ||
+          meta["jurisdiction"] !== "US-FED" ||
+          (meta["direction"] !== "forward" && meta["direction"] !== "backward") ||
+          typeof meta["days"] !== "number" || !Number.isInteger(meta["days"]) || (meta["days"] as number) < 1 ||
+          typeof meta["serviceByMail"] !== "boolean"
+        ) {
+          deps.receipts.append({
+            kind: "deadline",
+            tool: "deadline_bad_body",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+          sendJson(res, 400, {
+            error: "invalid_meta: deadline must be YYYY-MM-DD, rule must be FRCP-6, jurisdiction must be US-FED, direction must be forward|backward, days must be positive integer, serviceByMail must be boolean",
+          });
+          return;
+        }
+
+        // Append receipt — kind ALWAYS "deadline" (never from body).
+        // issueId is ALWAYS set to matterId so this deadline joins the per-matter
+        // bundle in GET /receipts/bundle?issueId=<matter>.
+        const entry = deps.receipts.append({
+          kind: "deadline",
+          tool: "deadline_calculation",
+          boundary: null,
+          decision: null,
+          outcome: "performed",
+          payloadSha256,
+          issueId: matterId as string,
+          meta: {
+            deadline: meta["deadline"],
+            rule: meta["rule"],
+            jurisdiction: meta["jurisdiction"],
+            direction: meta["direction"],
+            days: meta["days"],
+            serviceByMail: meta["serviceByMail"],
+          },
+        });
+
+        sendJson(res, 200, { recorded: true, seq: entry.seq, hash: entry.hash });
+      } catch {
+        if (!res.headersSent) sendJson(res, 500, { error: "internal_error" });
+      }
+      return;
+    }
+
+    // ------------------------------------------------------------------
     // POST /egress/{tool}
     // ------------------------------------------------------------------
     const egressMatch = url.match(/^\/egress\/([^/?#]+)(?:\?.*)?$/);

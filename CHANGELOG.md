@@ -7,6 +7,76 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.29.0] — 2026-06-27 — Phase 4: deterministic deadline engine + deadline receipt / Matter Trust Report
+
+Phase 4 of the trust pipeline: a deterministic FRCP Rule 6 deadline engine (US-FED v1), a
+`deadline-calculator` agent + `legal-deadline-calculation` skill that call it, and a
+`deadline` receipt kind that feeds the court-filing gate audit trail.
+
+### Added
+
+- **`deadline-engine/` package** (P4-1). Standalone TypeScript CLI implementing FRCP Rule 6
+  date arithmetic with the full federal holiday calendar (5 U.S.C. § 6103). Inputs:
+  `triggerDate`, `days`, `direction` (forward/backward), `serviceByMail` (FRCP 6(d) +3 days),
+  `jurisdiction`. Supports `US-FED` only; returns `{"supported":false}` for everything else.
+  35 node:test tests.
+
+- **`deadline-calculator` agent + `legal-deadline-calculation` skill** (P4-2). The agent
+  routes all deadline questions to the skill; the skill invokes the engine CLI — it never
+  computes, estimates, or reasons about a date. For any unsupported jurisdiction the agent
+  returns `UNCONFIRMED` and escalates. `deadline-calculator` lives under `litigation-lead`
+  with `modelLane: extractive`.
+
+- **`"deadline"` receipt kind + `POST /receipts/deadline` + Matter Trust Report section** (P4-3).
+  - `gate-proxy/src/receipts.ts`: `"deadline"` added to the `ReceiptBody.kind` union.
+  - `gate-proxy/src/server.ts`: `POST /receipts/deadline` endpoint — mirrors the
+    `/receipts/facade` anti-forgery pattern: `kind:"deadline"` is hard-coded server-side
+    (never read from the request body), `issueId` is always set to `matterId` so the
+    deadline joins the per-matter bundle. Validates: `matterId` (SAFE_ID_RE), `payloadSha256`
+    (64-hex), and a constrained `meta` with exactly
+    `{deadline, rule, jurisdiction, direction, days, serviceByMail}`.
+    Returns `{recorded:true, seq, hash}` on success; structured 4xx on bad body.
+    `serviceByMail` is recorded so a mail-service deadline's `days` reconciles with the
+    date (which silently includes the FRCP 6(d) +3 mail days).
+  - `gate-proxy/src/quality/signoff.ts`: `ComputedDeadlineEntry` interface + `deadlines`
+    field on `SignoffBundle` projects `kind:"deadline"` receipts for the matter.
+    `renderSignoffMarkdown` adds a "Computed Deadlines (deterministic — FRCP Rule 6)" section
+    whose blurb is explicit that the gate attests the record, it does not re-run the computation.
+    No matter content is exposed — only date/rule/jurisdiction facts and the computation SHA.
+  - `legal-deadline-calculation/SKILL.md` (Step 3b): after a successful computation, the
+    skill POSTs a deadline receipt to `$GATE_PROXY_URL/receipts/deadline`; if the gate is
+    not running, the deadline is returned unreceipted (fail-open for the computation, not the gate).
+    The skill is also fail-closed on the computation itself: any engine failure
+    (`POSSIBLAW_REPO_ROOT` unset, missing `tsx`/install, non-zero exit, no JSON) is a BLOCKER —
+    the agent never fabricates or estimates a date.
+
+- **Eval cases** (4 cases under `companies/legal-operations/evals/cases/`):
+  - `deadline-frcp-answer.md` — happy: 21-day forward answer → 2025-01-10.
+  - `deadline-holiday-roll.md` — edge: weekend roll (FRCP 6(a)(1)(C)).
+  - `deadline-backward-mail.md` — edge: backward direction (no mail; the engine's FRCP 6(d)
+    mail rule is forward-only) → 2025-02-24.
+  - `deadline-unsupported-jurisdiction.md` — failure/security: CA-CCP → UNCONFIRMED, no date.
+
+- **Docs**:
+  - `docs/operator-walkthrough.md`: "Compute a filing deadline (deterministic)" section.
+  - `docs/known-limitations.md`: "Deadline engine (v1)" — US-FED only; state holidays and
+    clerk-inaccessibility not modeled; CPR/state courts unsupported; deadline receipt is
+    audit-only (does not yet block a late filing; hard gate is a follow-up);
+    `pnpm -C deadline-engine install` prerequisite.
+
+### Tests
+
+- `gate-proxy/src/receipts.test.ts`: 1 new test (+1). `kind:"deadline"` round-trip.
+- `gate-proxy/src/server.test.ts`: 10 new tests (+10). Valid receipt, anti-forgery, missing
+  matterId, bad sha, extra meta field, wrong rule, bundle integration, malformed JSON,
+  serviceByMail:true recorded, missing serviceByMail rejected.
+- `gate-proxy/src/quality/signoff.test.ts`: 3 new tests (+3). Deadline in bundle, wrong-matter
+  exclusion, multiple deadlines.
+- Gate-proxy total: **285** (was 271 on main before Phase 4).
+- `deadline-engine/` node:test suite: **35** (unchanged).
+
+---
+
 ## [0.28.1] — 2026-06-26 — Firm-facade security hardening (#2 Matter Trust Report + #3 cross-company reads)
 
 Two non-blocking follow-up hardening changes from the Phase 3 whole-branch review.

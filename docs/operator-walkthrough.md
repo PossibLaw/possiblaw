@@ -15,7 +15,7 @@ The first hands-on step below exercises exactly that loop: a simulated court
 filing pauses at the human gate, you approve it in the dashboard, and the
 receipt trail shows the whole exchange.
 
-The 177 agents, 172 skills, and 34 teams are the interchangeable parts
+The 178 agents, 173 skills, and 34 teams are the interchangeable parts
 inside that pipeline. The rest of this walkthrough — variants, demo
 profiles, team subsets, delivery, the NDA matter — is how you choose which
 parts to run and watch them work.
@@ -111,7 +111,7 @@ To preview only (no DB writes):
 
 ```bash
 ./bin/possiblaw --variant codex --dry-run --non-interactive --yes
-# preview: agents=177 skills=172 projects=3 issues=3 warnings=0 errors=0
+# preview: agents=178 skills=173 projects=3 issues=3 warnings=0 errors=0
 ```
 
 Common flags:
@@ -263,7 +263,7 @@ the demo data is fictional.
 ### Team subset import (`--teams`)
 
 The catalog is the menu — import what your firm practices. By default the
-launcher imports all 177 agents; `--teams` imports only the named teams:
+launcher imports all 178 agents; `--teams` imports only the named teams:
 
 ```bash
 ./bin/possiblaw --teams litigation,commercial   # two practices
@@ -569,6 +569,25 @@ The package declares two routines in `.paperclip.yaml`:
 - `weekly-renewal-scan` — runs `0 9 * * MON`, intended for Chief Counsel to run `legal-renewal-tracker` against contract artifacts.
 
 Routine binding to a specific recurring issue is operator-configurable in the Paperclip UI after import.
+
+### Compute a filing deadline (deterministic)
+
+**Prerequisite:** `pnpm -C deadline-engine install` must be run once before using the deadline-calculator agent (installs `tsx` and other devDependencies).
+
+Create a new issue and ask: "Our client was served on 2024-12-20. What is the FRCP answer deadline (21 days forward, US federal court, personal service)?"
+
+`chief-of-staff` routes to `litigation-lead`, which routes to `deadline-calculator`. The agent invokes the deterministic `deadline-engine` CLI:
+
+```
+cd "$POSSIBLAW_REPO_ROOT/deadline-engine" && node --import tsx src/cli.ts \
+  --json '{"triggerDate":"2024-12-20","days":21,"direction":"forward","serviceByMail":false,"jurisdiction":"US-FED"}'
+```
+
+The engine returns `"deadline":"2025-01-10"` with a full `steps` trace showing which rules were applied (trigger-day exclusion, holiday calendar, weekend roll). The agent reports the exact date, the trace, and a "confirm with licensed counsel" caveat — it never computes the date itself.
+
+If the gate proxy (`$GATE_PROXY_URL`) is running, the skill also posts a `POST /receipts/deadline` receipt so the deadline is audited in the Matter Trust Report (`GET /receipts/bundle?issueId=<matter>`). This makes the deadline **visible and audited** — the hard "block a filing submitted past deadline" gate is a documented follow-up.
+
+For a non-US-FED jurisdiction (e.g., CA-CCP), the engine returns `supported:false` and the agent reports `UNCONFIRMED`, never a date.
 
 ### Privacy encoder
 

@@ -415,4 +415,44 @@ describe("receipts", () => {
       assert.equal(result.badSeq, 2, `badSeq should be line index 2, got ${result.badSeq}`);
     }
   });
+
+  // kind:"deadline" round-trip — verifies the new union value persists and
+  // verifies correctly through the hash-chained spine.
+  it('kind:"deadline" round-trips through append/verify/entries', () => {
+    const dir = tmpDir();
+    const chain = new ReceiptChain(path.join(dir, "receipts.jsonl"));
+
+    const sha = sha256hex("deadline-computation-sha");
+    const entry = chain.append(mkBody({
+      kind: "deadline",
+      tool: "deadline_calculation",
+      boundary: null,
+      decision: null,
+      outcome: "performed",
+      payloadSha256: sha,
+      issueId: "matter-100",
+      meta: {
+        deadline: "2025-01-10",
+        rule: "FRCP-6",
+        jurisdiction: "US-FED",
+        direction: "forward",
+        days: 21,
+      },
+    }));
+
+    assert.equal(entry.seq, 1);
+    assert.equal(entry.body.kind, "deadline");
+    assert.equal(entry.body.tool, "deadline_calculation");
+    assert.equal(entry.body.payloadSha256, sha);
+    assert.equal(entry.body.issueId, "matter-100");
+    assert.equal(entry.body.meta?.["deadline"], "2025-01-10");
+
+    const v = chain.verify();
+    assert.equal(v.ok, true);
+    if (v.ok) assert.equal(v.length, 1);
+
+    const all = chain.entries();
+    assert.equal(all.length, 1);
+    assert.equal(all[0].body.kind, "deadline");
+  });
 });

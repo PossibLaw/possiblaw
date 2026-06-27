@@ -735,6 +735,34 @@ agents:
       possiblaw:
         modelLane: extractive
         adapterDecision: codex-local-default-2026-06-09
+  deadline-calculator:
+    role: specialist
+    icon: calendar-clock
+    capabilities: Filing-deadline computation via deterministic FRCP Rule 6 engine; never estimates dates; fails closed for unsupported jurisdictions.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        POSSIBLAW_REPO_ROOT:
+          kind: plain
+          requirement: optional
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-06-27
   litigation-demand-response-drafter:
     role: specialist
     icon: mail-warning
@@ -4497,6 +4525,7 @@ sidebar:
     - litigation-lead
     - litigation-hold-drafter
     - litigation-docket-monitor
+    - deadline-calculator
     - litigation-demand-response-drafter
     - corporate-lead
     - corporate-entity-drafter

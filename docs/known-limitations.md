@@ -258,6 +258,28 @@ lookup path) and forces static UI mode for launcher-started servers. Caveats:
 - After a paperclip submodule update, delete `paperclip/ui/dist` to force a
   rebuild on the next themed run (stale assets otherwise persist).
 
+## Deadline engine (v1)
+
+### US federal FRCP Rule 6 only
+
+The `deadline-engine` package implements FRCP Rule 6 for US federal courts only (`jurisdiction: "US-FED"`). Any other jurisdiction (CA-CCP, CPR, US state courts, etc.) returns `{"supported": false, "reason": "unsupported_jurisdiction"}` and the `deadline-calculator` agent reports **UNCONFIRMED** — it never computes, estimates, or guesses a date.
+
+### Federal holiday calendar only; state-declared holidays not modeled
+
+The engine applies the federal legal public holidays listed in 5 U.S.C. § 6103 (plus observed weekend-shift rules). FRCP Rule 6(a)(6)(C) state-declared holidays and FRCP Rule 6(a)(3) clerk's-office-inaccessibility dates are **not modeled** — the engine cannot detect courthouse closures or state emergency extensions. Operators must apply those adjustments manually.
+
+### `pnpm -C deadline-engine install` prerequisite
+
+The `deadline-engine` package relies on `tsx` (a devDependency) to run from source. `pnpm -C deadline-engine install` must be run at least once before the `deadline-calculator` agent can invoke the CLI. The launcher does not auto-install it.
+
+### Engine failure is a hard BLOCKER — no fabricated fallback date
+
+The `deadline-calculator` agent invokes the engine via `cd "$POSSIBLAW_REPO_ROOT/deadline-engine" && node --import tsx src/cli.ts ...`, which depends on `POSSIBLAW_REPO_ROOT` being set in the agent env (the launcher injects it). If the engine invocation fails for ANY reason — `POSSIBLAW_REPO_ROOT` unset/empty, the `cd` fails, `tsx` not installed (`pnpm -C deadline-engine install` never run), a non-zero exit, or no parseable JSON — the agent reports a **BLOCKER** and must NOT fabricate, estimate, or guess a date. A date is reported only from a successful (exit 0, valid JSON, `supported: true`) engine run. This fail-closed posture is the whole point of offloading date math to a deterministic engine.
+
+### Deadline receipt is audit-only; it does not yet block a late filing
+
+`POST /receipts/deadline` makes a computed deadline **visible and audited** in the Matter Trust Report (`GET /receipts/bundle?issueId=<matter>` — the `deadlines` section). It does **not yet** block a filing submitted past its deadline. The hard "block-on-late-filing" gate is a documented follow-up requiring a real-time court-clock comparison at egress time.
+
 ## Gemini variants have no reasoning-effort lanes
 
 Paperclip's `gemini_local` adapter exposes no reasoning-effort or thinking

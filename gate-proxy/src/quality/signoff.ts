@@ -119,6 +119,30 @@ export interface FirmFacadeActivity {
   displayStatus: string;
 }
 
+/**
+ * One computed deadline as projected into the Matter Trust Report.
+ * Carries date/rule/jurisdiction/direction/days + the computation sha only —
+ * no matter content, no privileged text.
+ */
+export interface ComputedDeadlineEntry {
+  seq: number;
+  ts: string;
+  /** The computed deadline date (YYYY-MM-DD). */
+  deadline: string;
+  /** The rule applied — e.g. "FRCP-6". */
+  rule: string;
+  /** Jurisdiction key — e.g. "US-FED". */
+  jurisdiction: string;
+  /** "forward" or "backward". */
+  direction: string;
+  /** Period in calendar days. */
+  days: number;
+  /** Whether FRCP 6(d) mail service (+3 days, forward only) was applied. */
+  serviceByMail: boolean;
+  /** SHA-256 of the deterministic computation input (from the deadline-calculator skill). */
+  payloadSha256: string;
+}
+
 /** Authority provenance: what was retrieved + which outbound citations were unbacked. */
 export interface AuthorityProvenance {
   registrations: AuthorityRegistration[];
@@ -142,6 +166,12 @@ export interface SignoffBundle {
    * never board-decided attestations — the attestations section excludes kind:"firm_facade".
    */
   firmFacadeActivity: FirmFacadeActivity[];
+  /**
+   * Computed deadlines recorded via POST /receipts/deadline for this matter.
+   * Each row carries date/rule/jurisdiction facts + the computation sha only —
+   * no matter content. v1: US-FED FRCP Rule 6 only.
+   */
+  deadlines: ComputedDeadlineEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -303,15 +333,18 @@ export function assembleSignoffBundle(
     });
 
   // ATTESTATIONS — board-decided approvals only.
-  // SECURITY INVARIANT: kind:"firm_facade" receipts are EXCLUDED here.
-  // A facade request_approval carries an approvalId and outcome:"pending" — it is
-  // a REQUEST, not a board decision. Including it here would mis-represent a
-  // pending facade request as an attested action in the regulator report.
-  // Facade activity is surfaced separately in firmFacadeActivity below.
+  // SECURITY INVARIANT: kind:"firm_facade" and kind:"deadline" receipts are
+  // EXCLUDED here by name. A facade request_approval carries an approvalId and
+  // outcome:"pending" — it is a REQUEST, not a board decision. A deadline receipt
+  // never carries an approvalId today, but the explicit guard is defense-in-depth:
+  // a future deadline extension that ever set approvalId must NEVER leak into the
+  // attestations (board-decision) section. Facade activity and deadlines are
+  // surfaced in their own sections (firmFacadeActivity / deadlines) below.
   const attestations: Attestation[] = matter
     .filter(
       (e) =>
         e.body.kind !== "firm_facade" &&
+        e.body.kind !== "deadline" &&
         e.body.approvalId !== undefined &&
         e.body.approvalId !== "",
     )
@@ -359,6 +392,24 @@ export function assembleSignoffBundle(
       return row;
     });
 
+  // COMPUTED DEADLINES — projected from kind:"deadline" receipts for this matter.
+  // Carries date/rule/jurisdiction/direction/days + computation sha only — no
+  // matter content, no privileged text (the deadline-calculator skill never posts
+  // matter text into the receipt; only the deterministic date/rule facts).
+  const deadlines: ComputedDeadlineEntry[] = matter
+    .filter((e) => e.body.kind === "deadline")
+    .map((e) => ({
+      seq: e.seq,
+      ts: e.ts,
+      deadline: metaString(e.body, "deadline") ?? "",
+      rule: metaString(e.body, "rule") ?? "",
+      jurisdiction: metaString(e.body, "jurisdiction") ?? "",
+      direction: metaString(e.body, "direction") ?? "",
+      days: (typeof e.body.meta?.["days"] === "number" ? e.body.meta["days"] as number : 0),
+      serviceByMail: e.body.meta?.["serviceByMail"] === true,
+      payloadSha256: e.body.payloadSha256,
+    }));
+
   return {
     issueId,
     generatedAt: new Date().toISOString(),
@@ -371,6 +422,7 @@ export function assembleSignoffBundle(
     blockedEgress,
     attestations,
     firmFacadeActivity,
+    deadlines,
   };
 }
 
@@ -575,6 +627,32 @@ export function renderSignoffMarkdown(bundle: SignoffBundle): string {
         `| ${r.seq} | ${cell(r.ts)} | ${cell(r.tool)} | ${cell(r.displayStatus)} ` +
           `| ${cell(r.approvalId)} | ${cell(r.workProductId)} ` +
           `| ${textDisclosedCell} | \`${cell(r.payloadSha256)}\` |`,
+      );
+    }
+  }
+  out.push("");
+
+  // Computed Deadlines
+  out.push("## Computed Deadlines (deterministic — FRCP Rule 6)");
+  out.push("");
+  out.push(
+    "_Computed Deadlines (deterministic FRCP Rule 6, US-FED v1) — recorded for this matter; " +
+      "the gate attests the record (date/rule/jurisdiction facts + computation SHA, no matter content), " +
+      "it does not re-run the computation. Makes deadlines VISIBLE and audited; it does not yet block a " +
+      "late filing (the hard gate is a documented follow-up). State courts and CPR are unsupported; those " +
+      "requests return UNCONFIRMED and do not generate a receipt._",
+  );
+  out.push("");
+  if (bundle.deadlines.length === 0) {
+    out.push("_No computed deadlines for this matter._");
+  } else {
+    out.push("| seq | ts | deadline | rule | jurisdiction | direction | days | serviceByMail | payloadSha256 |");
+    out.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    for (const d of bundle.deadlines) {
+      out.push(
+        `| ${d.seq} | ${cell(d.ts)} | ${cell(d.deadline)} | ${cell(d.rule)} ` +
+          `| ${cell(d.jurisdiction)} | ${cell(d.direction)} | ${d.days} | ${d.serviceByMail ? "yes" : "no"} ` +
+          `| \`${cell(d.payloadSha256)}\` |`,
       );
     }
   }
