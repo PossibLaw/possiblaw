@@ -89,6 +89,36 @@ export interface UnbackedCitationRecord {
   unbackedCitations: string[];
 }
 
+/**
+ * One firm-facade action as projected into the Matter Trust Report.
+ * Carries hashes and non-payload audit identifiers only — never plaintext.
+ *
+ * displayStatus renders the outcome in regulator-readable language:
+ *   - "pending" (request_approval) → "requested — pending human approval"
+ *   - "performed" → "performed"
+ *   - etc.
+ * A pending approval request is NEVER shown as attested; it is always clearly
+ * labelled as a pending request awaiting human decision.
+ */
+export interface FirmFacadeActivity {
+  seq: number;
+  ts: string;
+  tool: string;
+  outcome: ReceiptOutcome;
+  payloadSha256: string;
+  /** Present on request_approval receipts. */
+  approvalId?: string;
+  /** Present on fetch_work_product receipts (from meta.workProductId). */
+  workProductId?: string;
+  /** Present on fetch_work_product receipts (from meta.textDisclosed). */
+  textDisclosed?: boolean;
+  /**
+   * Regulator-readable status — never confuses a pending request with an approval.
+   * "outcome:pending" → "requested — pending human approval"
+   */
+  displayStatus: string;
+}
+
 /** Authority provenance: what was retrieved + which outbound citations were unbacked. */
 export interface AuthorityProvenance {
   registrations: AuthorityRegistration[];
@@ -106,6 +136,12 @@ export interface SignoffBundle {
   tierFloorDecisions: TierFloorDecision[];
   blockedEgress: BlockedEgress[];
   attestations: Attestation[];
+  /**
+   * Firm-facade actions performed on this matter.
+   * Separate from attestations: facade approval requests are PENDING requests,
+   * never board-decided attestations — the attestations section excludes kind:"firm_facade".
+   */
+  firmFacadeActivity: FirmFacadeActivity[];
 }
 
 // ---------------------------------------------------------------------------
@@ -266,8 +302,19 @@ export function assembleSignoffBundle(
       return r;
     });
 
+  // ATTESTATIONS — board-decided approvals only.
+  // SECURITY INVARIANT: kind:"firm_facade" receipts are EXCLUDED here.
+  // A facade request_approval carries an approvalId and outcome:"pending" — it is
+  // a REQUEST, not a board decision. Including it here would mis-represent a
+  // pending facade request as an attested action in the regulator report.
+  // Facade activity is surfaced separately in firmFacadeActivity below.
   const attestations: Attestation[] = matter
-    .filter((e) => e.body.approvalId !== undefined && e.body.approvalId !== "")
+    .filter(
+      (e) =>
+        e.body.kind !== "firm_facade" &&
+        e.body.approvalId !== undefined &&
+        e.body.approvalId !== "",
+    )
     .map((e) => {
       const a: Attestation = {
         approvalId: e.body.approvalId as string,
@@ -278,6 +325,38 @@ export function assembleSignoffBundle(
       };
       if (e.body.agentId !== undefined) a.agentId = e.body.agentId;
       return a;
+    });
+
+  // FIRM FACADE ACTIVITY — projected from kind:"firm_facade" receipts for this matter.
+  // Each row carries the facade tool name, outcome, and non-privileged audit identifiers.
+  // displayStatus renders the outcome in regulator-readable language; "pending" is
+  // always shown as "requested — pending human approval" (never as "approved/attested").
+  const firmFacadeActivity: FirmFacadeActivity[] = matter
+    .filter((e) => e.body.kind === "firm_facade")
+    .map((e) => {
+      const outcome = e.body.outcome;
+      const displayStatus =
+        outcome === "pending"
+          ? "requested — pending human approval"
+          : outcome === "anonymized_performed"
+            ? "performed (anonymized)"
+            : String(outcome);
+
+      const row: FirmFacadeActivity = {
+        seq: e.seq,
+        ts: e.ts,
+        tool: e.body.tool,
+        outcome,
+        payloadSha256: e.body.payloadSha256,
+        displayStatus,
+      };
+      if (e.body.approvalId !== undefined) row.approvalId = e.body.approvalId;
+      // workProductId and textDisclosed live in meta on fetch_work_product receipts
+      const wpId = metaString(e.body, "workProductId");
+      if (wpId !== undefined) row.workProductId = wpId;
+      const textDisclosedRaw = e.body.meta?.["textDisclosed"];
+      if (typeof textDisclosedRaw === "boolean") row.textDisclosed = textDisclosedRaw;
+      return row;
     });
 
   return {
@@ -291,6 +370,7 @@ export function assembleSignoffBundle(
     tierFloorDecisions,
     blockedEgress,
     attestations,
+    firmFacadeActivity,
   };
 }
 
@@ -470,6 +550,31 @@ export function renderSignoffMarkdown(bundle: SignoffBundle): string {
       out.push(
         `| ${r.seq} | ${cell(r.ts)} | ${cell(r.tool)} | ${cell(r.boundary)} ` +
           `| ${cell(r.reason)} | \`${cell(r.payloadSha256)}\` |`,
+      );
+    }
+  }
+  out.push("");
+
+  // Firm Facade Activity
+  out.push("## Firm Facade Activity");
+  out.push("");
+  out.push(
+    "_Actions performed through the firm-facing MCP facade. Pending approval requests " +
+      "are shown as requested — not as attested events. Board attestations (if any) are in the section below._",
+  );
+  out.push("");
+  if (bundle.firmFacadeActivity.length === 0) {
+    out.push("_No facade activity for this matter._");
+  } else {
+    out.push("| seq | ts | tool | status | approvalId | workProductId | textDisclosed | payloadSha256 |");
+    out.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
+    for (const r of bundle.firmFacadeActivity) {
+      const textDisclosedCell =
+        r.textDisclosed === undefined ? "—" : r.textDisclosed ? "yes" : "no";
+      out.push(
+        `| ${r.seq} | ${cell(r.ts)} | ${cell(r.tool)} | ${cell(r.displayStatus)} ` +
+          `| ${cell(r.approvalId)} | ${cell(r.workProductId)} ` +
+          `| ${textDisclosedCell} | \`${cell(r.payloadSha256)}\` |`,
       );
     }
   }

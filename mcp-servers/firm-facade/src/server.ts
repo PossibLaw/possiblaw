@@ -191,6 +191,10 @@ export function buildDepsFromEnv(
     policy,
     publicBaseUrl: env["PAPERCLIP_PUBLIC_URL"],
     companyPrefix: env["PAPERCLIP_COMPANY_PREFIX"],
+    // Follow-up #3: thread companyId into deps for defense-in-depth cross-company
+    // read isolation in the read handlers. buildDepsFromEnv already requires
+    // PAPERCLIP_COMPANY_ID above (throws if absent), so this is always set.
+    companyId,
   };
 }
 

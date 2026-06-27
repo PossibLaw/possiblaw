@@ -454,27 +454,49 @@ handler writes its receipt on the success path and throws if the gate write
 fails. The gate proxy must be running on `GATE_PROXY_URL`; do not use
 `--no-gate-proxy` with `--firm-facade`.
 
-### Facade receipts are not yet in the per-matter Matter Trust Report
+### Facade receipts appear in the per-matter Matter Trust Report (fixed in 0.28.1)
 
-Facade receipts are recorded in the whole-chain audit (`GET /receipts/verify`,
-the tamper-evident hash chain) but are not yet surfaced in the per-matter
-`GET /receipts/bundle` Matter Trust Report. The facade writes the matter
-identifier into `meta.matterId`, while the bundle filters on the top-level
-`issueId` receipt field (`gate-proxy/src/quality/signoff.ts`), which facade
-receipts do not set. Wiring facade receipts into the per-matter bundle is a
-planned enhancement; it is deferred deliberately so that a `pending` approval is
-not mis-rendered as an attested action in the report.
+Facade receipts are recorded in the whole-chain audit (`GET /receipts/verify`)
+and are now also surfaced in the per-matter `GET /receipts/bundle` Matter Trust
+Report under a dedicated **Firm Facade Activity** section.
 
-### Cross-company read isolation depends on the company-scoped key
+The fix has two parts:
+
+1. **`POST /receipts/facade` now defaults the top-level `issueId` from `matterId`.**
+   Every facade tool carries `matterId`; the gate-proxy handler propagates it to the
+   top-level `issueId` field that the bundle filter (`gate-proxy/src/quality/signoff.ts`)
+   reads. An explicit `issueId` in the POST body still wins.
+
+2. **The `attestations` section in the bundle excludes `kind:"firm_facade"` receipts.**
+   A facade `request_approval` carries an `approvalId` with `outcome:"pending"` — it is
+   a *request*, not a board decision. The fixed filter ensures a pending facade request
+   is never rendered as an attestation in a regulator report. Facade actions appear
+   under the separate Firm Facade Activity section, where `pending` is rendered as
+   "requested — pending human approval".
+
+A regression test in `gate-proxy/src/quality/signoff.test.ts` asserts that a
+pending `firm_facade` `request_approval` with an `approvalId` produces an **empty**
+attestations section.
+
+### Cross-company read isolation: defense-in-depth assertion added (fixed in 0.28.1)
 
 The read tools (`get_matter_status`, `list_work_products`, `fetch_work_product`)
-issue scoped reads against Paperclip using the facade's company-scoped agent
-key. On a `local_trusted` instance without the minted company-scoped key, those
-reads rely on Paperclip's per-key authorization for cross-company isolation —
-the same loopback caveat noted for approvals above. The launcher's auto-mint
-path provisions the company-scoped key so reads are bound to the firm's company;
-if the key is absent on a `local_trusted` instance, cross-company read isolation
-is weakened in the same way.
+now assert — at the facade level — that every resolved issue's `companyId` matches
+the facade's configured `PAPERCLIP_COMPANY_ID`. On mismatch, the handler writes an
+audited `firm_facade` error receipt (outcome `error`, meta `{reason:"company_scope_violation"}`,
+no privileged text) and rejects the call before any data is returned.
+
+**This is defense-in-depth, not the primary control.** Paperclip's per-key
+authorization remains the primary isolation boundary. The facade's `companyId`
+assertion is a secondary check: it rejects out-of-company reads even in the
+`local_trusted` loopback scenario where paperclip's auth is weaker. The launcher's
+`--firm-facade` path provisions a company-scoped agent key (the structural boundary);
+this assertion adds a redundant rejection layer so an accidental or adversarial
+cross-company read is stopped and receipted at the facade, not just by paperclip.
+
+Residual: when `PAPERCLIP_API_KEY` is absent on a `local_trusted` instance AND
+`PAPERCLIP_COMPANY_ID` is not set, the scope check is skipped (backward-compatible
+with unconfigured deployments). The launcher always sets both variables.
 
 ### Facade key is write-once; hosted deployments must set `PAPERCLIP_PUBLIC_URL`
 

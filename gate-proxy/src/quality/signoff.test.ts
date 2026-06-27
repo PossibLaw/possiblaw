@@ -302,6 +302,191 @@ test("authority provenance: empty matter shows no registrations and no unbacked 
 });
 
 // ---------------------------------------------------------------------------
+// Follow-up #2 — facade receipts in Matter Trust Report
+// ---------------------------------------------------------------------------
+
+test("SECURITY TRAP regression: pending firm_facade request_approval with approvalId is NOT in attestations", () => {
+  // This is the TRAP the brief warns about: a firm_facade pending receipt has
+  // an approvalId. The old filter (approvalId !== undefined) would include it in
+  // attestations, making it appear as a board-attested event. Fixed by excluding
+  // kind:"firm_facade" from attestations.
+  const { chain } = freshChainPath();
+  chain.append({
+    kind: "firm_facade",
+    tool: "request_approval",
+    boundary: null,
+    decision: null,
+    outcome: "pending",
+    payloadSha256: sha256hex("facade-approval-payload"),
+    issueId: "POS-500",
+    approvalId: "approval-facade-1",
+  });
+
+  const bundle = assembleSignoffBundle(chain, "POS-500");
+
+  // MUST be empty — pending firm_facade receipt is NOT a board attestation
+  assert.equal(
+    bundle.attestations.length,
+    0,
+    "pending firm_facade request_approval MUST NOT appear in attestations",
+  );
+
+  // MUST appear in firmFacadeActivity
+  assert.equal(bundle.firmFacadeActivity.length, 1);
+  assert.equal(bundle.firmFacadeActivity[0].tool, "request_approval");
+  assert.equal(bundle.firmFacadeActivity[0].outcome, "pending");
+  assert.ok(
+    bundle.firmFacadeActivity[0].displayStatus.includes("pending human approval"),
+    `displayStatus must say "pending human approval"; got: ${bundle.firmFacadeActivity[0].displayStatus}`,
+  );
+  assert.equal(bundle.firmFacadeActivity[0].approvalId, "approval-facade-1");
+});
+
+test("firmFacadeActivity: facade actions appear in own section; pending request_approval renders as pending not attested", () => {
+  const { chain } = freshChainPath();
+
+  // create_matter facade receipt
+  chain.append({
+    kind: "firm_facade",
+    tool: "create_matter",
+    boundary: null,
+    decision: null,
+    outcome: "performed",
+    payloadSha256: sha256hex("create-payload"),
+    issueId: "POS-501",
+  });
+
+  // request_approval facade receipt — pending (the TRAP case)
+  chain.append({
+    kind: "firm_facade",
+    tool: "request_approval",
+    boundary: null,
+    decision: null,
+    outcome: "pending",
+    payloadSha256: sha256hex("approval-payload"),
+    issueId: "POS-501",
+    approvalId: "approval-facade-2",
+  });
+
+  // fetch_work_product receipt with workProductId in meta
+  chain.append({
+    kind: "firm_facade",
+    tool: "fetch_work_product",
+    boundary: null,
+    decision: null,
+    outcome: "performed",
+    payloadSha256: sha256hex("fetch-payload"),
+    issueId: "POS-501",
+    meta: { workProductId: "wp-001", textDisclosed: false },
+  });
+
+  // Unrelated matter receipt — must be excluded
+  chain.append({
+    kind: "egress",
+    tool: "send_email",
+    boundary: "THIRD_PARTY_EGRESS",
+    decision: "allow",
+    outcome: "performed",
+    payloadSha256: sha256hex("other"),
+    issueId: "POS-OTHER",
+  });
+
+  const bundle = assembleSignoffBundle(chain, "POS-501");
+
+  // 3 facade receipts in firmFacadeActivity
+  assert.equal(bundle.firmFacadeActivity.length, 3);
+  const createRow = bundle.firmFacadeActivity.find((r) => r.tool === "create_matter");
+  const approvalRow = bundle.firmFacadeActivity.find((r) => r.tool === "request_approval");
+  const fetchRow = bundle.firmFacadeActivity.find((r) => r.tool === "fetch_work_product");
+
+  assert.ok(createRow !== undefined, "create_matter must appear in firmFacadeActivity");
+  assert.equal(createRow!.outcome, "performed");
+
+  assert.ok(approvalRow !== undefined, "request_approval must appear in firmFacadeActivity");
+  assert.equal(approvalRow!.outcome, "pending");
+  assert.ok(
+    approvalRow!.displayStatus.includes("pending human approval"),
+    `pending request_approval displayStatus must say "pending human approval"; got: ${approvalRow!.displayStatus}`,
+  );
+  assert.equal(approvalRow!.approvalId, "approval-facade-2");
+
+  assert.ok(fetchRow !== undefined, "fetch_work_product must appear in firmFacadeActivity");
+  assert.equal(fetchRow!.workProductId, "wp-001");
+  assert.equal(fetchRow!.textDisclosed, false);
+
+  // attestations: ZERO — no firm_facade receipt carries a board attestation
+  assert.equal(
+    bundle.attestations.length,
+    0,
+    "attestations must be empty — firm_facade receipts are never board attestations",
+  );
+
+  // firmFacadeActivity does NOT appear in receipts count
+  // (facade receipts DO appear in bundle.receipts since they share issueId)
+  assert.equal(bundle.receipts.length, 3); // 3 facade receipts in this matter
+
+  // Markdown checks
+  const md = renderSignoffMarkdown(bundle);
+  assert.ok(md.includes("## Firm Facade Activity"), "Markdown must include Firm Facade Activity section");
+  assert.ok(
+    md.includes("pending human approval"),
+    "Markdown must show pending status for request_approval",
+  );
+  assert.ok(md.includes("_No approvals recorded for this matter._"), "attestations section must show no approvals");
+});
+
+test("firmFacadeActivity: a non-facade approvalId receipt (egress/board) DOES still appear in attestations", () => {
+  // Sanity check: the kind !== "firm_facade" filter must not over-exclude.
+  // A human-approved egress receipt still belongs in attestations.
+  const { chain } = freshChainPath();
+  chain.append({
+    kind: "egress",
+    tool: "file_court_document",
+    boundary: "COURT_FILING",
+    decision: "human",
+    outcome: "performed",
+    payloadSha256: sha256hex("court-doc"),
+    agentId: "agent-1",
+    issueId: "POS-502",
+    approvalId: "approval-board-3",
+  });
+
+  const bundle = assembleSignoffBundle(chain, "POS-502");
+
+  // Egress attestation must appear
+  assert.equal(bundle.attestations.length, 1);
+  assert.equal(bundle.attestations[0].approvalId, "approval-board-3");
+
+  // firmFacadeActivity must be empty
+  assert.equal(bundle.firmFacadeActivity.length, 0);
+});
+
+test("firmFacadeActivity: facade create_matter receipt has issueId via matterId defaulting (integration)", () => {
+  // Verifies that after the server.ts issueId fix, the receipt chain entry has
+  // top-level issueId set from matterId — so assembleSignoffBundle picks it up.
+  const { chain } = freshChainPath();
+
+  // Simulate what the server does after the fix: top-level issueId = matterId
+  chain.append({
+    kind: "firm_facade",
+    tool: "create_matter",
+    boundary: null,
+    decision: null,
+    outcome: "performed",
+    payloadSha256: sha256hex("create-xyz"),
+    issueId: "matter-XYZ",               // defaulted from matterId in server.ts
+    meta: { matterId: "matter-XYZ" },
+  });
+
+  const bundle = assembleSignoffBundle(chain, "matter-XYZ");
+
+  // Receipt must appear in the per-matter bundle
+  assert.equal(bundle.receipts.length, 1);
+  assert.equal(bundle.firmFacadeActivity.length, 1);
+  assert.equal(bundle.firmFacadeActivity[0].tool, "create_matter");
+});
+
+// ---------------------------------------------------------------------------
 // shared invariant assertion
 // ---------------------------------------------------------------------------
 

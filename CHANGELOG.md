@@ -7,6 +7,51 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.28.1] — 2026-06-26 — Firm-facade security hardening (#2 Matter Trust Report + #3 cross-company reads)
+
+Two non-blocking follow-up hardening changes from the Phase 3 whole-branch review.
+
+### Fixed
+
+- **Facade receipts now appear in the per-matter Matter Trust Report** (`GET /receipts/bundle`).
+  The `POST /receipts/facade` handler now defaults the top-level `issueId` from `matterId`
+  when no explicit `issueId` is supplied — every facade tool call carries `matterId`, so all
+  five tools join the per-matter bundle. A dedicated **Firm Facade Activity** section is added
+  to the `SignoffBundle` interface and the Markdown renderer; it lists each facade action with
+  its outcome, approvalId (for `request_approval`), workProductId and textDisclosed flag (for
+  `fetch_work_product`), and a regulator-readable `displayStatus`.
+
+- **Pending facade approval request NOT mislabelled as attested (attestations filter fix).**
+  The `attestations` section of the Matter Trust Report now excludes `kind:"firm_facade"` receipts.
+  A `request_approval` receipt carries an `approvalId` with `outcome:"pending"` — the old
+  `approvalId !== undefined` filter would have rendered it as a board attestation. Fixed by
+  gating on `kind !== "firm_facade"`. Regression test: a matter whose only approvalId-bearing
+  receipt is a pending `firm_facade` `request_approval` yields an EMPTY attestations section.
+  (`gate-proxy/src/quality/signoff.ts` + signoff.test.ts)
+
+- **Defense-in-depth cross-company read isolation in the facade.**
+  The three read handlers (`getMatterStatus`, `listWorkProducts`, `fetchWorkProduct`) now assert
+  `issue.companyId === deps.companyId` before returning any data. On mismatch, an audited
+  `firm_facade` error receipt is written (outcome `error`, meta `{reason:"company_scope_violation"}`,
+  no privileged text) and the call is rejected. A shared `guardCompanyScope` helper fetches the
+  issue and asserts scope — `getMatterStatus` reuses its existing `getIssue` call (zero extra
+  fetches); `listWorkProducts` and `fetchWorkProduct` each add one `getIssue` guard call before
+  their data fetch. `companyId` is threaded through `HandlerDeps` and `buildDepsFromEnv`.
+  This is defense-in-depth: paperclip's per-key auth remains the primary control; the facade
+  assertion is a secondary rejection layer.
+  (`mcp-servers/firm-facade/src/handlers.ts`, `server.ts`)
+
+### Tests
+
+- `gate-proxy/src/quality/signoff.test.ts`: 4 new tests (+4; was 9, now 13).
+  TRAP regression, firmFacadeActivity listing, non-facade attestation sanity, integration.
+- `gate-proxy/src/server.test.ts`: 2 new tests (+2; was 265, now 271 full suite after adding
+  signoff tests). matterId → issueId defaulting, explicit issueId precedence.
+- `mcp-servers/firm-facade/src/handlers.test.ts`: 8 new tests (+8; was 129, now 137).
+  Scope violation + success for all three read handlers, backward-compat (no companyId), no-data-on-violation.
+
+---
+
 ## [0.28.0] — 2026-06-26 — Firm-facing MCP facade
 
 Phase 3 of the trust pipeline: expose the firm AS an MCP server to an outside

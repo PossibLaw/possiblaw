@@ -61,6 +61,7 @@ export interface FacadeReceipts {
  * Fail-closed defaults:
  *   - `policy` absent → treated as { allowWorkProductText: false }
  *   - `publicBaseUrl` or `companyPrefix` absent → buildApprovalDeepLink returns null
+ *   - `companyId` absent → cross-company scope check is skipped (backward-compatible)
  */
 export interface HandlerDeps {
   client: FacadeClient;
@@ -71,6 +72,16 @@ export interface HandlerDeps {
   publicBaseUrl?: string;
   /** Company prefix for approval deep links (e.g. the firm's company slug). */
   companyPrefix?: string;
+  /**
+   * Company (firm) id — used for defense-in-depth cross-company read isolation (Follow-up #3).
+   * When set, each read handler asserts that the resolved issue belongs to this company.
+   * When absent, the scope check is skipped (backward-compatible with callers that don't set it).
+   *
+   * NOTE: this is defense-in-depth atop paperclip's per-key auth (the primary control).
+   * On a local_trusted instance without a company-scoped key, paperclip's auth is the
+   * primary boundary; this assertion is the facade-level secondary check.
+   */
+  companyId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +104,58 @@ async function writeReceipt(
     ...(meta !== undefined ? { meta } : {}),
   };
   await receipts.record(input);
+}
+
+// ---------------------------------------------------------------------------
+// Defense-in-depth company scope guard (Follow-up #3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch an issue and assert it belongs to the facade's configured company.
+ *
+ * SECURITY: this is a DEFENSE-IN-DEPTH control on top of paperclip's per-key
+ * authorization (the primary control). It rejects out-of-company reads even if
+ * paperclip would allow them (e.g. on a local_trusted instance without a
+ * company-scoped key where loopback reads are board-equivalent).
+ *
+ * Behavior:
+ *   - If companyId is undefined: skips the assertion (backward-compatible).
+ *   - If getIssue throws: writes one error receipt and re-throws.
+ *   - If issue.companyId !== companyId: writes one error receipt with
+ *     meta {reason:"company_scope_violation"} and throws (no privileged text).
+ *   - On success: returns the issue (so callers can use it without a second fetch).
+ *
+ * NEVER include the mismatched companyId or any issue payload text in the error receipt.
+ */
+async function guardCompanyScope(
+  client: FacadeClient,
+  receipts: FacadeReceipts,
+  tool: FacadeTool,
+  matterId: string,
+  payloadSha256: string,
+  companyId: string | undefined,
+): Promise<IssueRecord> {
+  let issue: IssueRecord;
+  try {
+    issue = await client.getIssue(matterId);
+  } catch (err) {
+    // Client error (network / 4xx / 5xx) — write error receipt then re-throw
+    await writeReceipt(receipts, tool, "error", payloadSha256, { matterId });
+    throw err;
+  }
+
+  // Defense-in-depth scope check: assert the issue belongs to this company.
+  // Skip when companyId is not configured (backward-compatible).
+  if (companyId !== undefined && issue["companyId"] !== companyId) {
+    // Error receipt: reason only — no privileged text, no mismatched company id
+    await writeReceipt(receipts, tool, "error", payloadSha256, { matterId }, {
+      reason: "company_scope_violation",
+    });
+    // Throw a structured error that callers and tests can pattern-match on
+    throw Object.assign(new Error("company_scope_violation"), { code: "company_scope_violation" });
+  }
+
+  return issue;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,14 +188,13 @@ export async function getMatterStatus(
   // payloadSha256 = hash of non-privileged action descriptor (tool + ids only, NO text)
   const payloadSha256 = sha256hex(canonicalArgs({ matterId, tool: "get_matter_status" }));
 
-  let issue: IssueRecord;
-  try {
-    issue = await client.getIssue(matterId);
-  } catch (err) {
-    // Client call failed — write error receipt then re-throw
-    await writeReceipt(receipts, "get_matter_status", "error", payloadSha256, { matterId });
-    throw err;
-  }
+  // Defense-in-depth: fetch issue and assert company scope (Follow-up #3).
+  // guardCompanyScope handles getIssue errors and scope violations, writing an
+  // error receipt in either case. On success it returns the issue for use below
+  // (zero extra calls vs the original getIssue + scope check pattern).
+  const issue = await guardCompanyScope(
+    client, receipts, "get_matter_status", matterId, payloadSha256, deps.companyId,
+  );
 
   // Receipt written AFTER successful client call (read operations are safe to audit post-read)
   await writeReceipt(receipts, "get_matter_status", "performed", payloadSha256, { matterId });
@@ -178,6 +240,13 @@ export async function listWorkProducts(
   const { matterId } = args;
   const { client, receipts } = deps;
   const payloadSha256 = sha256hex(canonicalArgs({ matterId, tool: "list_work_products" }));
+
+  // Defense-in-depth company scope check (Follow-up #3).
+  // This adds one getIssue call; it throws (with error receipt) on getIssue failure
+  // or scope violation — so the listWorkProducts call below is never reached on violation.
+  await guardCompanyScope(
+    client, receipts, "list_work_products", matterId, payloadSha256, deps.companyId,
+  );
 
   let items: WorkProductRecord[];
   try {
@@ -263,6 +332,14 @@ export async function fetchWorkProduct(
   // payloadSha256: tool + ids only — workProductId is an id, NOT privileged text
   const payloadSha256 = sha256hex(
     canonicalArgs({ matterId, tool: "fetch_work_product", workProductId }),
+  );
+
+  // Defense-in-depth company scope check (Follow-up #3).
+  // Resolves the matter and asserts companyId before any work-product data is accessed.
+  // On getIssue failure or scope violation, throws (with error receipt) before reaching
+  // the listWorkProducts call below — no data is disclosed on violation.
+  await guardCompanyScope(
+    client, receipts, "fetch_work_product", matterId, payloadSha256, deps.companyId,
   );
 
   let items: WorkProductRecord[];

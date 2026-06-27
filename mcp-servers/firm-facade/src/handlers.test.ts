@@ -27,10 +27,13 @@ import { FirmFacadeClient } from "./paperclip-client.ts";
 
 const FAKE_MATTER_ID = "matter-abc-123";
 const FAKE_WP_ID = "wp-001";
+// Follow-up #3: company id used by deps and matching fakeIssue — so existing tests pass the scope check.
+const FAKE_COMPANY_ID = "company-abc-456";
 
 const fakeIssue: IssueRecord = {
   id: FAKE_MATTER_ID,
   status: "open",
+  companyId: FAKE_COMPANY_ID,   // Follow-up #3: required for cross-company read isolation check
   workProducts: [{ id: "wp-001" }, { id: "wp-002" }],
   documentSummaries: [{ id: "ds-1" }],
   // planDocument with body simulates server returning privileged text — must never leak into receipt
@@ -149,6 +152,7 @@ function makeDeps(overrides?: {
   policy?: { allowWorkProductText: boolean };
   publicBaseUrl?: string;
   companyPrefix?: string;
+  companyId?: string;
 }): HandlerDeps & { client: TestClient; receipts: ReceiptSpy } {
   return {
     client: makeClient(overrides?.client),
@@ -156,6 +160,9 @@ function makeDeps(overrides?: {
     policy: overrides?.policy,
     publicBaseUrl: overrides?.publicBaseUrl,
     companyPrefix: overrides?.companyPrefix,
+    // Follow-up #3: include companyId by default so the scope check is exercised.
+    // fakeIssue.companyId === FAKE_COMPANY_ID, so existing tests pass.
+    companyId: overrides?.companyId !== undefined ? overrides.companyId : FAKE_COMPANY_ID,
   };
 }
 
@@ -989,5 +996,167 @@ describe("no privileged text in any receipt — cross-cutting", () => {
     const serialized = JSON.stringify(deps.receipts.calls);
     assert.ok(!serialized.includes("PRIVILEGED_ACTION_TEXT"), "no action text in requestApproval receipt");
     assert.ok(!serialized.includes("PRIVILEGED_SUMMARY_TEXT"), "no summary text in requestApproval receipt");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Follow-up #3 — defense-in-depth cross-company read isolation
+// ---------------------------------------------------------------------------
+
+describe("cross-company read isolation (defense-in-depth)", () => {
+  const FOREIGN_COMPANY_ID = "company-foreign-999";
+
+  // An issue that belongs to a DIFFERENT company than deps.companyId
+  const foreignIssue: IssueRecord = {
+    id: FAKE_MATTER_ID,
+    status: "open",
+    companyId: FOREIGN_COMPANY_ID,
+    workProducts: [],
+    documentSummaries: [],
+  };
+
+  // ---------------------------------------------------------------------------
+  // getMatterStatus
+  // ---------------------------------------------------------------------------
+
+  it("getMatterStatus: mismatched companyId → company_scope_violation error + error receipt (no data returned)", async () => {
+    const deps = makeDeps({
+      client: {
+        async getIssue(_id: string): Promise<IssueRecord> {
+          return foreignIssue;
+        },
+      },
+    });
+
+    await assert.rejects(
+      () => getMatterStatus({ matterId: FAKE_MATTER_ID }, deps),
+      /company_scope_violation/,
+    );
+
+    // Exactly one error receipt written
+    assert.equal(deps.receipts.calls.length, 1);
+    const r = deps.receipts.calls[0];
+    assert.equal(r.tool, "get_matter_status");
+    assert.equal(r.outcome, "error");
+    assert.equal(r.matterId, FAKE_MATTER_ID);
+    assert.deepEqual(r.meta, { reason: "company_scope_violation" });
+
+    // No foreign companyId or privileged data in receipt
+    const serialized = JSON.stringify(r);
+    assert.ok(!serialized.includes(FOREIGN_COMPANY_ID), "foreign companyId must not appear in receipt");
+  });
+
+  it("getMatterStatus: matching companyId → succeeds normally (scope check passes)", async () => {
+    const deps = makeDeps(); // companyId: FAKE_COMPANY_ID; fakeIssue.companyId: FAKE_COMPANY_ID
+    const result = await getMatterStatus({ matterId: FAKE_MATTER_ID }, deps);
+    assert.equal(result.status, "open");
+    assert.equal(deps.receipts.calls.length, 1);
+    assert.equal(deps.receipts.calls[0].outcome, "performed");
+  });
+
+  it("getMatterStatus: companyId absent in deps → scope check skipped (backward-compatible)", async () => {
+    // When companyId is undefined, the guard must not assert and must pass.
+    const depsNoCompany: HandlerDeps & { client: TestClient; receipts: ReceiptSpy } = {
+      client: makeClient(),
+      receipts: makeReceiptsSpy(),
+      // no companyId — backward-compatible: no scope check performed
+    };
+    const result = await getMatterStatus({ matterId: FAKE_MATTER_ID }, depsNoCompany);
+    assert.equal(result.status, "open");
+    assert.equal(depsNoCompany.receipts.calls[0].outcome, "performed");
+  });
+
+  // ---------------------------------------------------------------------------
+  // listWorkProducts
+  // ---------------------------------------------------------------------------
+
+  it("listWorkProducts: mismatched companyId → company_scope_violation error + error receipt (no data returned)", async () => {
+    const deps = makeDeps({
+      client: {
+        async getIssue(_id: string): Promise<IssueRecord> {
+          return foreignIssue;
+        },
+      },
+    });
+
+    await assert.rejects(
+      () => listWorkProducts({ matterId: FAKE_MATTER_ID }, deps),
+      /company_scope_violation/,
+    );
+
+    assert.equal(deps.receipts.calls.length, 1);
+    const r = deps.receipts.calls[0];
+    assert.equal(r.tool, "list_work_products");
+    assert.equal(r.outcome, "error");
+    assert.equal(r.matterId, FAKE_MATTER_ID);
+    assert.deepEqual(r.meta, { reason: "company_scope_violation" });
+  });
+
+  it("listWorkProducts: matching companyId → succeeds normally", async () => {
+    const deps = makeDeps();
+    const result = await listWorkProducts({ matterId: FAKE_MATTER_ID }, deps);
+    assert.equal(result.length, 2);
+    assert.equal(deps.receipts.calls[0].outcome, "performed");
+  });
+
+  // ---------------------------------------------------------------------------
+  // fetchWorkProduct
+  // ---------------------------------------------------------------------------
+
+  it("fetchWorkProduct: mismatched companyId → company_scope_violation error + error receipt (no data returned)", async () => {
+    const deps = makeDeps({
+      client: {
+        async getIssue(_id: string): Promise<IssueRecord> {
+          return foreignIssue;
+        },
+      },
+    });
+
+    await assert.rejects(
+      () => fetchWorkProduct({ matterId: FAKE_MATTER_ID, workProductId: FAKE_WP_ID }, deps),
+      /company_scope_violation/,
+    );
+
+    assert.equal(deps.receipts.calls.length, 1);
+    const r = deps.receipts.calls[0];
+    assert.equal(r.tool, "fetch_work_product");
+    assert.equal(r.outcome, "error");
+    assert.equal(r.matterId, FAKE_MATTER_ID);
+    assert.deepEqual(r.meta, { reason: "company_scope_violation" });
+  });
+
+  it("fetchWorkProduct: matching companyId → succeeds normally", async () => {
+    const deps = makeDeps();
+    const result = await fetchWorkProduct({ matterId: FAKE_MATTER_ID, workProductId: FAKE_WP_ID }, deps);
+    if ("error" in result) assert.fail(`expected no error: ${result.error}`);
+    assert.equal(result.id, FAKE_WP_ID);
+    assert.equal(deps.receipts.calls[0].outcome, "performed");
+  });
+
+  it("SECURITY: no data returned on scope violation — no work product arrays, no titles, no text", async () => {
+    // Verify the error throws BEFORE any data is read or returned
+    const getIssueCalls: string[] = [];
+    const listWorkProductsCalls: string[] = [];
+    const deps = makeDeps({
+      client: {
+        async getIssue(id: string): Promise<IssueRecord> {
+          getIssueCalls.push(id);
+          return foreignIssue;
+        },
+        async listWorkProducts(id: string): Promise<WorkProductRecord[]> {
+          listWorkProductsCalls.push(id);
+          return fakeWorkProducts; // should never be called on scope violation
+        },
+      },
+    });
+
+    await assert.rejects(() => fetchWorkProduct({ matterId: FAKE_MATTER_ID, workProductId: FAKE_WP_ID }, deps));
+
+    assert.equal(getIssueCalls.length, 1, "getIssue called exactly once (for scope check)");
+    assert.equal(
+      listWorkProductsCalls.length,
+      0,
+      "listWorkProducts must NOT be called when scope check fails — no data access on violation",
+    );
   });
 });
