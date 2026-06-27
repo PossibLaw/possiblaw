@@ -831,6 +831,102 @@ describe("fetchWorkProduct full-text opt-in (Unit D)", () => {
     const serialized = JSON.stringify(deps.receipts.calls);
     assert.ok(!serialized.includes("DOCUMENT_BODY"), "no document body in receipt on no-docKey path");
   });
+
+  it("getDocument throws → exactly ONE error receipt, no text returned, error propagates (fail-closed audit)", async () => {
+    const deps = makeDeps({
+      policy: { allowWorkProductText: true },
+      client: {
+        async listWorkProducts(_id: string) {
+          return [fakeDocWorkProduct]; // resolvable docKey → dual gate satisfied
+        },
+        async getDocument(_issueId: string, _key: string): Promise<never> {
+          throw new Error("document fetch boom");
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        fetchWorkProduct(
+          { matterId: FAKE_MATTER_ID, workProductId: "wp-doc-001", include_text: true },
+          deps,
+        ),
+      /document fetch boom/,
+    );
+
+    // Exactly ONE receipt — the error receipt — even though getDocument threw.
+    assert.equal(deps.receipts.calls.length, 1, "must write exactly one receipt on getDocument failure");
+    const r = deps.receipts.calls[0];
+    assert.equal(r.tool, "fetch_work_product");
+    assert.equal(r.outcome, "error");
+    assert.equal(r.matterId, FAKE_MATTER_ID);
+    assert.equal(r.workProductId, "wp-doc-001");
+    assert.deepEqual(r.meta, {
+      textDisclosed: false,
+      reason: "document_fetch_failed",
+      workProductId: "wp-doc-001",
+    });
+    // No document body text in the error receipt
+    const serialized = JSON.stringify(deps.receipts.calls);
+    assert.ok(!serialized.includes("DOCUMENT_BODY"), "no document body in error receipt");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getDocument reachability guard (Fix 1): fetchWorkProduct is the ONLY handler
+// that may call client.getDocument. Guards against a future handler calling it
+// ungated (bypassing the include_text + policy dual gate).
+// ---------------------------------------------------------------------------
+
+describe("getDocument reachability guard", () => {
+  it("getMatterStatus / listWorkProducts / createMatter / requestApproval NEVER call getDocument; fetchWorkProduct (dual gate) calls it exactly once", async () => {
+    // Shared spy client across all handlers so getDocument call-count is cumulative.
+    const getDocumentCalls: Array<{ issueId: string; key: string }> = [];
+    const sharedClient = makeClient({
+      async listWorkProducts(_id: string) {
+        return [fakeDocWorkProduct]; // resolvable docKey for the fetch path
+      },
+      async getDocument(issueId: string, key: string) {
+        getDocumentCalls.push({ issueId, key });
+        return { id: key, body: "DOCUMENT_BODY_TEXT" };
+      },
+    });
+    const receipts = makeReceiptsSpy();
+    const deps: HandlerDeps = {
+      client: sharedClient,
+      receipts,
+      policy: { allowWorkProductText: true },
+      publicBaseUrl: "https://app.possiblaw.io",
+      companyPrefix: "acme-law",
+    };
+
+    // Happy paths for every NON-fetch handler — none may touch getDocument.
+    await getMatterStatus({ matterId: FAKE_MATTER_ID }, deps);
+    await listWorkProducts({ matterId: FAKE_MATTER_ID }, deps);
+    await createMatter({ title: "Reachability Matter" }, deps);
+    await requestApproval(
+      { matterId: FAKE_MATTER_ID, action: "act", summary: "summary" },
+      deps,
+    );
+
+    assert.equal(
+      getDocumentCalls.length,
+      0,
+      "getDocument MUST NOT be called by getMatterStatus/listWorkProducts/createMatter/requestApproval",
+    );
+
+    // fetchWorkProduct under the full dual gate (policy on + include_text:true + docKey) → exactly one call.
+    await fetchWorkProduct(
+      { matterId: FAKE_MATTER_ID, workProductId: "wp-doc-001", include_text: true },
+      deps,
+    );
+
+    assert.equal(
+      getDocumentCalls.length,
+      1,
+      "fetchWorkProduct under the dual gate must call getDocument exactly once",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

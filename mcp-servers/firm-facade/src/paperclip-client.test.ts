@@ -231,5 +231,24 @@ describe("FirmFacadeClient", () => {
         );
       }
     });
+
+    // ALLOWLIST-EQUALITY (the real guard): the verb regex above would miss a
+    // backdoor with an innocuous name (resolveApproval, assertBoard, castVote,
+    // setApprovalDecision). Asserting the EXACT method set catches ANY added
+    // method regardless of name. To add a method here you must also extend this
+    // allowlist — forcing a deliberate, reviewable change.
+    it("FirmFacadeClient prototype exposes EXACTLY the 5 allowed methods (no extras, any name)", () => {
+      const EXPECTED = ["createIssue", "getIssue", "listWorkProducts", "getDocument", "createApproval"];
+      const actual = Object.getOwnPropertyNames(FirmFacadeClient.prototype)
+        .filter((n) => n !== "constructor")
+        .sort();
+      assert.deepEqual(
+        actual,
+        [...EXPECTED].sort(),
+        `SECURITY VIOLATION: FirmFacadeClient method set changed. Any added method — even an ` +
+          `innocuously-named one (resolveApproval, assertBoard, castVote) — must be reviewed and ` +
+          `explicitly added to this allowlist. Expected exactly: ${[...EXPECTED].sort().join(", ")}`,
+      );
+    });
   });
 });

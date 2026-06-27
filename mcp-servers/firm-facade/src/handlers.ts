@@ -303,7 +303,24 @@ export async function fetchWorkProduct(
     if (docKey !== undefined) {
       // Full text available — fetch document, return text + disclosure receipt.
       // Receipt records the disclosure event; NO body text enters the receipt.
-      const doc = await client.getDocument(matterId, docKey);
+      //
+      // Fail-closed audit completeness: if getDocument throws (network/4xx/5xx),
+      // write exactly one error receipt (NO body text) BEFORE rethrowing, so the
+      // "exactly one receipt per call" invariant holds even on the failure path.
+      let doc: DocumentRecord;
+      try {
+        doc = await client.getDocument(matterId, docKey);
+      } catch (err) {
+        await writeReceipt(
+          receipts,
+          "fetch_work_product",
+          "error",
+          payloadSha256,
+          { matterId, workProductId },
+          { textDisclosed: false, reason: "document_fetch_failed", workProductId },
+        );
+        throw err;
+      }
       await writeReceipt(
         receipts,
         "fetch_work_product",

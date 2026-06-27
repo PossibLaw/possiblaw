@@ -214,7 +214,7 @@ export function loadPolicy(filePath?: string): Policy {
   for (const key of Object.keys(doc)) {
     if (!VALID_TOP_LEVEL_KEYS.has(key)) {
       throw new PolicyError(
-        `Unknown top-level key "${key}" in policy file. Only "version", "boundaries", and "citationGate" are allowed.`,
+        `Unknown top-level key "${key}" in policy file. Only "version", "boundaries", "citationGate", and "firmFacade" are allowed.`,
       );
     }
   }
