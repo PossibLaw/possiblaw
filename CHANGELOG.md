@@ -7,6 +7,54 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.28.0] — 2026-06-26 — Firm-facing MCP facade
+
+Phase 3 of the trust pipeline: expose the firm AS an MCP server to an outside
+assistant (Claude Desktop, Codex, or any MCP client) behind a five-noun
+allowlist, human-only approvals, default-closed work-product text, and every
+action receipted through the gate proxy.
+
+### Added
+
+- **Firm-facing MCP facade** (`mcp-servers/firm-facade/`). Standalone stdio
+  MCP server with a hard-wired five-tool catalog: `create_matter`,
+  `get_matter_status`, `list_work_products`, `fetch_work_product`,
+  `request_approval`. The dispatch map (`HANDLERS`) is enforced at startup via
+  exact set-equality against the catalog — no silent gap, no extra handler.
+  Company-scoped paperclip client (`FirmFacadeClient`); no approve or decide
+  method on the client or in any handler. `request_approval` creates a
+  `request_board_approval` and always returns `status: "pending_approval"`;
+  the human reviews and decides in the Paperclip dashboard. Work-product full
+  text is default-closed; returned only when
+  `firmFacade.allowWorkProductText: true` (gate-policy opt-in) AND
+  `include_text: true` (caller opt-in). `payloadSha256` for every receipt is
+  over tool name and IDs only — no titles, descriptions, action text, or
+  document bodies enter any receipt. 129 node:test tests.
+- **Gate-proxy `POST /receipts/facade` endpoint + `firm_facade` receipt kind.**
+  Every facade tool call writes one `firm_facade` receipt (performed / pending /
+  error) through the gate proxy — facade actions appear in the whole-chain
+  tamper-evident audit (`GET /receipts/verify`) alongside internal egress.
+  (Per-matter Matter Trust Report inclusion — `GET /receipts/bundle` — is a
+  planned follow-up: facade receipts carry `meta.matterId`, while the bundle
+  filters on the top-level `issueId` field, so they are not yet surfaced there.)
+  `kind` is hard-coded server-side (never read from the request body). Tool field
+  validated against the same five-noun allowlist; validation failures append an
+  error receipt before returning 4xx (consistent with other quality endpoints).
+  Anti-forgery: the `CitationRegistry` is never called from the facade endpoint.
+- **`--firm-facade` launcher flag.** On a successful live import, provisions a
+  company-scoped agent key (minted against the chief-of-staff agent; fallback:
+  first agent) and writes `<data-dir>/firm-facade-mcp.json` (mode 600, written
+  atomically via `os.open` with `O_CREAT|0o600`). The config contains all
+  required env vars pre-filled; optional vars are omitted rather than written as
+  empty strings. Key not exposed to stderr even on failure (response body written
+  to a temp file, not captured into a log variable). Dry-run announces intent but
+  does not mint or write.
+- **`gate-policy.yaml` `firmFacade` section** (`companies/legal-operations/`).
+  New `firmFacade.allowWorkProductText` flag (default `false`). Gate proxy's
+  `VALID_TOP_LEVEL_KEYS` updated to accept the new key without parsing it.
+
+---
+
 ## [0.27.0] — 2026-06-26 — Data layer, sign-off bundle, data-terms tier-floor
 
 Derived from a LegalTechTalk market analysis (legal AI sorting into data /
