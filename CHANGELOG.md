@@ -17,7 +17,7 @@ operator-gated on a disposable Paperclip instance.
 ### Added
 
 - **`orchestration-eval/` package** (Tasks 1–9). Standalone TypeScript CLI (`bin/orchestration-eval`)
-  with five modules: `paperclip-client` (issue create, document put, budget patch, cost summary),
+  with six modules: `paperclip-client` (issue create, document put, budget patch, cost summary),
   `extract` (deliverable fetcher + Harvey `parse_doc` bridge for DOCX/PDF/XLSX/EML via `uv`),
   `await-completion` (issue-status poller with configurable timeout), `runner` (Arm A single-agent
   and Arm B chief-of-staff execution), `judge` (Harvey LAB `run_eval` bridge; default judge model
