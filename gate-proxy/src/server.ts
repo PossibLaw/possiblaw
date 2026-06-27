@@ -699,7 +699,11 @@ export function createGateServer(deps: GateServerDeps): http.Server {
         if (matterId !== undefined) receiptMeta["matterId"] = matterId;
         if (workProductId !== undefined) receiptMeta["workProductId"] = workProductId;
 
-        // Append receipt — kind ALWAYS firm_facade (never from body)
+        // Append receipt — kind ALWAYS firm_facade (never from body).
+        // Follow-up #2: default top-level issueId from matterId when no explicit
+        // issueId is supplied. Every facade tool carries matterId, so this makes
+        // facade receipts appear in the per-matter GET /receipts/bundle Matter Trust
+        // Report (which filters on body.issueId). Explicit issueId wins when present.
         const entry = deps.receipts.append({
           kind: "firm_facade",
           tool,
@@ -708,7 +712,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
           outcome,
           payloadSha256,
           agentId: agentId as string | undefined,
-          issueId: issueId as string | undefined,
+          issueId: ((issueId ?? matterId) as string | undefined),
           approvalId: approvalId as string | undefined,
           ...(Object.keys(receiptMeta).length > 0 ? { meta: receiptMeta } : {}),
         });

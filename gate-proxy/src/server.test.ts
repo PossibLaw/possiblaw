@@ -1996,6 +1996,72 @@ describe("gate server", () => {
     await close();
   });
 
+  // facade-6: matterId with no issueId → chain entry issueId defaults from matterId
+  it("POST /receipts/facade: matterId with no explicit issueId → chain entry issueId === matterId", async () => {
+    // Follow-up #2: so facade receipts appear in the per-matter Matter Trust Report.
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const facadeSha = sha256hex("matter-payload");
+    const { status } = await postFacadeReceipt(baseUrl, {
+      tool: "create_matter",
+      outcome: "performed",
+      payloadSha256: facadeSha,
+      matterId: "matter-XYZ",
+      // NOTE: no issueId supplied — must be defaulted from matterId
+    });
+
+    assert.equal(status, 200);
+    const last = receipts.entries().at(-1)!;
+    assert.equal(
+      last.body.issueId,
+      "matter-XYZ",
+      "top-level issueId must be defaulted from matterId when not explicitly supplied",
+    );
+    // meta.matterId still present
+    assert.equal(last.body.meta?.["matterId"], "matter-XYZ");
+
+    await close();
+  });
+
+  // facade-7: explicit issueId wins over matterId
+  it("POST /receipts/facade: explicit issueId wins when both issueId and matterId are supplied", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const facadeSha = sha256hex("matter-payload-2");
+    await postFacadeReceipt(baseUrl, {
+      tool: "get_matter_status",
+      outcome: "performed",
+      payloadSha256: facadeSha,
+      matterId: "matter-ABC",
+      issueId: "issue-EXPLICIT",
+    });
+
+    const last = receipts.entries().at(-1)!;
+    assert.equal(
+      last.body.issueId,
+      "issue-EXPLICIT",
+      "explicit issueId must win when both issueId and matterId are supplied",
+    );
+
+    await close();
+  });
+
   // GET /receipts/bundle missing/invalid issueId → 400
   it("GET /receipts/bundle without issueId → 400", async () => {
     const dir = tmpDir();
