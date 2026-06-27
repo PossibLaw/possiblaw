@@ -13,6 +13,14 @@ with traceability, governance, and efficiency in one platform.**
 All three share one Remotion project, one component library, and the same finale —
 only the cold open, the middle "day in the life" act, and the persona stats differ.
 
+> **Pre-render note (operator-gated — Sprint D, paused):** These scripts were written
+> before Phases 2–4 shipped. Before any render, the scripts must be re-cut to include
+> the citation gate (Phase 2), the firm-facing MCP facade (Phase 3), and the
+> deterministic deadline engine (Phase 4). The render itself — VO recording, music
+> bed, and Remotion pipeline — is an operator-driven step with production decisions
+> (talent, tooling, hosting) still open. Do not attempt to scaffold or render from
+> these scripts until the re-cut is reviewed and the operator confirms readiness.
+
 ---
 
 ## 1. Production spec (Remotion)

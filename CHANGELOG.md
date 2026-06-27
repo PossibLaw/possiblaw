@@ -7,6 +7,34 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.30.0] — 2026-06-27 — Phase 5 (docs): clone-to-demo polish; trust pipeline Phases 0–4 complete
+
+Documentation-only release. Tightens the README so a newcomer cloning the repo
+sees the complete trust pipeline and a crisp end-to-end path from `git clone` to
+`GET /receipts/verify`. No source code, tests, or `paperclip/` submodule touched.
+
+### Changed
+
+- **`README.md`** — Pipeline Phases 3–4 additions surfaced:
+  - Trust pipeline section: one-line pipeline spine (boundary classify → policy →
+    anonymize → human gate → citation gate → deadline audit → receipt → Matter Trust
+    Report) added before the bullet list. Deadline engine bullet added (Phase 4 — v1):
+    FRCP Rule 6 date math by code; audit-only in v1 (visible in the Matter Trust
+    Report, does not yet block a late filing); US-FED only; `pnpm -C deadline-engine
+    install` prerequisite. Firm-facade bullet was already present from Phase 3.
+  - "See the gates work" and "Quickstart" merged into a single **"5-minute path"**
+    section (`## The 5-minute path: clone → launch → see the receipt`), reordered so
+    clone/install comes first (Step 1, 2 min) and the gated-filing curl + receipt
+    verify comes second (Step 2, 3 min).
+  - Catalog table: two new rows added — **Firm-facing MCP facade** (stdio v1; human
+    approves in dashboard) and **Deterministic deadline engine** (US-FED; audit-only).
+- **`docs/demo-video-scripts.md`** — Pre-render note added: scripts predate Phases 2–4
+  (citation gate, firm-facing MCP facade, deadline engine) and must be re-cut before
+  render; the render itself (VO / music / Remotion) is an operator-driven step with
+  decisions still open. No video was rendered.
+
+---
+
 ## [0.29.0] — 2026-06-27 — Phase 4: deterministic deadline engine + deadline receipt / Matter Trust Report
 
 Phase 4 of the trust pipeline: a deterministic FRCP Rule 6 deadline engine (US-FED v1), a

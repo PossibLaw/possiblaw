@@ -27,6 +27,8 @@ Legal AI is sorting into a data layer (law as an API/MCP with provenance), a gua
 
 ## The trust pipeline
 
+Pipeline spine: boundary classify → policy → anonymize → human gate → citation gate → deadline audit → receipt → Matter Trust Report.
+
 What a firm actually gets:
 
 - **Hard-gated egress (structural).** Every egress write — email send, document upload, e-signature, payment, court filing, external delete — routes through a loopback Gate Proxy (`gate-proxy/`, default `http://127.0.0.1:3801`). Egress credentials exist **only** in the proxy process; the launcher scrubs them from the agent runtime, so a misbehaving agent's direct vendor call fails for want of credentials. Policy is the firm's to tune, per trust boundary, in [`companies/legal-operations/gate-policy.yaml`](companies/legal-operations/gate-policy.yaml): `allow` is pass-through + receipt; `anonymize` / `human` / `block` are hard gates.
@@ -34,6 +36,7 @@ What a firm actually gets:
 - **Receipts for everything.** Every gate decision — performed, pending, blocked, error — appends to a SHA-256 hash-chained, append-only receipt log. `GET /receipts/verify` checks the chain; `POST /receipts/anchor` writes the chain head into a paperclip comment. Payloads never appear in receipts — only their sha256.
 - **The agents are the interchangeable parts.** 178 atomic agents / 173 skills across 34 teams do the work inside the pipeline, with ten model variants that swap providers per lane without touching the package. The catalog is the supporting cast; the pipeline is the product.
 - **Firm-facing MCP facade (Phase 3 — v1).** An outside assistant (Claude Desktop, Codex, or any MCP client) can connect to the firm over stdio as a client. The facade exposes the firm AS an MCP server behind a fixed five-noun allowlist: `create_matter`, `get_matter_status`, `list_work_products`, `fetch_work_product`, `request_approval`. Human-only approvals — the facade has no approve tool, and the company-scoped agent key 403s on board-decide endpoints on authenticated instances. Work-product text is default-closed and opt-in (`firmFacade.allowWorkProductText` in `gate-policy.yaml`). Every facade action is receipted through the gate proxy so it appears in the same hash-chained audit spine as internal egress. Start with `./bin/possiblaw --firm-facade`: the launcher mints a company-scoped agent key and writes a ready-to-paste MCP config to `<data-dir>/firm-facade-mcp.json` (mode 600). Implementation: [`mcp-servers/firm-facade/`](mcp-servers/firm-facade/). Walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md). Honest limits: [docs/known-limitations.md](docs/known-limitations.md) → "Firm-facing MCP facade (v1)".
+- **Deterministic deadline engine (Phase 4 — v1).** Court-filing deadlines are computed by code (FRCP Rule 6, `deadline-engine/`), never by an LLM. The `deadline-calculator` agent routes all deadline questions through the `legal-deadline-calculation` skill, which invokes the engine CLI and reports the exact date with a full rule-application trace. Every computed deadline is audited in the Matter Trust Report via a `deadline` receipt kind. Prerequisite: `pnpm -C deadline-engine install`. Honest limits: US-FED only (`jurisdiction: "US-FED"`); state/CPR courts return `UNCONFIRMED`; audit-only in v1 — the deadline is visible and recorded in the report but does not yet block a late filing. Agent + skill: `companies/legal-operations/`. Engine: [`deadline-engine/`](deadline-engine/). Walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md) → "Compute a filing deadline." Honest limits: [docs/known-limitations.md](docs/known-limitations.md) → "Deadline engine (v1)".
 
 ## What's enforced vs routed vs advisory
 
@@ -56,11 +59,24 @@ PossibLaw helps a firm take the **reasonable steps** that Rule 1.6 and ABA Forma
 
 Sharp edges are documented, not hidden — see [docs/known-limitations.md](docs/known-limitations.md): `local_trusted` dev instances accept unauthenticated local board calls (the human gate binds agents via credential isolation; production deployments with auth enabled get the structural gate too); the receipt chain assumes a single writer, and same-user tampering is caught only against an externally anchored head; `share_external` writes (HubSpot, Linear, Clio, iManage, NetDocuments) are visibly refused in v1 rather than silently credentialed; Slack/Teams notification webhooks (operator-configured, no matter content) remain direct in v1. Which connector takes which path: [docs/connectors-inventory.md](docs/connectors-inventory.md).
 
-## See the gates work (2 minutes)
+## The 5-minute path: clone → launch → see the receipt
+
+**Step 1 — clone and launch (2 min)**
 
 ```bash
-./bin/possiblaw    # one command: paperclip server + package import + gate proxy
+git clone https://github.com/PossibLaw/possiblaw && cd possiblaw
+git submodule update --init --recursive
+pnpm -C paperclip install
+./bin/possiblaw
+# answer three prompts (org name, mission, variant)
+# → browser opens to your paperclip dashboard, agents loaded, gate proxy running
+```
 
+Add `--variant <slug>` to skip the interactive prompt, `--list-variants` to see the options, `--dry-run` to preview without writing.
+
+**Step 2 — trigger a gated court filing and verify the receipt (3 min)**
+
+```bash
 # simulate an agent attempting a court filing:
 curl -s -X POST http://127.0.0.1:3801/egress/file_court_document \
   -H 'content-type: application/json' \
@@ -74,18 +90,7 @@ curl -s http://127.0.0.1:3801/receipts/verify
 # → {"ok":true,"length":N,"head":"..."} — the tamper-evident trail
 ```
 
-## Quickstart
-
-```bash
-git clone https://github.com/PossibLaw/possiblaw && cd possiblaw
-git submodule update --init --recursive
-pnpm -C paperclip install
-./bin/possiblaw
-# answer three prompts (org name, mission, variant)
-# → browser opens to your paperclip dashboard, agents loaded, gate proxy running
-```
-
-Add `--variant <slug>` to skip the interactive prompt, `--list-variants` to see the options, `--dry-run` to preview without writing. Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); package layout: [docs/paperclip-package.md](docs/paperclip-package.md); sharp edges: [docs/known-limitations.md](docs/known-limitations.md).
+Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); package layout: [docs/paperclip-package.md](docs/paperclip-package.md); sharp edges: [docs/known-limitations.md](docs/known-limitations.md).
 
 ## The catalog (the interchangeable parts)
 
@@ -100,6 +105,8 @@ Add `--variant <slug>` to skip the interactive prompt, `--list-variants` to see 
 | **Demos** | `--demo law-firm` / `inhouse-legal` / `biglaw-practice-group` — synthetic demo matters for a boutique firm, an in-house department, and a BigLaw practice group |
 | **Delivery** | `deliverables-courier` files finished work products to your own OneDrive/SharePoint, Google Drive, or Notion per an operator policy file — auto-file or on-request per work-product type, privacy-tier gated, local copy always retained |
 | **Theme** | `--theme possiblaw` (default) — light-first dashboard with a warm launch palette; `light` / `dark` also available |
+| **Firm-facing MCP facade** | Drive the firm from your own MCP assistant (Claude Desktop, Codex, or any MCP client) via a fixed five-noun allowlist; human-only approvals; work-product text default-closed; every facade action receipted through the gate proxy. `./bin/possiblaw --firm-facade`. Honest: stdio v1; human approves in the Paperclip dashboard. [`mcp-servers/firm-facade/`](mcp-servers/firm-facade/) |
+| **Deterministic deadline engine** | Court-filing deadlines computed by code (FRCP Rule 6), never by an LLM; result audited in the Matter Trust Report. `deadline-calculator` agent + [`deadline-engine/`](deadline-engine/). Honest: US-FED only; audit-only (visible in the report, not yet blocking); `pnpm -C deadline-engine install` prerequisite. |
 
 ## Model variants
 
