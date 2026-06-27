@@ -1,6 +1,6 @@
 # PossibLaw Agent Catalog
 
-177 agents · 172 skills · 34 teams under two executives. Derived from `companies/legal-operations/` (agent frontmatter + `.paperclip.yaml` lanes); regenerate after package changes.
+178 agents · 173 skills · 34 teams under two executives. Derived from `companies/legal-operations/` (agent frontmatter + `.paperclip.yaml` lanes); regenerate after package changes.
 
 The catalog is the menu — import what your firm practices. `./bin/possiblaw --teams <names>` (e.g. `litigation,commercial`, or presets `boutique` / `inhouse`) imports just those teams plus the executives, meta-reviewers, capability builder, and the skills they reference. See the operator walkthrough.
 
@@ -74,12 +74,13 @@ Lanes: **routing** = classify + delegate · **drafting** = produces documents ·
 | `dpia-assessor` | review | Data-protection impact assessments with residual-risk flags. |
 | `breach-notification-drafter` | drafting | Per-audience breach-notification letter drafting, never sent. |
 
-### Litigation Lead (`litigation-lead`) — 9 specialists
+### Litigation Lead (`litigation-lead`) — 10 specialists
 
 | Agent | Lane | What it does |
 |---|---|---|
 | `litigation-hold-drafter` | drafting | Litigation-hold notice drafting with custodian scoping and acknowledgment tracking. |
 | `litigation-docket-monitor` | extractive | Docket monitoring via CourtListener with structured filing summaries; read-only posture. |
+| `deadline-calculator` | extractive | Filing-deadline computation via deterministic FRCP Rule 6 engine; never estimates dates; fails closed to UNCONFIRMED for unsupported jurisdictions. |
 | `litigation-demand-response-drafter` | drafting | Demand letter and response drafting; internal work products only, operator gate before any use. |
 | `discovery-request-drafter` | drafting | RFP, interrogatory, and RFA drafting, never served. |
 | `discovery-response-drafter` | drafting | Discovery responses and objections drafting with privilege flags. |
