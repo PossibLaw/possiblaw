@@ -1,6 +1,6 @@
 // mcp-servers/firm-facade/src/handlers.test.ts
 //
-// Zero-network tests for firm-facade handlers — Unit C (Task 3.4 + 3.5).
+// Zero-network tests for firm-facade handlers — Units C + D (Tasks 3.4–3.7).
 // Injects a fake client and a fake receipts spy; no fetch/network I/O.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -10,11 +10,16 @@ import {
   listWorkProducts,
   fetchWorkProduct,
   createMatter,
+  requestApproval,
 } from "./handlers.ts";
 import type { FacadeClient, FacadeReceipts, HandlerDeps } from "./handlers.ts";
 import type { FacadeReceiptInput } from "./receipts.ts";
 import type { IssueRecord, WorkProductRecord } from "./paperclip-client.ts";
 import { sha256hex, canonicalArgs } from "./hash.ts";
+
+// Static-invariant imports (no runtime behavior — just imported for enumeration)
+import { FACADE_TOOLS } from "./catalog.ts";
+import { FirmFacadeClient } from "./paperclip-client.ts";
 
 // ---------------------------------------------------------------------------
 // Fake data fixtures
@@ -41,6 +46,7 @@ const fakeWorkProducts: WorkProductRecord[] = [
     status: "draft",
     reviewState: "pending",
     isPrimary: true,
+    // No externalId/metadata → no docKey → cannot disclose full text
   },
   {
     id: "wp-002",
@@ -52,6 +58,33 @@ const fakeWorkProducts: WorkProductRecord[] = [
     isPrimary: false,
   },
 ];
+
+/** Work product WITH a docKey via externalId — used in Unit D full-text tests. */
+const fakeDocWorkProduct: WorkProductRecord = {
+  id: "wp-doc-001",
+  type: "document",
+  title: "PRIVILEGED_DOC_TITLE",
+  externalId: "doc-key-abc",
+  status: "draft",
+  reviewState: "pending",
+  isPrimary: true,
+};
+
+/** Work product with docKey in metadata.documentKey only. */
+const fakeDocMetaWorkProduct: WorkProductRecord = {
+  id: "wp-doc-002",
+  type: "document",
+  metadata: { documentKey: "doc-key-from-meta" },
+  status: "draft",
+};
+
+/** Work product WITHOUT any docKey — e.g. a PR url, no document body. */
+const fakeNonDocWorkProduct: WorkProductRecord = {
+  id: "wp-pr-001",
+  type: "pull_request",
+  url: "https://github.com/example/repo/pull/42",
+  status: "open",
+};
 
 // ---------------------------------------------------------------------------
 // Fake receipts spy
@@ -74,12 +107,20 @@ function makeReceiptsSpy(opts?: { throws?: boolean }): ReceiptSpy {
 // Fake client
 // ---------------------------------------------------------------------------
 
-type TestClient = FacadeClient & { createIssueCalls: unknown[] };
+type TestClient = FacadeClient & {
+  createIssueCalls: unknown[];
+  createApprovalCalls: unknown[];
+  getDocumentCalls: Array<{ issueId: string; key: string }>;
+};
 
 function makeClient(overrides?: Partial<FacadeClient>): TestClient {
   const createIssueCalls: unknown[] = [];
+  const createApprovalCalls: unknown[] = [];
+  const getDocumentCalls: Array<{ issueId: string; key: string }> = [];
   return {
     createIssueCalls,
+    createApprovalCalls,
+    getDocumentCalls,
     async createIssue(body) {
       createIssueCalls.push(structuredClone(body));
       return { id: "matter-new", status: "created" };
@@ -90,20 +131,31 @@ function makeClient(overrides?: Partial<FacadeClient>): TestClient {
     async listWorkProducts(_issueId: string): Promise<WorkProductRecord[]> {
       return fakeWorkProducts;
     },
-    async getDocument(_issueId: string, _key: string) {
-      return { id: _key, body: "DOCUMENT_BODY_TEXT" };
+    async getDocument(issueId: string, key: string) {
+      getDocumentCalls.push({ issueId, key });
+      return { id: key, body: "DOCUMENT_BODY_TEXT" };
     },
-    async createApproval(_body) {
+    async createApproval(body) {
+      createApprovalCalls.push(structuredClone(body));
       return { id: "approval-1", status: "pending" };
     },
     ...overrides,
   };
 }
 
-function makeDeps(overrides?: { client?: Partial<FacadeClient>; throws?: boolean }): HandlerDeps & { client: TestClient; receipts: ReceiptSpy } {
+function makeDeps(overrides?: {
+  client?: Partial<FacadeClient>;
+  throws?: boolean;
+  policy?: { allowWorkProductText: boolean };
+  publicBaseUrl?: string;
+  companyPrefix?: string;
+}): HandlerDeps & { client: TestClient; receipts: ReceiptSpy } {
   return {
     client: makeClient(overrides?.client),
     receipts: makeReceiptsSpy({ throws: overrides?.throws }),
+    policy: overrides?.policy,
+    publicBaseUrl: overrides?.publicBaseUrl,
+    companyPrefix: overrides?.companyPrefix,
   };
 }
 
@@ -210,7 +262,8 @@ describe("listWorkProducts", () => {
 // ---------------------------------------------------------------------------
 
 describe("fetchWorkProduct", () => {
-  it("returns metadata with textWithheld:true even when include_text:true", async () => {
+  it("returns metadata with textWithheld:true when policy absent and include_text:true", async () => {
+    // No policy in deps → treat as {allowWorkProductText:false} (fail-closed)
     const deps = makeDeps();
     const result = await fetchWorkProduct(
       { matterId: FAKE_MATTER_ID, workProductId: FAKE_WP_ID, include_text: true },
@@ -218,12 +271,20 @@ describe("fetchWorkProduct", () => {
     );
 
     if ("error" in result) assert.fail(`expected no error, got: ${result.error}`);
+    // Narrow to withhold variant
+    if (!("textWithheld" in result)) assert.fail("expected textWithheld result, not full-text disclosure");
+
     assert.equal(result.id, FAKE_WP_ID);
     assert.equal(result.type, "brief");
     assert.equal(result.textWithheld, true);
-    assert.equal(result.note, "full text withheld — opt-in policy applies");
+    // Note must mention the policy flag (policy was absent/off but include_text was true)
+    assert.ok(
+      typeof result.note === "string" && result.note.includes("enable firmFacade.allowWorkProductText"),
+      `note should mention policy flag, got: ${result.note}`,
+    );
     assert.equal(result.link, "https://paperclip.example/wp/001");
     assert.ok(!("body" in result), "body must not be present on result");
+    assert.ok(!("text" in result), "text must not be present when policy off");
   });
 
   it("returns metadata with textWithheld:true when include_text is omitted", async () => {
@@ -231,8 +292,12 @@ describe("fetchWorkProduct", () => {
     const result = await fetchWorkProduct({ matterId: FAKE_MATTER_ID, workProductId: FAKE_WP_ID }, deps);
 
     if ("error" in result) assert.fail(`expected no error, got: ${result.error}`);
+    if (!("textWithheld" in result)) assert.fail("expected textWithheld result");
     assert.equal(result.textWithheld, true);
     assert.ok(!("body" in result), "body must not be present");
+    assert.ok(!("text" in result), "text must not be present when include_text omitted");
+    // No note when include_text was not requested
+    assert.equal(result.note, undefined, "note must be absent when include_text not true");
   });
 
   it("link uses the work product's own url (not a constructed deep link)", async () => {
@@ -258,7 +323,7 @@ describe("fetchWorkProduct", () => {
     assert.equal(result.link, null);
   });
 
-  it("writes exactly one fetch_work_product performed receipt with matterId + workProductId + meta:{textWithheld:true}", async () => {
+  it("writes exactly one fetch_work_product performed receipt with matterId + workProductId + meta:{textDisclosed:false}", async () => {
     const deps = makeDeps();
     await fetchWorkProduct({ matterId: FAKE_MATTER_ID, workProductId: FAKE_WP_ID }, deps);
 
@@ -269,7 +334,7 @@ describe("fetchWorkProduct", () => {
     assert.equal(r.matterId, FAKE_MATTER_ID);
     assert.equal(r.workProductId, FAKE_WP_ID);
     assert.match(r.payloadSha256, /^[0-9a-f]{64}$/);
-    assert.deepEqual(r.meta, { textWithheld: true });
+    assert.deepEqual(r.meta, { textDisclosed: false });
   });
 
   it("returns work_product_not_found error and writes error receipt for unknown id", async () => {
@@ -422,6 +487,353 @@ describe("createMatter", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tests: requestApproval (Unit D, Task 3.6)
+// ---------------------------------------------------------------------------
+
+describe("requestApproval", () => {
+  it("calls createApproval with type:'request_board_approval', issueIds:[matterId], payload carrying action+summary", async () => {
+    const deps = makeDeps({
+      publicBaseUrl: "https://app.possiblaw.io",
+      companyPrefix: "acme-law",
+    });
+    await requestApproval(
+      { matterId: FAKE_MATTER_ID, action: "file_motion", summary: "File motion to dismiss" },
+      deps,
+    );
+
+    assert.equal(deps.client.createApprovalCalls.length, 1);
+    const callBody = deps.client.createApprovalCalls[0] as Record<string, unknown>;
+    assert.equal(callBody["type"], "request_board_approval");
+    assert.deepEqual(callBody["issueIds"], [FAKE_MATTER_ID]);
+    const payload = callBody["payload"] as Record<string, unknown>;
+    assert.equal(payload["action"], "file_motion");
+    assert.equal(payload["summary"], "File motion to dismiss");
+    assert.equal(payload["matterId"], FAKE_MATTER_ID);
+    assert.equal(payload["source"], "firm-facade");
+  });
+
+  it("returns status:'pending_approval', approvalId, and constructed deepLink when config present", async () => {
+    const deps = makeDeps({
+      publicBaseUrl: "https://app.possiblaw.io",
+      companyPrefix: "acme-law",
+    });
+    const result = await requestApproval(
+      { matterId: FAKE_MATTER_ID, action: "file_motion", summary: "Motion to dismiss" },
+      deps,
+    );
+
+    assert.equal(result.status, "pending_approval");
+    assert.equal(result.approvalId, "approval-1");
+    assert.equal(
+      result.deepLink,
+      "https://app.possiblaw.io/acme-law/approvals/approval-1",
+    );
+    assert.equal(result.note, undefined, "note must be absent when deepLink is present");
+  });
+
+  it("returns deepLink:null and fallback note when publicBaseUrl/companyPrefix absent", async () => {
+    const deps = makeDeps(); // no publicBaseUrl or companyPrefix
+    const result = await requestApproval(
+      { matterId: FAKE_MATTER_ID, action: "send_letter", summary: "Demand letter" },
+      deps,
+    );
+
+    assert.equal(result.status, "pending_approval");
+    assert.equal(result.approvalId, "approval-1");
+    assert.equal(result.deepLink, null);
+    assert.ok(
+      typeof result.note === "string" && result.note.length > 0,
+      "note must be present when deepLink is null",
+    );
+    assert.ok(
+      result.note!.includes("PAPERCLIP_PUBLIC_URL"),
+      `note should mention PAPERCLIP_PUBLIC_URL, got: ${result.note}`,
+    );
+  });
+
+  it("writes exactly one 'pending' receipt with approvalId + matterId; NO action/summary text in receipt", async () => {
+    const deps = makeDeps({
+      publicBaseUrl: "https://app.possiblaw.io",
+      companyPrefix: "acme-law",
+    });
+    await requestApproval(
+      { matterId: FAKE_MATTER_ID, action: "SENSITIVE_ACTION", summary: "SENSITIVE_SUMMARY_TEXT" },
+      deps,
+    );
+
+    assert.equal(deps.receipts.calls.length, 1);
+    const r = deps.receipts.calls[0];
+    assert.equal(r.tool, "request_approval");
+    assert.equal(r.outcome, "pending");
+    assert.equal(r.matterId, FAKE_MATTER_ID);
+    assert.equal(r.approvalId, "approval-1");
+    assert.match(r.payloadSha256, /^[0-9a-f]{64}$/);
+
+    // CRITICAL: no action or summary text must appear in the receipt
+    const serialized = JSON.stringify(r);
+    assert.ok(!serialized.includes("SENSITIVE_ACTION"), "action must not appear in receipt");
+    assert.ok(!serialized.includes("SENSITIVE_SUMMARY_TEXT"), "summary must not appear in receipt");
+  });
+
+  it("payloadSha256 is sha256(canonicalArgs({tool,matterId,approvalId})) — no action/summary", async () => {
+    const deps = makeDeps();
+    await requestApproval(
+      { matterId: FAKE_MATTER_ID, action: "act", summary: "sum" },
+      deps,
+    );
+
+    const r = deps.receipts.calls[0];
+    const expectedSha = sha256hex(
+      canonicalArgs({ tool: "request_approval", matterId: FAKE_MATTER_ID, approvalId: "approval-1" }),
+    );
+    assert.equal(r.payloadSha256, expectedSha);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: human-only invariant (static — load-bearing security property #1)
+// ---------------------------------------------------------------------------
+
+describe("human-only approval invariant (static)", () => {
+  it("FACADE_TOOLS catalog has no approve/decide/reject tool", () => {
+    // Check that no tool NAME starts with an approve/reject/decide verb.
+    // "request_approval" is intentionally allowed — it REQUESTS a human to approve;
+    // it does not itself approve. The regex is anchored to start-of-name to match
+    // the same convention as paperclip-client.test.ts (no ^approve-starting tool).
+    const names = FACADE_TOOLS.map((t) => t.name);
+    for (const name of names) {
+      assert.ok(
+        !/^(approv|reject|decide)/i.test(name),
+        `catalog MUST NOT contain an approve/reject/decide tool (name must not start with those verbs) — found: "${name}"`,
+      );
+    }
+  });
+
+  it("FirmFacadeClient prototype exposes no approve/reject/decide/request-revision method", () => {
+    const proto = FirmFacadeClient.prototype;
+    const methods = Object.getOwnPropertyNames(proto);
+    for (const m of methods) {
+      assert.ok(
+        !/^(approv|reject|decide)|request.?revision/i.test(m),
+        `FirmFacadeClient MUST NOT have an approve/reject/decide method — found: "${m}"`,
+      );
+    }
+  });
+
+  it("requestApproval always returns status 'pending_approval' — never approves or rejects", async () => {
+    const deps = makeDeps();
+    const result = await requestApproval(
+      { matterId: "m-test", action: "act", summary: "summary" },
+      deps,
+    );
+    assert.equal(result.status, "pending_approval", "status MUST always be pending_approval");
+    assert.ok(!("approved" in result), "result MUST NOT contain an 'approved' field");
+    assert.ok(!("rejected" in result), "result MUST NOT contain a 'rejected' field");
+    assert.ok(!("decided" in result), "result MUST NOT contain a 'decided' field");
+  });
+
+  it("handlers module exports no approve/reject/decide function", async () => {
+    // Check that no exported function NAME starts with an approve/reject/decide verb.
+    // "requestApproval" is intentionally allowed — it submits a request; it does not
+    // approve. Anchored to start-of-name to avoid false-positives on "request*" names.
+    const mod = await import("./handlers.ts");
+    const exports = Object.keys(mod);
+    for (const name of exports) {
+      assert.ok(
+        !/^(approv|reject|decide)/i.test(name),
+        `handlers module MUST NOT export an approve/reject/decide function (name must not start with those verbs) — found: "${name}"`,
+      );
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: fetchWorkProduct full-text opt-in (Unit D, Task 3.7 — risk #2)
+// ---------------------------------------------------------------------------
+
+describe("fetchWorkProduct full-text opt-in (Unit D)", () => {
+  it("EDGE: policy OFF, include_text:true → withheld, getDocument NOT called, policy-off note returned", async () => {
+    // No policy → treat as {allowWorkProductText:false}
+    const deps = makeDeps({
+      client: {
+        async listWorkProducts(_id: string) {
+          return [fakeDocWorkProduct];
+        },
+      },
+    });
+    const result = await fetchWorkProduct(
+      { matterId: FAKE_MATTER_ID, workProductId: "wp-doc-001", include_text: true },
+      deps,
+    );
+
+    if ("error" in result) assert.fail(`expected no error: ${result.error}`);
+    if (!("textWithheld" in result)) assert.fail("expected withhold, not full-text disclosure");
+    assert.equal(result.textWithheld, true);
+    assert.ok(!("text" in result), "text must not be present when policy off");
+    assert.ok(
+      typeof result.note === "string" && result.note.includes("enable firmFacade.allowWorkProductText"),
+      `note must reference the policy flag; got: ${result.note}`,
+    );
+    // getDocument MUST NOT be called when policy is off
+    assert.equal(deps.client.getDocumentCalls.length, 0, "getDocument must NOT be called when policy off");
+    // Receipt: textDisclosed:false
+    assert.equal(deps.receipts.calls.length, 1);
+    assert.deepEqual(deps.receipts.calls[0].meta, { textDisclosed: false });
+  });
+
+  it("policy ON + include_text:true + externalId docKey → getDocument called, text returned, textDisclosed receipt", async () => {
+    const deps = makeDeps({
+      policy: { allowWorkProductText: true },
+      client: {
+        async listWorkProducts(_id: string) {
+          return [fakeDocWorkProduct]; // has externalId: "doc-key-abc"
+        },
+      },
+    });
+    const result = await fetchWorkProduct(
+      { matterId: FAKE_MATTER_ID, workProductId: "wp-doc-001", include_text: true },
+      deps,
+    );
+
+    if ("error" in result) assert.fail(`expected no error: ${result.error}`);
+    if (!("textDisclosed" in result)) assert.fail("expected full-text disclosure result");
+    assert.equal(result.textDisclosed, true);
+    assert.ok("text" in result, "text must be present when policy on and docKey present");
+    assert.equal((result as { text?: string }).text, "DOCUMENT_BODY_TEXT");
+    assert.ok(!("textWithheld" in result), "textWithheld must not be present on full-text result");
+
+    // getDocument must be called exactly once with the correct docKey
+    assert.equal(deps.client.getDocumentCalls.length, 1);
+    assert.equal(deps.client.getDocumentCalls[0].issueId, FAKE_MATTER_ID);
+    assert.equal(deps.client.getDocumentCalls[0].key, "doc-key-abc");
+
+    // Receipt: textDisclosed:true, workProductId in meta
+    assert.equal(deps.receipts.calls.length, 1);
+    const r = deps.receipts.calls[0];
+    assert.equal(r.outcome, "performed");
+    assert.deepEqual(r.meta, { textDisclosed: true, workProductId: "wp-doc-001" });
+  });
+
+  it("policy ON + include_text:true + metadata.documentKey → docKey resolved from metadata", async () => {
+    const deps = makeDeps({
+      policy: { allowWorkProductText: true },
+      client: {
+        async listWorkProducts(_id: string) {
+          return [fakeDocMetaWorkProduct]; // has metadata.documentKey
+        },
+      },
+    });
+    const result = await fetchWorkProduct(
+      { matterId: FAKE_MATTER_ID, workProductId: "wp-doc-002", include_text: true },
+      deps,
+    );
+
+    if ("error" in result) assert.fail(`expected no error: ${result.error}`);
+    if (!("textDisclosed" in result)) assert.fail("expected full-text disclosure");
+    assert.equal(result.textDisclosed, true);
+    assert.equal(deps.client.getDocumentCalls.length, 1);
+    assert.equal(deps.client.getDocumentCalls[0].key, "doc-key-from-meta");
+  });
+
+  it("policy ON + include_text:false → withheld, getDocument NOT called, no note", async () => {
+    const deps = makeDeps({
+      policy: { allowWorkProductText: true },
+      client: {
+        async listWorkProducts(_id: string) {
+          return [fakeDocWorkProduct];
+        },
+      },
+    });
+    const result = await fetchWorkProduct(
+      { matterId: FAKE_MATTER_ID, workProductId: "wp-doc-001", include_text: false },
+      deps,
+    );
+
+    if ("error" in result) assert.fail(`expected no error: ${result.error}`);
+    if (!("textWithheld" in result)) assert.fail("expected withhold when include_text:false");
+    assert.equal(result.textWithheld, true);
+    assert.ok(!("text" in result), "text must not be present when include_text:false");
+    assert.equal(result.note, undefined, "note must be absent when include_text:false");
+    assert.equal(deps.client.getDocumentCalls.length, 0, "getDocument must NOT be called when include_text:false");
+    // Receipt: textDisclosed:false
+    assert.deepEqual(deps.receipts.calls[0].meta, { textDisclosed: false });
+  });
+
+  it("policy ON + include_text:true + NO docKey → withheld + 'no linked document' note", async () => {
+    const deps = makeDeps({
+      policy: { allowWorkProductText: true },
+      client: {
+        async listWorkProducts(_id: string) {
+          return [fakeNonDocWorkProduct]; // pull_request — no externalId/metadata.documentKey
+        },
+      },
+    });
+    const result = await fetchWorkProduct(
+      { matterId: FAKE_MATTER_ID, workProductId: "wp-pr-001", include_text: true },
+      deps,
+    );
+
+    if ("error" in result) assert.fail(`expected no error: ${result.error}`);
+    if (!("textWithheld" in result)) assert.fail("expected withhold when no docKey");
+    assert.equal(result.textWithheld, true);
+    assert.ok(!("text" in result), "text must not be present when no docKey");
+    assert.ok(
+      typeof result.note === "string" && result.note.includes("no linked document"),
+      `note must mention 'no linked document'; got: ${result.note}`,
+    );
+    assert.equal(deps.client.getDocumentCalls.length, 0, "getDocument must NOT be called when no docKey");
+    // Receipt: textDisclosed:false with reason
+    assert.deepEqual(
+      deps.receipts.calls[0].meta,
+      { textDisclosed: false, reason: "no_linked_document" },
+    );
+  });
+
+  it("SECURITY: no document body text ever appears in any receipt — full-text disclosed path", async () => {
+    // Policy on + docKey → text IS returned to caller; body must NOT appear in receipt
+    const deps = makeDeps({
+      policy: { allowWorkProductText: true },
+      client: {
+        async listWorkProducts(_id: string) {
+          return [fakeDocWorkProduct];
+        },
+        async getDocument(_issueId: string, _key: string) {
+          return { id: _key, body: "SECRET_PRIVILEGED_DOCUMENT_BODY_XYZ" };
+        },
+      },
+    });
+    await fetchWorkProduct(
+      { matterId: FAKE_MATTER_ID, workProductId: "wp-doc-001", include_text: true },
+      deps,
+    );
+
+    const serialized = JSON.stringify(deps.receipts.calls);
+    assert.ok(
+      !serialized.includes("SECRET_PRIVILEGED_DOCUMENT_BODY_XYZ"),
+      "document body MUST NEVER appear in any receipt — security invariant violated",
+    );
+  });
+
+  it("SECURITY: no document body text in receipt on no-docKey path", async () => {
+    const deps = makeDeps({
+      policy: { allowWorkProductText: true },
+      client: {
+        async listWorkProducts(_id: string) {
+          return [fakeNonDocWorkProduct];
+        },
+      },
+    });
+    await fetchWorkProduct(
+      { matterId: FAKE_MATTER_ID, workProductId: "wp-pr-001", include_text: true },
+      deps,
+    );
+
+    const serialized = JSON.stringify(deps.receipts.calls);
+    assert.ok(!serialized.includes("DOCUMENT_BODY"), "no document body in receipt on no-docKey path");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Cross-cutting: no privileged text in ANY receipt across all handlers
 // ---------------------------------------------------------------------------
 
@@ -444,7 +856,7 @@ describe("no privileged text in any receipt — cross-cutting", () => {
     assert.ok(!serialized.includes("PRIVILEGED_MEMO_TITLE"), "no work product titles in listWorkProducts receipt");
   });
 
-  it("fetchWorkProduct receipt: only ids + {textWithheld} flag, no document body or title in payload", async () => {
+  it("fetchWorkProduct receipt: only ids + {textDisclosed:false} flag, no document body or title in payload", async () => {
     const deps = makeDeps();
     await fetchWorkProduct(
       { matterId: FAKE_MATTER_ID, workProductId: FAKE_WP_ID, include_text: true },
@@ -455,8 +867,8 @@ describe("no privileged text in any receipt — cross-cutting", () => {
     const serialized = JSON.stringify(r);
     assert.ok(!serialized.includes("PRIVILEGED_BRIEF_TITLE"), "no work product title in fetchWorkProduct receipt");
     assert.ok(!serialized.includes("DOCUMENT_BODY_TEXT"), "no document body in fetchWorkProduct receipt");
-    // meta must be only { textWithheld: true }
-    assert.deepEqual(r.meta, { textWithheld: true });
+    // meta must be only { textDisclosed: false } — policy was off, so no text was released
+    assert.deepEqual(r.meta, { textDisclosed: false });
   });
 
   it("createMatter receipt: only ids + flags, no title or description", async () => {
@@ -469,5 +881,17 @@ describe("no privileged text in any receipt — cross-cutting", () => {
     const serialized = JSON.stringify(deps.receipts.calls);
     assert.ok(!serialized.includes("PRIVILEGED_MATTER_TITLE"), "no title in createMatter receipt");
     assert.ok(!serialized.includes("PRIVILEGED_MATTER_DESCRIPTION"), "no description in createMatter receipt");
+  });
+
+  it("requestApproval receipt: no action or summary text in receipt", async () => {
+    const deps = makeDeps();
+    await requestApproval(
+      { matterId: FAKE_MATTER_ID, action: "PRIVILEGED_ACTION_TEXT", summary: "PRIVILEGED_SUMMARY_TEXT" },
+      deps,
+    );
+
+    const serialized = JSON.stringify(deps.receipts.calls);
+    assert.ok(!serialized.includes("PRIVILEGED_ACTION_TEXT"), "no action text in requestApproval receipt");
+    assert.ok(!serialized.includes("PRIVILEGED_SUMMARY_TEXT"), "no summary text in requestApproval receipt");
   });
 });

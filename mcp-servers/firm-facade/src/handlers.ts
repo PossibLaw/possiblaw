@@ -1,6 +1,6 @@
 // mcp-servers/firm-facade/src/handlers.ts
 //
-// Read handlers (Task 3.4) and create_matter (Task 3.5) for the firm-facade MCP server.
+// Handlers (Tasks 3.4–3.7) for the firm-facade MCP server.
 // Server wiring is a LATER unit — handlers here are pure functions of (args, deps).
 //
 // LOAD-BEARING SECURITY RULES (enforced by tests in handlers.test.ts):
@@ -8,13 +8,20 @@
 // (a) Every handler writes exactly ONE firm_facade receipt — outcome "performed" on
 //     success, "error" on failure. No handler silently swallows an unaudited action.
 //
-// (b) NO privileged text (titles, descriptions, document bodies) ever enters a receipt
-//     or the payloadSha256 descriptor. Receipts carry only ids (matterId / workProductId)
-//     plus outcome flags. The payloadSha256 is sha256hex(canonicalArgs({ tool, ...ids })).
+// (b) NO privileged text (titles, descriptions, document bodies, action/summary text)
+//     ever enters a receipt or the payloadSha256 descriptor. Receipts carry only ids
+//     (matterId / workProductId / approvalId) plus outcome flags. The payloadSha256
+//     is sha256hex(canonicalArgs({ tool, ...ids })).
 //
-// (c) fetch_work_product withholds full document text in this unit even when
-//     include_text===true. Unit D adds the policy-gated full-text branch (clearly marked
-//     with a seam comment below). Do not call client.getDocument here.
+// (c) HUMAN-ONLY APPROVAL (risk #1): there is NO tool and NO handler and NO code
+//     path that approves, rejects, or decides an approval. requestApproval ALWAYS
+//     returns status:"pending_approval". The client has no approve/decide method.
+//
+// (d) FULL-TEXT SIDE-DOOR (risk #2): document body text is returned to the outside
+//     assistant ONLY when include_text:true AND policy.allowWorkProductText===true
+//     (literal boolean). Every disclosure writes a receipt with textDisclosed:true.
+//     No document body text ever enters a receipt. Fail-closed: absent policy is
+//     treated as {allowWorkProductText:false}.
 
 import type {
   IssueRecord,
@@ -26,6 +33,7 @@ import type {
 } from "./paperclip-client.ts";
 import type { FacadeReceiptInput, FacadeOutcome, FacadeTool } from "./receipts.ts";
 import { sha256hex, canonicalArgs } from "./hash.ts";
+import { buildApprovalDeepLink } from "./deeplink.ts";
 
 // ---------------------------------------------------------------------------
 // Structural interfaces for dependency injection
@@ -38,8 +46,6 @@ export interface FacadeClient {
   createIssue(body: CreateIssueBody): Promise<IssueRecord>;
   getIssue(issueId: string): Promise<IssueRecord>;
   listWorkProducts(issueId: string): Promise<WorkProductRecord[]>;
-  /** Used by Unit D (policy-gated full-text branch). Included here so the interface
-   *  is stable across units. */
   getDocument(issueId: string, key: string): Promise<DocumentRecord>;
   createApproval(body: CreateApprovalBody): Promise<ApprovalRecord>;
 }
@@ -50,12 +56,21 @@ export interface FacadeReceipts {
 }
 
 /**
- * Handler dependencies. Extendable — Unit D will add a policy dependency here
- * for the fetch_work_product full-text gate.
+ * Handler dependencies. Extended in Unit D for the policy gate and approval deep link.
+ *
+ * Fail-closed defaults:
+ *   - `policy` absent → treated as { allowWorkProductText: false }
+ *   - `publicBaseUrl` or `companyPrefix` absent → buildApprovalDeepLink returns null
  */
 export interface HandlerDeps {
   client: FacadeClient;
   receipts: FacadeReceipts;
+  /** Full-text policy gate. Absent is treated as {allowWorkProductText:false} (fail-closed). */
+  policy?: { allowWorkProductText: boolean };
+  /** Public base URL for approval deep links (e.g. PAPERCLIP_PUBLIC_URL env). */
+  publicBaseUrl?: string;
+  /** Company prefix for approval deep links (e.g. the firm's company slug). */
+  companyPrefix?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +202,7 @@ export async function listWorkProducts(
 }
 
 // ---------------------------------------------------------------------------
-// Handler: fetchWorkProduct (Task 3.4) — METADATA-ONLY in this unit
+// Handler: fetchWorkProduct (Tasks 3.4 + 3.7)
 // ---------------------------------------------------------------------------
 
 export interface FetchWorkProductArgs {
@@ -196,37 +211,54 @@ export interface FetchWorkProductArgs {
   include_text?: boolean;
 }
 
+/** Full-text disclosed result — returned when policy allows and docKey is resolvable. */
+export interface FetchWorkProductFullText {
+  id: string;
+  title?: string;
+  type: string;
+  status?: string;
+  reviewState?: string;
+  link: string | null;
+  text: string;
+  textDisclosed: true;
+}
+
+/** Withheld result — returned when policy is off, include_text is false, or no docKey. */
+export interface FetchWorkProductWithheld {
+  id: string;
+  title?: string;
+  type: string;
+  status?: string;
+  reviewState?: string;
+  link: string | null;
+  textWithheld: true;
+  note?: string;
+}
+
 export type FetchWorkProductResult =
-  | {
-      id: string;
-      title?: string;
-      type: string;
-      status?: string;
-      reviewState?: string;
-      link: string | null;
-      textWithheld: true;
-      note: string;
-    }
+  | FetchWorkProductFullText
+  | FetchWorkProductWithheld
   | { error: string };
 
 /**
- * Fetch metadata for a specific work product.
+ * Fetch a specific work product. Returns metadata only by default.
  *
- * METADATA-ONLY in this unit: full document text is ALWAYS withheld even when
- * include_text===true. The caller receives textWithheld:true and a note.
+ * FULL-TEXT OPT-IN (risk #2): document body is returned ONLY when
+ *   args.include_text === true AND deps.policy?.allowWorkProductText === true.
+ * Default-closed; absent policy → closed. Every disclosure writes a
+ * receipt with meta.textDisclosed:true. No body text ever enters a receipt.
  *
- * Unit D seam: the policy-gated full-text branch (client.getDocument call) is
- * clearly marked below. Unit D will insert the branch there after adding a
- * policy dependency to HandlerDeps.
+ * DOC-KEY DERIVATION: a work product has no first-class document FK.
+ * The doc key is derived from: externalId → metadata.documentKey → metadata.key.
+ * When none is resolvable, full text is honestly unavailable (v1 limitation, Unit G).
  *
- * Writes one "fetch_work_product" receipt (performed/error).
- * payloadSha256 includes workProductId (an id, not privileged text).
+ * Writes exactly one "fetch_work_product" receipt per call (performed/error).
  */
 export async function fetchWorkProduct(
   args: FetchWorkProductArgs,
   deps: HandlerDeps,
 ): Promise<FetchWorkProductResult> {
-  const { matterId, workProductId } = args;
+  const { matterId, workProductId, include_text } = args;
   const { client, receipts } = deps;
   // payloadSha256: tool + ids only — workProductId is an id, NOT privileged text
   const payloadSha256 = sha256hex(
@@ -247,11 +279,84 @@ export async function fetchWorkProduct(
     return { error: "work_product_not_found" };
   }
 
-  // Unit D: policy-gated full-text branch goes here.
-  // When deps.policy allows and include_text === true, call:
-  //   const doc = await client.getDocument(matterId, workProductId);
-  //   return the result with body text included.
-  // Until Unit D, full text is always withheld (see note below).
+  const link = wp.url ?? null;
+
+  // ---------------------------------------------------------------------------
+  // FULL-TEXT BRANCH (risk #2):
+  // Gate condition: include_text === true AND policy.allowWorkProductText === true.
+  // Absent policy is closed (fail-closed).
+  // ---------------------------------------------------------------------------
+
+  if (include_text === true && deps.policy?.allowWorkProductText === true) {
+    // Derive document key — three lookup sources, in priority order.
+    // externalId is typed string|undefined; metadata fields need runtime type check (unknown).
+    const meta = wp.metadata;
+    const docKey: string | undefined =
+      wp.externalId
+      ?? (meta !== undefined && typeof meta["documentKey"] === "string"
+          ? meta["documentKey"]
+          : undefined)
+      ?? (meta !== undefined && typeof meta["key"] === "string"
+          ? meta["key"]
+          : undefined);
+
+    if (docKey !== undefined) {
+      // Full text available — fetch document, return text + disclosure receipt.
+      // Receipt records the disclosure event; NO body text enters the receipt.
+      const doc = await client.getDocument(matterId, docKey);
+      await writeReceipt(
+        receipts,
+        "fetch_work_product",
+        "performed",
+        payloadSha256,
+        { matterId, workProductId },
+        // meta: textDisclosed:true + workProductId so the receipt is self-contained
+        { textDisclosed: true, workProductId },
+      );
+      return {
+        id: wp.id,
+        title: wp.title,
+        type: wp.type,
+        status: wp.status,
+        reviewState: wp.reviewState,
+        link,
+        text: doc.body ?? "",
+        textDisclosed: true,
+      };
+    }
+
+    // No docKey resolvable — work product has no linked document (e.g. pull_request, preview_url).
+    // This is an honest v1 limitation (Unit G). Withhold with a clear note.
+    await writeReceipt(
+      receipts,
+      "fetch_work_product",
+      "performed",
+      payloadSha256,
+      { matterId, workProductId },
+      { textDisclosed: false, reason: "no_linked_document" },
+    );
+    return {
+      id: wp.id,
+      title: wp.title,
+      type: wp.type,
+      status: wp.status,
+      reviewState: wp.reviewState,
+      link,
+      textWithheld: true,
+      note: "no linked document to disclose for this work product",
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // WITHHOLD PATH: include_text false/absent OR policy off.
+  // Receipt: textDisclosed:false. Note present only when caller requested text
+  // but policy was off (helps caller understand why text was not returned).
+  // ---------------------------------------------------------------------------
+
+  const note: string | undefined =
+    include_text === true
+      ? "full text withheld — enable firmFacade.allowWorkProductText"
+      : undefined;
 
   await writeReceipt(
     receipts,
@@ -259,7 +364,7 @@ export async function fetchWorkProduct(
     "performed",
     payloadSha256,
     { matterId, workProductId },
-    { textWithheld: true },
+    { textDisclosed: false },
   );
 
   return {
@@ -268,11 +373,9 @@ export async function fetchWorkProduct(
     type: wp.type,
     status: wp.status,
     reviewState: wp.reviewState,
-    // Use the work product's own url pass-through — do NOT construct a paperclip deep link
-    // (the paperclip "issues" dashboard URL shape was not confirmed in the spike)
-    link: wp.url ?? null,
+    link,
     textWithheld: true,
-    note: "full text withheld — opt-in policy applies",
+    ...(note !== undefined ? { note } : {}),
   };
 }
 
@@ -338,4 +441,84 @@ export async function createMatter(
   await writeReceipt(receipts, "create_matter", "performed", payloadSha256, { matterId: issue.id });
 
   return { matterId: issue.id, status: issue.status };
+}
+
+// ---------------------------------------------------------------------------
+// Handler: requestApproval (Task 3.6) — HUMAN-ONLY APPROVAL (risk #1)
+// ---------------------------------------------------------------------------
+
+export interface RequestApprovalArgs {
+  matterId: string;
+  action: string;
+  summary: string;
+}
+
+export interface RequestApprovalResult {
+  /** Always "pending_approval" — there is no code path that approves or decides. */
+  status: "pending_approval";
+  approvalId: string;
+  /** Deep link to the approval dashboard entry, or null when config is absent. */
+  deepLink: string | null;
+  /** Present only when deepLink is null — instructs caller to use the dashboard. */
+  note?: string;
+}
+
+/**
+ * Request human approval for a proposed action on a matter.
+ *
+ * HUMAN-ONLY INVARIANT (risk #1 — headline security property):
+ * This handler creates an APPROVAL REQUEST. It ALWAYS returns status "pending_approval".
+ * There is NO code path that approves, rejects, or decides the approval.
+ * The client has no approve/decide method. The human reviewer decides via the dashboard.
+ *
+ * Bait-and-switch surface: v1 has no post-approval execution step inside the facade —
+ * the human approves exactly what the dashboard shows. There is no execution seam here.
+ *
+ * payloadSha256: hashes { tool, matterId, approvalId } only.
+ * NO action or summary text enters the receipt (they are privileged human-readable
+ * content; they go to the paperclip payload seen by the human reviewer in the dashboard).
+ */
+export async function requestApproval(
+  args: RequestApprovalArgs,
+  deps: HandlerDeps,
+): Promise<RequestApprovalResult> {
+  const { matterId, action, summary } = args;
+  const { client, receipts, publicBaseUrl, companyPrefix } = deps;
+
+  // Create approval request. action/summary go to the dashboard payload so the
+  // human reviewer can see what is being approved — they do NOT go into the receipt.
+  const approval = await client.createApproval({
+    type: "request_board_approval",
+    payload: {
+      source: "firm-facade",
+      action,
+      summary,
+      matterId,
+    },
+    issueIds: [matterId],
+  });
+
+  // Build optional deep link — null when publicBaseUrl or companyPrefix is absent
+  const deepLink = buildApprovalDeepLink(publicBaseUrl, companyPrefix, approval.id);
+
+  // Receipt: tool + ids only. NO action/summary text — those are privileged.
+  const payloadSha256 = sha256hex(
+    canonicalArgs({ tool: "request_approval", matterId, approvalId: approval.id }),
+  );
+  await writeReceipt(
+    receipts,
+    "request_approval",
+    "pending",
+    payloadSha256,
+    { matterId, approvalId: approval.id },
+  );
+
+  return {
+    status: "pending_approval",
+    approvalId: approval.id,
+    deepLink,
+    note: deepLink === null
+      ? "Open the approval in the dashboard; set PAPERCLIP_PUBLIC_URL + company prefix for a direct link."
+      : undefined,
+  };
 }

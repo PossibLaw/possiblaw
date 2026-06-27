@@ -65,6 +65,16 @@ export interface WorkProductRecord {
   reviewState?: string;
   summary?: string;
   isPrimary?: boolean;
+  /**
+   * Optional external identifier used to derive the document key for full-text
+   * retrieval (Unit D spike). When set, getDocument is called with this value.
+   */
+  externalId?: string;
+  /**
+   * Optional metadata record. The document key may live here as
+   * `metadata.documentKey` or `metadata.key` when externalId is absent.
+   */
+  metadata?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
