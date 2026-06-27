@@ -385,3 +385,105 @@ as the human-approval gate — see "Gate proxy" above); production deployments
 with `PAPERCLIP_GATE_API_KEY` enabled get the structural boundary. Good-law
 and currency checks (KeyCite / Shepard's) are never performed by the gate and
 remain operator/counsel follow-ups.
+
+## Firm-facing MCP facade (v1)
+
+### stdio only
+
+The facade communicates over stdin/stdout. It is spawned by the outside
+assistant as a subprocess; there is no remote HTTP/SSE transport, no
+firm-issued bearer auth for the MCP channel, and no multi-tenant routing. A
+remote HTTP facade with firm-issued auth is a later phase.
+
+### Approval is human-only — with a trust caveat on local_trusted instances
+
+`request_approval` creates a `request_board_approval` in Paperclip and always
+returns `status: "pending_approval"`. The facade exposes no approve or decide
+tool; the company-scoped agent key 403s on Paperclip's `assertBoard`
+board-decide endpoints.
+
+Caveat: on a `local_trusted` dev instance, Paperclip accepts unauthenticated
+loopback board calls (see "Gate proxy" above). If the facade's
+`PAPERCLIP_API_KEY` is absent or empty, the facade's HTTP calls to Paperclip
+run over loopback without a credential — and on a `local_trusted` instance
+that loopback call is treated as board-authenticated, which would mean
+`assertBoard` endpoints succeed. The `--firm-facade` auto-mint path resolves
+this by provisioning a company-scoped key (`type: "agent"`) so the facade
+authenticates as an agent, not a board actor, and cannot call `assertBoard`. If
+the mint fails and the operator does not manually provision a key, the structural
+"cannot approve" guarantee holds only at the code level (no approve code path
+exists), not at the paperclip auth layer. Production deployments with
+`PAPERCLIP_GATE_API_KEY` enabled get the full structural boundary.
+
+### Work-product full text is default-closed + opt-in
+
+`fetch_work_product` withholds document body text unless BOTH conditions hold:
+`firmFacade.allowWorkProductText: true` in `gate-policy.yaml` (set by the
+operator) AND `include_text: true` in the tool call. Every disclosure is
+receipted with `meta.textDisclosed: true`; no document body appears in the
+receipt itself.
+
+Additionally, full text is resolvable only when the work product carries a
+document key — derived from `externalId`, `metadata.documentKey`, or
+`metadata.key` in the work-product record. A work product that has only a URL
+(e.g. a pull request or preview link) has no document to retrieve; the response
+is `{ textWithheld: true, note: "no linked document to disclose for this work
+product" }`.
+
+### No ethical wall or cross-matter information barriers (deferred)
+
+Every tool is scoped to an explicit `matterId` supplied by the caller. There is
+no cross-matter search or aggregation surface. Cross-matter information barriers
+— preventing a connected assistant from interleaving data from different client
+matters — are a later phase.
+
+### Create-then-audit window
+
+`create_matter` calls Paperclip first, then writes the receipt. If the receipt
+write fails (gate proxy unreachable after the create succeeds), the issue exists
+in Paperclip without an audit receipt. This error propagates to the caller — it
+is not silently swallowed — but the window exists in v1. Deferred-receipt
+queueing is a future mitigation.
+
+### Receipts depend on the gate proxy
+
+Facade receipts route through the gate proxy (`POST /receipts/facade`, single
+writer). All five facade tools fail-closed if the receipt cannot be recorded —
+including the read-only `get_matter_status` and `list_work_products`: every
+handler writes its receipt on the success path and throws if the gate write
+fails. The gate proxy must be running on `GATE_PROXY_URL`; do not use
+`--no-gate-proxy` with `--firm-facade`.
+
+### Facade receipts are not yet in the per-matter Matter Trust Report
+
+Facade receipts are recorded in the whole-chain audit (`GET /receipts/verify`,
+the tamper-evident hash chain) but are not yet surfaced in the per-matter
+`GET /receipts/bundle` Matter Trust Report. The facade writes the matter
+identifier into `meta.matterId`, while the bundle filters on the top-level
+`issueId` receipt field (`gate-proxy/src/quality/signoff.ts`), which facade
+receipts do not set. Wiring facade receipts into the per-matter bundle is a
+planned enhancement; it is deferred deliberately so that a `pending` approval is
+not mis-rendered as an attested action in the report.
+
+### Cross-company read isolation depends on the company-scoped key
+
+The read tools (`get_matter_status`, `list_work_products`, `fetch_work_product`)
+issue scoped reads against Paperclip using the facade's company-scoped agent
+key. On a `local_trusted` instance without the minted company-scoped key, those
+reads rely on Paperclip's per-key authorization for cross-company isolation —
+the same loopback caveat noted for approvals above. The launcher's auto-mint
+path provisions the company-scoped key so reads are bound to the firm's company;
+if the key is absent on a `local_trusted` instance, cross-company read isolation
+is weakened in the same way.
+
+### Facade key is write-once; hosted deployments must set `PAPERCLIP_PUBLIC_URL`
+
+The minted agent key is returned once by Paperclip and written to
+`<data-dir>/firm-facade-mcp.json` (mode 600). It cannot be retrieved again from
+Paperclip. If the file is lost, revoke the old key and mint a new one.
+
+`PAPERCLIP_PUBLIC_URL` defaults to the Paperclip loopback base
+(`http://127.0.0.1:<port>`), so approval deep links in `request_approval`
+responses resolve locally only. For hosted deployments, update
+`PAPERCLIP_PUBLIC_URL` in the emitted config to the public base URL before
+distributing it to the outside assistant.

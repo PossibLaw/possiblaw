@@ -151,6 +151,16 @@ OPTIONS:
                         If businesses/<slug>/ does not exist, it is created
                         from businesses/_template/ automatically.
   --no-browser          Don't auto-open the dashboard URL.
+  --firm-facade         After a successful import, provision a company-scoped
+                        agent key (attached to the chief-of-staff agent) and
+                        write a ready-to-paste MCP-client config block to
+                        <data-dir>/firm-facade-mcp.json (mode 600; contains
+                        the key). Paste the config into your outside
+                        assistant's MCP config so it can spawn the firm facade
+                        (mcp-servers/firm-facade) on demand over stdio.
+                        The launcher does NOT start a facade server — the
+                        outside assistant's MCP client does.
+                        Default: off. No-op in --dry-run mode.
   -h, --help            Show this help and exit.
 
 EXAMPLES:
@@ -302,6 +312,7 @@ ONBOARD_EXTRA_ENV=""
 DEMO_PROFILE=""
 TEAMS=""
 BUSINESS_SLUG=""
+FIRM_FACADE="false"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -326,6 +337,7 @@ while [ "$#" -gt 0 ]; do
         --teams) [ "$#" -ge 2 ] || { err "--teams requires a value"; exit 2; }; TEAMS="$2"; shift 2 ;;
         --business) [ "$#" -ge 2 ] || { err "--business requires a value"; exit 2; }; BUSINESS_SLUG="$2"; shift 2 ;;
         --no-browser) NO_BROWSER="true"; shift ;;
+        --firm-facade) FIRM_FACADE="true"; shift ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
         *) err "Unknown argument: $1"; usage >&2; exit 2 ;;
@@ -1578,6 +1590,9 @@ for e in errors: print(f"  err:  {e}")
 PY
 )"
     log "preview: $PREVIEW_SUMMARY"
+    if [ "$FIRM_FACADE" = "true" ]; then
+        log "--firm-facade is set; MCP-client config will be emitted on a real (non-dry-run) run"
+    fi
     milestone "dry-run complete; server still running (stop: kill \$(cat $LAUNCHER_PID_FILE))"
     # Keep server up so the operator can browse / re-run with no --dry-run.
     trap - INT TERM
@@ -1865,6 +1880,182 @@ PY
     fi
 fi
 rm -f "$SECRET_IDS_FILE" "$PLAIN_ENV_FILE"
+
+# ---------------------------------------------------------------------------
+# Firm facade: provision company-scoped key + emit MCP-client config
+# ---------------------------------------------------------------------------
+#
+# --firm-facade provisions a company-scoped agent key (attached to the
+# chief-of-staff agent; POST /api/agents/:id/keys, board-only loopback) and
+# writes a ready-to-paste MCP-client config JSON to
+# <data-dir>/firm-facade-mcp.json (mode 600; contains the raw key).
+#
+# The facade is spawned on-demand by the OUTSIDE assistant's MCP client over
+# stdio — the launcher does NOT start a server here.
+#
+# Key-mint contract (Step A, confirmed read-only):
+#   paperclip/server/src/routes/agents.ts:2850 — POST /api/agents/:id/keys
+#   body: { "name": "<string>" }   (schema: paperclip/packages/shared/…/agent.ts:112)
+#   response 201: { id, name, token, createdAt }
+#   token = raw key (returned ONCE on create; hashed in DB; never re-listable)
+#   assertBoard enforced → board-authed loopback (local_trusted) can mint
+
+if [ "$FIRM_FACADE" = "true" ] && [ -n "$COMPANY_ID" ]; then
+    milestone "firm facade: provisioning company-scoped key + emitting MCP-client config"
+
+    # Resolve chief-of-staff agent id from import response (fallback: first agent).
+    # Guarded with `|| true` so a Python failure cannot trip `set -e` and kill
+    # the launcher AFTER a successful import (before the final banner).
+    FACADE_AGENT_ID="$( { python3 - "$IMPORT_RESPONSE_FILE" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+agents = d.get("agents") or []
+for a in agents:
+    if isinstance(a, dict) and a.get("slug") == "chief-of-staff":
+        print(a.get("id") or ""); sys.exit(0)
+for a in agents:
+    if isinstance(a, dict) and a.get("id"):
+        print(a.get("id")); sys.exit(0)
+PY
+} || true )"
+
+    FACADE_KEY_TOKEN=""
+    FACADE_KEY_ERR="false"
+    if [ -z "$FACADE_AGENT_ID" ]; then
+        warn "firm facade: no agent id found in import response; cannot auto-mint company-scoped key"
+        FACADE_KEY_ERR="true"
+    else
+        # Capture the HTTP status separately; the response BODY goes to a 0600
+        # temp file (mktemp default perms) and is NEVER echoed — it contains the
+        # raw token on success. Parse the token from the file, then shred it.
+        FACADE_KEY_RESP_FILE="$(mktemp -t possiblaw-facade-key.XXXXXX.json)"
+        FACADE_KEY_HTTP="$(curl --silent --max-time 10 \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data '{"name":"firm-facade"}' \
+            --output "$FACADE_KEY_RESP_FILE" \
+            --write-out '%{http_code}' \
+            "$API_BASE/api/agents/$FACADE_AGENT_ID/keys" || echo 000)"
+        FACADE_KEY_TOKEN="$(python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    d = {}
+print(d.get("token") or "")' "$FACADE_KEY_RESP_FILE" 2>/dev/null || true)"
+        rm -f "$FACADE_KEY_RESP_FILE"
+        if [ -z "$FACADE_KEY_TOKEN" ]; then
+            warn "firm facade: key mint returned no token (HTTP $FACADE_KEY_HTTP)"
+            warn "  To mint a company-scoped key manually:"
+            warn "    POST $API_BASE/api/agents/$FACADE_AGENT_ID/keys"
+            warn "    body: {\"name\":\"firm-facade\"}"
+            warn "    The response.token is the raw key — add it as PAPERCLIP_API_KEY"
+            warn "    in $DATA_DIR/firm-facade-mcp.json after this run."
+            FACADE_KEY_ERR="true"
+        else
+            log "  company-scoped agent key minted (agent $FACADE_AGENT_ID; token redacted from log)"
+        fi
+    fi
+
+    FACADE_SERVER_TS="$REPO_ROOT/mcp-servers/firm-facade/src/server.ts"
+    FACADE_MCP_FILE="$DATA_DIR/firm-facade-mcp.json"
+    FACADE_POLICY_PATH="$REPO_ROOT/companies/legal-operations/gate-policy.yaml"
+
+    # Build JSON with all values via env (avoids quoting/escaping of key token).
+    # PAPERCLIP_PUBLIC_URL = $API_BASE (local loopback for local installs;
+    #   for hosted deployments the operator should update the emitted config
+    #   with the public base URL so approval deep links resolve correctly).
+    # PAPERCLIP_COMPANY_PREFIX = COMPANY_SHORT_CODE (issue-prefix / slug).
+    # Guard the heredoc with `{ ...; } || warn` so a non-zero Python exit
+    # (perm error, KeyError, disk full) cannot trip `set -e`; control always
+    # reaches the -f check below.
+    { PCSF_BASE_URL="$API_BASE" \
+      PCSF_COMPANY_ID="$COMPANY_ID" \
+      PCSF_GATE_PROXY_URL="$GATE_PROXY_URL" \
+      PCSF_API_KEY="$FACADE_KEY_TOKEN" \
+      PCSF_PUBLIC_URL="$API_BASE" \
+      PCSF_COMPANY_PREFIX="${COMPANY_SHORT_CODE:-}" \
+      PCSF_POLICY_PATH="$FACADE_POLICY_PATH" \
+      PCSF_SERVER_TS="$FACADE_SERVER_TS" \
+      PCSF_OUT_FILE="$FACADE_MCP_FILE" \
+      python3 - <<'PY'
+import json, os
+
+server_ts   = os.environ["PCSF_SERVER_TS"]
+# tsx binary from the facade's own node_modules; fallback to node --import tsx
+tsx_bin = os.path.join(os.path.dirname(os.path.dirname(server_ts)),
+                       "node_modules", ".bin", "tsx")
+if os.path.isfile(tsx_bin) and os.access(tsx_bin, os.X_OK):
+    command, args = tsx_bin, [server_ts]
+else:
+    command, args = "node", ["--import", "tsx", server_ts]
+
+# Required env vars for the facade (server.ts buildDepsFromEnv)
+env = {
+    "PAPERCLIP_BASE_URL":  os.environ["PCSF_BASE_URL"],
+    "PAPERCLIP_COMPANY_ID": os.environ["PCSF_COMPANY_ID"],
+    "GATE_PROXY_URL":      os.environ["PCSF_GATE_PROXY_URL"],
+}
+# Optional — include only when non-empty
+for facade_key, env_key in (
+    ("PAPERCLIP_API_KEY",        "PCSF_API_KEY"),
+    ("PAPERCLIP_PUBLIC_URL",     "PCSF_PUBLIC_URL"),
+    ("PAPERCLIP_COMPANY_PREFIX", "PCSF_COMPANY_PREFIX"),
+    ("GATE_POLICY_PATH",         "PCSF_POLICY_PATH"),
+):
+    v = os.environ.get(env_key, "")
+    if v:
+        env[facade_key] = v
+
+config = {
+    "mcpServers": {
+        "possiblaw-firm-facade": {
+            "command": command,
+            "args": args,
+            "env": env,
+        }
+    }
+}
+out = os.environ["PCSF_OUT_FILE"]
+# Create restricted (0600) from the start — no world-readable TOCTOU window.
+fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w") as fh:
+    json.dump(config, fh, indent=2)
+    fh.write("\n")
+PY
+    } || warn "firm facade: config write failed (Python exited non-zero)"
+
+    if [ -f "$FACADE_MCP_FILE" ]; then
+        # Belt-and-suspenders: re-assert 0600 in case the file pre-existed.
+        chmod 600 "$FACADE_MCP_FILE"
+        log "  MCP-client config written: $FACADE_MCP_FILE (mode 600)"
+    else
+        warn "firm facade: config write failed (no file at $FACADE_MCP_FILE)"
+    fi
+
+    printf '\n'
+    printf '=== Firm Facade MCP Config =============================================\n'
+    printf '  Config file: %s\n' "$FACADE_MCP_FILE"
+    if [ "$FACADE_KEY_ERR" = "true" ]; then
+        printf '\n'
+        printf '  WARNING (Unit-G known limitation): company-scoped key auto-mint\n'
+        printf '  failed. PAPERCLIP_API_KEY is absent from the config. On a\n'
+        printf '  local_trusted instance the facade may still function via\n'
+        printf '  unauthenticated board loopback, but the human-gate structural\n'
+        printf '  guarantee depends on a company-scoped key (cannot assertBoard).\n'
+        printf '  Mint manually and add response.token as PAPERCLIP_API_KEY in\n'
+        printf '  the mcpServers env block of the config file.\n'
+    else
+        printf '  Key:   company-scoped agent key (stored in config file only)\n'
+    fi
+    printf '\n'
+    printf '  Add the "possiblaw-firm-facade" block to your outside assistant'\''s\n'
+    printf '  MCP config, then restart the assistant:\n'
+    printf '    Claude Desktop: ~/.config/claude/claude_desktop_config.json\n'
+    printf '    Codex:          ~/.codex/config.toml  [mcp_servers] block\n'
+    printf '    Other MCP host: paste the mcpServers entry per your host'\''s docs.\n'
+    printf '=======================================================================\n'
+fi
 
 # ---------------------------------------------------------------------------
 # Final banner + browser open

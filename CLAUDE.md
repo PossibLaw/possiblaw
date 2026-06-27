@@ -87,6 +87,7 @@ When resuming prior work, read `${REPO_ROOT}/.claude/history.md` first.
 `python3 bin/_possiblaw_variants.py --self-test && python3 bin/_possiblaw_inline_source.py --self-test` - Self-test the Python helpers.
 `pnpm -C paperclip install` - Install the paperclip submodule's dependencies (the only pnpm usage left).
 `pnpm -C learning-loop test` - Run the learning-loop node:test suite (45 tests: sanitizer, ledger, memory, recurrence, remember-parser, store, CLI, manifest, diff, proposals).
+`pnpm -C mcp-servers/firm-facade test` - Run the firm-facade node:test suite (129 tests: catalog, paperclip-client, hash, handlers, policy, deeplink, receipts, server).
 
 Run the launcher dry-run + helper self-tests before handoff. Expected dry-run plan summary: 0 warnings, 0 errors.
 
@@ -106,6 +107,7 @@ Run the launcher dry-run + helper self-tests before handoff. Expected dry-run pl
 - Plan + handoff: `/Users/salvadorcarranza/.claude/plans/eventual-munching-fairy.md` (plan-of-record, local-only), `.agent/PLAN.md` (active work queue), `.agent/HANDOFF.md`.
 - Submodule: `paperclip/` (pinned, never modified).
 - Egress trust proxy: `gate-proxy/` (standalone TypeScript; boundary classify → policy → anonymize → human gate → hash-chained receipts; citation gate enforced on court/third-party egress). Tests: `pnpm -C gate-proxy test` (node:test).
+- Firm-facing MCP facade: `mcp-servers/firm-facade/` (standalone TypeScript stdio MCP server; 5-noun allowlist: `create_matter`, `get_matter_status`, `list_work_products`, `fetch_work_product`, `request_approval`; company-scoped paperclip client, human-only approvals, default-closed work-product text, every action receipted through the gate proxy via `FacadeReceiptWriter`; gate-proxy gains `POST /receipts/facade` + `firm_facade` receipt kind). Tests: `pnpm -C mcp-servers/firm-facade test` (node:test, 129 tests).
 - Eval harness: `eval-harness/` (standalone TypeScript CLI via `bin/eval`; scores agents/skills per case across all 10 variants, deterministic + all-pass rubric grading). Cases live in `companies/legal-operations/evals/cases/`. Tests: `pnpm -C eval-harness test` (node:test).
 - Learning loop: `learning-loop/` (standalone TypeScript; fail-closed sanitizer, JSONL ledger, HOT memory, recurrence tracker, `remember-parser`, store, `learn` CLI; Tier-2 modules: `manifest` delivery-record store, `diff` content-comparison, `proposals` skill-edit proposal queue; `skill-improvement-scribe` agent + `skill-improvement-sweep` routine). Tests: `pnpm -C learning-loop test` (node:test, 45 tests).
 - Firm learning store: `businesses/` (per-firm `businesses/<slug>/` dirs: `learnings/`, `memory/firm-memory.md`, `skill-overlays/`). Only `businesses/_template/` is tracked; per-slug dirs are gitignored. Bootstrapped automatically on first `--business <slug>` run.

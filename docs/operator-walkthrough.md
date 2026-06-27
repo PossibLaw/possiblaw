@@ -720,6 +720,132 @@ the ledger and will feed SkillOpt when it lands.
 
 ---
 
+## Drive your firm from your assistant (firm-facing MCP facade)
+
+After a successful launch, you can expose the firm AS an MCP server to any
+outside MCP client — Claude Desktop, Codex, or any assistant that speaks the
+Model Context Protocol over stdio. The facade presents a five-noun allowlist
+(`create_matter`, `get_matter_status`, `list_work_products`,
+`fetch_work_product`, `request_approval`), routes approval requests to a human
+reviewer in the Paperclip dashboard, keeps work-product text closed by default,
+and writes a receipt for every call through the gate proxy.
+
+### Step 1: Launch with `--firm-facade`
+
+```bash
+./bin/possiblaw --firm-facade --variant codex
+```
+
+This is a live run (not `--dry-run`). After a successful import the launcher:
+
+1. Resolves the chief-of-staff agent ID from the import response.
+2. Mints a company-scoped agent key (`POST /api/agents/<id>/keys`). The raw
+   token is returned once and never stored in Paperclip — only its hash is kept.
+3. Writes `<data-dir>/firm-facade-mcp.json` (mode 600) — the complete
+   MCP-client config with all required environment variables filled in.
+
+If the key mint fails (agent not found, Paperclip unreachable), the launcher
+falls to a manual path: it emits the config without a key, prints a warning,
+and shows the exact curl command to mint one later.
+
+The emitted config looks like this:
+
+```json
+{
+  "mcpServers": {
+    "possiblaw-firm-facade": {
+      "command": "<tsx-binary>",
+      "args": ["<repo-root>/mcp-servers/firm-facade/src/server.ts"],
+      "env": {
+        "PAPERCLIP_BASE_URL":        "http://127.0.0.1:<port>",
+        "PAPERCLIP_COMPANY_ID":      "<uuid>",
+        "GATE_PROXY_URL":            "http://127.0.0.1:<gate-port>",
+        "PAPERCLIP_API_KEY":         "<minted-token>",
+        "PAPERCLIP_PUBLIC_URL":      "http://127.0.0.1:<port>",
+        "PAPERCLIP_COMPANY_PREFIX":  "<slug>",
+        "GATE_POLICY_PATH":          "<repo-root>/companies/legal-operations/gate-policy.yaml"
+      }
+    }
+  }
+}
+```
+
+Optional vars (`PAPERCLIP_API_KEY`, `PAPERCLIP_PUBLIC_URL`,
+`PAPERCLIP_COMPANY_PREFIX`, `GATE_POLICY_PATH`) are omitted when unavailable
+rather than written as empty strings.
+
+### Step 2: Wire the block into your outside assistant
+
+- **Claude Desktop** — paste the `"possiblaw-firm-facade"` server block into
+  `claude_desktop_config.json` under `mcpServers`. The file location varies by
+  OS (macOS: `~/Library/Application Support/Claude/`; Linux: `~/.config/claude/`)
+  — see Claude Desktop's own docs for the path on your platform.
+- **Codex CLI** — add the equivalent block to `~/.codex/config.toml` under
+  `[mcp_servers.possiblaw-firm-facade]`.
+- Any other MCP host — add the block where that host's MCP config lives.
+
+### Step 3: Use the five tools from your assistant
+
+```
+create_matter        title="Acme — Mutual NDA" description="Standard mutual NDA"
+→ { matterId: "pos-1234", status: "active" }
+
+get_matter_status    matterId="pos-1234"
+→ { matterId, status, workProductCount, documentCount }
+
+list_work_products   matterId="pos-1234"
+→ [ { id, type, title, status, reviewState, isPrimary, url }, ... ]
+
+request_approval     matterId="pos-1234" action="send NDA draft to counterparty" summary="NDA v2 — redlines accepted"
+→ { status: "pending_approval", approvalId: "apr-7", deepLink: "http://..." }
+```
+
+`request_approval` always returns `status: "pending_approval"`. The outside
+assistant cannot approve — the facade has no approve tool, and the company-scoped
+agent key 403s on Paperclip's board-decide endpoints. A human opens the deep link
+(or navigates to the pending approval in the Paperclip dashboard) and approves
+or rejects there. The facade then becomes visible to subsequent tool calls once the
+matter moves forward.
+
+```
+fetch_work_product   matterId="pos-1234" workProductId="wp-3"
+→ { id, title, type, status, reviewState, link, textWithheld: true }
+```
+
+By default `fetch_work_product` returns metadata and a link; full document text
+is withheld. To allow full text, set `firmFacade.allowWorkProductText: true` in
+`companies/legal-operations/gate-policy.yaml` **and** pass `include_text: true`
+in the call. Every disclosure is receipted with `meta.textDisclosed: true`; no
+document body appears in the receipt. Full text is only resolvable when the work
+product carries a document key (`externalId` or `metadata.documentKey`); URL-only
+work products (pull requests, preview links) return a link and `textWithheld: true`
+with a note.
+
+### Prerequisites and caveats
+
+- **The gate proxy must be running.** Facade receipts route through the gate
+  proxy; state-changing calls fail-closed if the receipt cannot be recorded.
+  A `--firm-facade` launch starts the gate proxy automatically. Do not pass
+  `--no-gate-proxy` on a live facade run.
+- **Port 3100 is Paperclip — not the facade.** The facade server is a stdio
+  subprocess spawned by the outside assistant, not a listening TCP server.
+- **Key is write-once.** The minted token cannot be retrieved from Paperclip
+  after the config file is written. If `firm-facade-mcp.json` is lost, revoke
+  the old key and mint a new one via the Paperclip UI or
+  `DELETE /api/agents/:id/keys/:keyId` then `POST /api/agents/:id/keys`.
+- **`PAPERCLIP_PUBLIC_URL` defaults to the loopback base.** Approval deep links
+  point to `http://127.0.0.1:<port>`, reachable locally only. For hosted
+  deployments, update `PAPERCLIP_PUBLIC_URL` in the emitted config file before
+  distributing it.
+- **No ethical wall or cross-matter search.** Every tool is scoped to an explicit
+  `matterId`; there is no search across matters. Cross-matter information barriers
+  are a later phase.
+
+Honest enforcement limits: see `docs/known-limitations.md` → "Firm-facing MCP
+facade (v1)".
+
+---
+
 ## Reset
 
 The launcher uses `~/.possiblaw/paperclip-data` by default. To start from scratch:

@@ -74,6 +74,21 @@ citationGate:
 #   requireAuthorityProvenance: true
 
 # ---------------------------------------------------------------------------
+# Firm-facing MCP facade (Phase 3)
+# ---------------------------------------------------------------------------
+#
+# Default CLOSED. When allowWorkProductText is set to the literal boolean true,
+# the fetch_work_product MCP tool may return full privileged document text to a
+# connected outside assistant when the caller sets include_text: true.
+#
+# Every such disclosure is receipted (outcome:"performed", meta.textDisclosed:true).
+# No document body text ever enters the receipt — only the disclosure flag.
+#
+# Leave false (or omit) to keep all document bodies withheld from the MCP channel.
+firmFacade:
+  allowWorkProductText: false
+
+# ---------------------------------------------------------------------------
 # Out-of-scope in v1
 # ---------------------------------------------------------------------------
 #

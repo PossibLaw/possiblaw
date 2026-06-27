@@ -77,6 +77,28 @@ Firms wanting all research queries gated and receipted can promote research conn
 
 ---
 
+## Firm-facing MCP facade (Phase 3)
+
+An outside assistant (Claude Desktop, Codex, or any MCP client that speaks stdio) connects to the firm through the facade server (`mcp-servers/firm-facade/`). The facade is spawned by the outside assistant as a subprocess — it is not a listening TCP server. Every call writes a `firm_facade` receipt through the gate proxy, so facade actions appear in the whole-chain tamper-evident audit (`GET /receipts/verify`) alongside internal egress. They are not yet surfaced in the per-matter `GET /receipts/bundle` Matter Trust Report — facade receipts carry `meta.matterId` while the bundle filters on the top-level `issueId` field; bundle inclusion is a planned enhancement (see `docs/known-limitations.md`).
+
+| Tool | Required inputs | Returns | Receipt written |
+|---|---|---|---|
+| `create_matter` | `title` (required), `description?`, `projectId?` | `{ matterId, status }` | `firm_facade` / `performed`; `matterId` in receipt field |
+| `get_matter_status` | `matterId` | `{ matterId, status, workProductCount, documentCount }` | `firm_facade` / `performed`; `matterId` in receipt field |
+| `list_work_products` | `matterId` | array of `{ id, type, title, status, reviewState, isPrimary, url }` | `firm_facade` / `performed`; `matterId` in receipt field |
+| `fetch_work_product` | `matterId`, `workProductId`, `include_text?` | metadata + link by default; full text when policy opt-in + `include_text: true` | `firm_facade` / `performed`; `meta.textDisclosed` boolean flag; no document body in receipt |
+| `request_approval` | `matterId`, `action`, `summary` | `{ status: "pending_approval", approvalId, deepLink }`; plus a `note` when deepLink is null (deep-link config missing) | `firm_facade` / `pending`; `approvalId` + `matterId` in receipt; no action/summary text in receipt |
+
+**Human-only approval.** `request_approval` creates a `request_board_approval` in Paperclip and always returns `status: "pending_approval"`. The facade exposes no approve or decide tool; the company-scoped agent key 403s on Paperclip's `assertBoard` board-decide endpoints on authenticated instances. A human approves or rejects in the Paperclip dashboard.
+
+**Default-closed work-product text.** `fetch_work_product` withholds document body text unless `firmFacade.allowWorkProductText: true` is set in `gate-policy.yaml` AND the caller passes `include_text: true`. Full text is resolvable only when the work product carries a document key (`externalId` or `metadata.documentKey`); URL-only work products (pull requests, preview links) return a link and `textWithheld: true` with a note.
+
+**No privileged text in receipts.** `payloadSha256` for every call is computed over tool name and IDs only — never over titles, descriptions, action or summary text, or document bodies. `meta.textDisclosed` in a `fetch_work_product` receipt is a boolean flag, not the text itself.
+
+Spawn the facade: `./bin/possiblaw --firm-facade` (live run; requires the gate proxy). Implementation: `mcp-servers/firm-facade/`. Walkthrough: "Drive your firm from your assistant" in `docs/operator-walkthrough.md`. Honest limits: `docs/known-limitations.md` → "Firm-facing MCP facade (v1)".
+
+---
+
 ## Documented for future implementation
 
 These connectors appear in the v1 PossibLaw plan (§1, "19 MCP connector targets") and were

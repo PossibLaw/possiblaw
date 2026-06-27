@@ -53,8 +53,20 @@ const VALID_DECISIONS: ReadonlySet<string> = new Set<Decision>([
   "block",
 ]);
 
-/** The only top-level keys permitted in a policy file. */
-const VALID_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(["version", "boundaries", "citationGate"]);
+/**
+ * Top-level keys permitted in a policy file.
+ *
+ * `firmFacade` is allowed but intentionally ignored here — the firm-facade MCP
+ * process reads it via its own loadFirmFacadePolicy() in src/policy.ts.
+ * Listing it here prevents the gate proxy from throwing on a shared gate-policy.yaml
+ * that also carries the firmFacade section (additive; gate proxy behavior unchanged).
+ */
+const VALID_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set([
+  "version",
+  "boundaries",
+  "citationGate",
+  "firmFacade", // read by firm-facade MCP; gate proxy ignores it
+]);
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -202,7 +214,7 @@ export function loadPolicy(filePath?: string): Policy {
   for (const key of Object.keys(doc)) {
     if (!VALID_TOP_LEVEL_KEYS.has(key)) {
       throw new PolicyError(
-        `Unknown top-level key "${key}" in policy file. Only "version", "boundaries", and "citationGate" are allowed.`,
+        `Unknown top-level key "${key}" in policy file. Only "version", "boundaries", "citationGate", and "firmFacade" are allowed.`,
       );
     }
   }
