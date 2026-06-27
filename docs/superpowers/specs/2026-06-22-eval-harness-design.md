@@ -28,7 +28,7 @@ Three eval-related assets already exist but do not form a working pipeline:
    for interpretation; happy / edge / failure coverage.
 
 **External target:** the operator wants the harness to eventually run against
-[Harvey LAB](https://github.com/harveyai/harvey-labs) (MIT) — 1,200+ tasks across 24 practice areas,
+[Harvey LAB](https://github.com/harveyai/harvey-labs) (MIT) — 1,749 tasks across 25 practice-area directories (Harvey README badges ~1,660 / 24+contracting),
 75,000+ expert rubric criteria, graded **all-pass** (every rubric criterion must pass; no partial
 credit) plus LLM-judge. Each LAB task = instruction + client matter (documents) + a work-product
 requirement. This maps closely onto PossibLaw's structure and dictates two design requirements: a
