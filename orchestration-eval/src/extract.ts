@@ -48,9 +48,20 @@ export async function extractTaskDocuments(
   const dir = join(harveyLabDir, "tasks", taskPath, "documents");
   if (!existsSync(dir)) return [];
   const out: Array<{ name: string; text: string; skipped: boolean }> = [];
-  for (const name of readdirSync(dir)) {
-    const r = await extractDocText(harveyLabDir, join(dir, name), run);
-    out.push({ name, text: r.text, skipped: r.skipped });
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    try {
+      const r = await extractDocText(harveyLabDir, join(dir, entry.name), run);
+      out.push({ name: entry.name, text: r.text, skipped: r.skipped });
+    } catch {
+      // per-file failures do not abort the batch
+    }
   }
   return out;
 }
