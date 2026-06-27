@@ -331,15 +331,18 @@ export function assembleSignoffBundle(
     });
 
   // ATTESTATIONS — board-decided approvals only.
-  // SECURITY INVARIANT: kind:"firm_facade" receipts are EXCLUDED here.
-  // A facade request_approval carries an approvalId and outcome:"pending" — it is
-  // a REQUEST, not a board decision. Including it here would mis-represent a
-  // pending facade request as an attested action in the regulator report.
-  // Facade activity is surfaced separately in firmFacadeActivity below.
+  // SECURITY INVARIANT: kind:"firm_facade" and kind:"deadline" receipts are
+  // EXCLUDED here by name. A facade request_approval carries an approvalId and
+  // outcome:"pending" — it is a REQUEST, not a board decision. A deadline receipt
+  // never carries an approvalId today, but the explicit guard is defense-in-depth:
+  // a future deadline extension that ever set approvalId must NEVER leak into the
+  // attestations (board-decision) section. Facade activity and deadlines are
+  // surfaced in their own sections (firmFacadeActivity / deadlines) below.
   const attestations: Attestation[] = matter
     .filter(
       (e) =>
         e.body.kind !== "firm_facade" &&
+        e.body.kind !== "deadline" &&
         e.body.approvalId !== undefined &&
         e.body.approvalId !== "",
     )

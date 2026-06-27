@@ -3,7 +3,7 @@ slug: deadline-holiday-roll
 target: deadline-calculator
 targetType: agent
 lane: extractive
-input_brief: "We need to compute a 14-day deadline from trigger date 2024-12-17, direction forward, jurisdiction US-FED, no mail service. The raw count lands on 2024-12-31 — but that date is observed New Year's Day (2025-01-01 falls on Wednesday so no observed shift; however 2024-12-31 is a regular Tuesday, not a holiday). Re-check: use trigger 2025-11-11 (Veterans Day, Tuesday) + 4 days forward US-FED. The raw date is 2025-11-15 (Saturday), which rolls to Monday 2025-11-17."
+input_brief: "Compute a deadline from trigger date 2025-11-11 (Veterans Day, Tuesday), 4 days forward, jurisdiction US-FED, no mail service. The raw count lands on Saturday 2025-11-15. What is the deadline after applying the weekend/holiday roll rule?"
 grading:
   mode: rubric
   rubric:

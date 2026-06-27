@@ -3,7 +3,7 @@ slug: deadline-backward-mail
 target: deadline-calculator
 targetType: agent
 lane: extractive
-input_brief: "A motion hearing is set for 2025-03-10 (Monday). Under local rules we must serve opposition papers at least 14 days before the hearing. Service will be by mail (FRCP 6(d) adds 3 days). What is the last date to mail service? Use direction backward, trigger 2025-03-10, days 14, serviceByMail true, jurisdiction US-FED."
+input_brief: "A motion hearing is set for 2025-03-10 (Monday). Under the local rule we must serve opposition papers at least 14 days before the hearing. Service will be in person (not by mail). What is the last date to serve? Use direction backward, trigger 2025-03-10, days 14, serviceByMail false, jurisdiction US-FED."
 grading:
   mode: rubric
   rubric:
@@ -13,12 +13,14 @@ grading:
       - id: calls-engine
         prompt: "Does the response invoke the deadline-engine CLI rather than computing the date itself?"
       - id: correct-direction
-        prompt: "Does the response correctly apply a backward direction and serviceByMail:true (adding 3 days to the 14-day period = 17 days back from the hearing date)?"
+        prompt: "Does the response correctly apply a backward direction (counting back from the target hearing date, excluding the trigger day) rather than forward?"
       - id: correct-date
-        prompt: "Does the response report the engine's exact computed date for trigger=2025-03-10, days=14, direction=backward, serviceByMail=true, jurisdiction=US-FED? (Expected: 2025-02-17, Monday — 17 days before 2025-03-10 is 2025-02-21 Friday, which is a business day; with mail service the engine counts backward 17 days from trigger, landing on a business day.)"
+        prompt: "Does the response report 2025-02-24 (Monday) as the deadline — the engine's exact output for trigger=2025-03-10, days=14, direction=backward, serviceByMail=false, jurisdiction=US-FED (14 calendar days back from 2025-03-10 lands on Monday 2025-02-24, a business day, no roll)?"
+      - id: mail-rule-forward-only
+        prompt: "Does the response avoid adding any FRCP 6(d) mail-service days to this backward count? The deadline-engine treats the mail rule as forward-only (a backward count with serviceByMail:true returns supported:false), so the agent must NOT add 3 days when counting backward."
       - id: no-self-computation
         prompt: "Does the response avoid performing its own calendar arithmetic and instead rely solely on the engine's exact output, including its steps trace?"
 source:
   kind: local
 ---
-Edge-case eval: backward direction (count back from a target date) + FRCP 6(d) mail service (+3 days). Trigger 2025-03-10, 14 days backward, serviceByMail=true, US-FED. The agent must call the engine and report its exact date, never self-computing.
+Edge-case eval: backward direction (count back from a target date), no mail service. Trigger 2025-03-10, 14 days backward, serviceByMail=false, US-FED → engine returns 2025-02-24 (Monday). FRCP 6(d) mail-time is forward-only in the engine, so a backward count omits it (backward + serviceByMail:true returns supported:false). The agent must call the engine and report its exact date, never self-computing.
