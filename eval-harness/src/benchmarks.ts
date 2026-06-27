@@ -6,6 +6,7 @@
 import { join } from "node:path";
 import type { Case } from "./types.ts";
 import { loadCuadCases } from "./adapters/cuad.ts";
+import { loadLabCases } from "./adapters/lab.ts";
 
 export interface BenchmarkDef {
   name: string;
@@ -18,6 +19,10 @@ const BENCHMARKS: Record<string, BenchmarkDef> = {
     name: "cuad",
     load: (repoRoot: string): Case[] =>
       loadCuadCases(join(repoRoot, "layer/evals/datasets/cuad/fixtures.jsonl")),
+  },
+  lab: {
+    name: "lab",
+    load: (repoRoot: string): Case[] => loadLabCases(repoRoot),
   },
 };
 

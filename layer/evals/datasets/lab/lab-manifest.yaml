@@ -1,0 +1,56 @@
+schema: possiblaw/lab-manifest/v1
+# Harvey LAB pinned SHA (from Task 1 Step 1):
+submodule_sha: "354e90d38ca0e2f46e3c0c7fd4c971a97217330b"
+# Inclusion rule is PURELY STRUCTURAL: the task must map to one parent issue
+# (a fixed document set in, one reconstituted deliverable out). Curated blind to results.
+included:
+  - task: immigration/compare-draft-eb
+    work_type: review
+    arm_a_agent: immigration-lead
+    note: "4 docs (docx/eml/xlsx) → one gap-analysis memo; clean single-issue fit"
+
+  - task: banking-finance/identify-issues-in-commitment-letter
+    work_type: review
+    arm_a_agent: banking-finance-lead
+    note: "5 docs → one commitment-letter-issues-memo; single parent issue"
+
+  - task: real-estate/identify-issues-in-title-commitment
+    work_type: review
+    arm_a_agent: real-estate-lead
+    note: "5 docs → one title-issue-memorandum; single parent issue"
+
+  - task: intellectual-property/extract-key-terms-from-technology-licensing-term-sheet
+    work_type: analyze
+    arm_a_agent: ip-lead
+    note: "3 docs → one key-terms-extraction-memo; smallest document footprint in set"
+
+  - task: employment-labor/identify-issues-in-non
+    work_type: analyze
+    arm_a_agent: employment-lead
+    note: "5 docs → one enforceability-memorandum; non-compete enforceability single issue"
+
+  - task: tax/extract-assessed-items-from-tax-authority-notice
+    work_type: analyze
+    arm_a_agent: tax-lead
+    note: "5 docs → one tax-assessment-extraction-report; single parent issue"
+
+  - task: data-privacy-cybersecurity/summarize-new-gdpr-enforcement-guidance
+    work_type: analyze
+    arm_a_agent: privacy-lead
+    note: "5 docs → one executive-regulatory-brief; single parent issue"
+
+  - task: trusts-estates-private-client/compare-charitable-trust-structures-against-client-goals
+    work_type: analyze
+    arm_a_agent: estates-lead
+    note: "5 docs → one trust-structure-recommendation-memo; single parent issue"
+
+  - task: healthcare-life-sciences/compare-clinical-trial-protocol-against-fda-regulatory-requirements
+    work_type: analyze
+    arm_a_agent: healthcare-lead
+    note: "5 docs → one gap-analysis-memorandum; single parent issue"
+
+excluded:
+  - task: immigration/draft-response-to-request-for-evidence
+    reason: "11 docs + 2 deliverables (rfe-response-letter + strategic-memo); multi-deliverable violates single-issue model"
+  - task: trusts-estates-private-client/compare-creditor-claims-against-estate-assets
+    reason: "13 docs; too many documents for a single-issue parent task (S5 scalability concern v1)"
