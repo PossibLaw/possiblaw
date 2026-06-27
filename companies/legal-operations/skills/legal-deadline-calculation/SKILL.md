@@ -71,6 +71,33 @@ Example engine output for reference:
 }
 ```
 
+## Step 3b — Record the Deadline Receipt (if gate running)
+
+After a successful (`supported: true`) computation for a specific matter, POST the deadline to the gate proxy so it is audited in the Matter Trust Report. This is best-effort: if `$GATE_PROXY_URL` is unset or the POST fails, record the deadline on the matter and note it is unreceipted — do not fail the computation.
+
+The `payloadSha256` is the SHA-256 (lowercase hex) of the canonical JSON of the engine inputs: `{"triggerDate":"<DATE>","days":<N>,"direction":"<forward|backward>","serviceByMail":<bool>,"jurisdiction":"<JURI>","deadline":"<RESULT>"}`.
+
+```bash
+# Only run when GATE_PROXY_URL is set and computation was successful
+if [ -n "$GATE_PROXY_URL" ]; then
+  curl -s -X POST "$GATE_PROXY_URL/receipts/deadline" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "matterId": "<MATTER_ID>",
+      "payloadSha256": "<64-HEX-SHA>",
+      "meta": {
+        "deadline": "<YYYY-MM-DD>",
+        "rule": "FRCP-6",
+        "jurisdiction": "US-FED",
+        "direction": "<forward|backward>",
+        "days": <N>
+      }
+    }' || true  # fail-open: a receipt failure must not block the computation result
+fi
+```
+
+If `$GATE_PROXY_URL` is unset: return the deadline result and note "deadline is unreceipted (no gate running)".
+
 ## Step 4 — Unsupported Jurisdiction
 
 If the engine returns `{"supported": false, "reason": "unsupported_jurisdiction"}`:

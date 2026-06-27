@@ -487,6 +487,139 @@ test("firmFacadeActivity: facade create_matter receipt has issueId via matterId 
 });
 
 // ---------------------------------------------------------------------------
+// Computed Deadlines — deadline receipt kind in Matter Trust Report
+// ---------------------------------------------------------------------------
+
+test("HAPPY: deadline receipt appears in bundle.deadlines + Markdown section", () => {
+  const { chain } = freshChainPath();
+
+  const dlSha = sha256hex("frcp-computation-sha");
+
+  // A deadline receipt for the matter under test
+  chain.append({
+    kind: "deadline",
+    tool: "deadline_calculation",
+    boundary: null,
+    decision: null,
+    outcome: "performed",
+    payloadSha256: dlSha,
+    issueId: "POS-DL-1",
+    meta: {
+      deadline: "2025-01-10",
+      rule: "FRCP-6",
+      jurisdiction: "US-FED",
+      direction: "forward",
+      days: 21,
+    },
+  });
+
+  // An unrelated matter receipt — must be excluded from the deadline section
+  chain.append({
+    kind: "deadline",
+    tool: "deadline_calculation",
+    boundary: null,
+    decision: null,
+    outcome: "performed",
+    payloadSha256: sha256hex("other-matter-sha"),
+    issueId: "POS-OTHER",
+    meta: {
+      deadline: "2025-03-15",
+      rule: "FRCP-6",
+      jurisdiction: "US-FED",
+      direction: "backward",
+      days: 14,
+    },
+  });
+
+  const bundle = assembleSignoffBundle(chain, "POS-DL-1");
+
+  // deadlines section has exactly one entry for this matter
+  assert.equal(bundle.deadlines.length, 1, "must have exactly one deadline for POS-DL-1");
+  const dl = bundle.deadlines[0];
+  assert.equal(dl.deadline, "2025-01-10");
+  assert.equal(dl.rule, "FRCP-6");
+  assert.equal(dl.jurisdiction, "US-FED");
+  assert.equal(dl.direction, "forward");
+  assert.equal(dl.days, 21);
+  assert.equal(dl.payloadSha256, dlSha);
+
+  // Chain verify ok
+  assert.equal(bundle.chain.ok, true);
+
+  // Markdown renders the section
+  const md = renderSignoffMarkdown(bundle);
+  assert.ok(md.includes("## Computed Deadlines"), "Markdown must include Computed Deadlines section");
+  assert.ok(md.includes("2025-01-10"), "Markdown must include the deadline date");
+  assert.ok(md.includes("FRCP-6"), "Markdown must include the rule");
+  assert.ok(md.includes("US-FED"), "Markdown must include the jurisdiction");
+  assert.ok(md.includes("21"), "Markdown must include the days count");
+
+  // INVARIANT: no plaintext leakage (date/rule facts are non-privileged by design)
+  assertNoPlaintext(bundle, md);
+});
+
+test("EDGE: deadline receipt for a different matter is excluded from bundle.deadlines", () => {
+  const { chain } = freshChainPath();
+
+  chain.append({
+    kind: "deadline",
+    tool: "deadline_calculation",
+    boundary: null,
+    decision: null,
+    outcome: "performed",
+    payloadSha256: sha256hex("sha-other"),
+    issueId: "POS-WRONG",
+    meta: { deadline: "2025-02-01", rule: "FRCP-6", jurisdiction: "US-FED", direction: "forward", days: 30 },
+  });
+
+  const bundle = assembleSignoffBundle(chain, "POS-DL-EMPTY");
+  assert.equal(bundle.deadlines.length, 0, "deadlines must be empty for a matter with no deadline receipts");
+
+  const md = renderSignoffMarkdown(bundle);
+  assert.ok(md.includes("_No computed deadlines for this matter._"), "Markdown must show empty state");
+});
+
+test("EDGE: multiple deadline receipts for same matter appear in order", () => {
+  const { chain } = freshChainPath();
+
+  const sha1 = sha256hex("comp-sha-1");
+  const sha2 = sha256hex("comp-sha-2");
+
+  chain.append({
+    kind: "deadline",
+    tool: "deadline_calculation",
+    boundary: null,
+    decision: null,
+    outcome: "performed",
+    payloadSha256: sha1,
+    issueId: "POS-DL-MULTI",
+    meta: { deadline: "2025-01-10", rule: "FRCP-6", jurisdiction: "US-FED", direction: "forward", days: 21 },
+  });
+
+  chain.append({
+    kind: "deadline",
+    tool: "deadline_calculation",
+    boundary: null,
+    decision: null,
+    outcome: "performed",
+    payloadSha256: sha2,
+    issueId: "POS-DL-MULTI",
+    meta: { deadline: "2025-01-03", rule: "FRCP-6", jurisdiction: "US-FED", direction: "backward", days: 7 },
+  });
+
+  const bundle = assembleSignoffBundle(chain, "POS-DL-MULTI");
+  assert.equal(bundle.deadlines.length, 2);
+  assert.equal(bundle.deadlines[0].payloadSha256, sha1);
+  assert.equal(bundle.deadlines[1].payloadSha256, sha2);
+  assert.equal(bundle.deadlines[0].direction, "forward");
+  assert.equal(bundle.deadlines[1].direction, "backward");
+
+  const md = renderSignoffMarkdown(bundle);
+  assert.ok(md.includes("2025-01-10"));
+  assert.ok(md.includes("2025-01-03"));
+});
+
+// ---------------------------------------------------------------------------
 // shared invariant assertion
 // ---------------------------------------------------------------------------
 

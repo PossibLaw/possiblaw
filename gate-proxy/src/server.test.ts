@@ -2062,6 +2062,304 @@ describe("gate server", () => {
     await close();
   });
 
+  // ---------------------------------------------------------------------------
+  // POST /receipts/deadline — deadline receipt audit channel tests
+  // ---------------------------------------------------------------------------
+
+  /** POST a JSON body to /receipts/deadline and return {status, json}. */
+  async function postDeadlineReceipt(
+    baseUrl: string,
+    body: unknown,
+  ): Promise<{ status: number; json: unknown }> {
+    const res = await fetch(`${baseUrl}/receipts/deadline`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    return { status: res.status, json };
+  }
+
+  /** A valid deadline meta object for reuse in tests. */
+  const VALID_DEADLINE_META = {
+    deadline: "2025-01-10",
+    rule: "FRCP-6",
+    jurisdiction: "US-FED",
+    direction: "forward",
+    days: 21,
+  };
+
+  // deadline-1: valid deadline receipt → 200, chain verify ok, kind=deadline, issueId=matterId
+  it("POST /receipts/deadline: valid receipt → 200 recorded:true, chain verify ok, kind=deadline, issueId=matterId", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const dlSha = sha256hex("deadline-computation-sha");
+    const { status, json } = await postDeadlineReceipt(baseUrl, {
+      matterId: "matter-DL-1",
+      payloadSha256: dlSha,
+      meta: VALID_DEADLINE_META,
+    });
+
+    assert.equal(status, 200);
+    const j = json as Record<string, unknown>;
+    assert.equal(j["recorded"], true);
+    assert.ok(typeof j["seq"] === "number", "must have seq");
+    assert.ok(
+      typeof j["hash"] === "string" && /^[0-9a-f]{64}$/.test(j["hash"] as string),
+      "must have valid hash",
+    );
+
+    const v = receipts.verify();
+    assert.equal(v.ok, true, "chain must verify ok after deadline receipt");
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "deadline", "kind must be deadline");
+    assert.equal(last.body.tool, "deadline_calculation", "tool must be deadline_calculation");
+    assert.equal(last.body.outcome, "performed");
+    assert.equal(last.body.payloadSha256, dlSha);
+    assert.equal(last.body.boundary, null);
+    assert.equal(last.body.decision, null);
+    // top-level issueId MUST equal matterId (so bundle filter picks it up)
+    assert.equal(
+      last.body.issueId,
+      "matter-DL-1",
+      "top-level issueId must be set to matterId",
+    );
+    // meta carries the computation facts
+    assert.equal(last.body.meta?.["deadline"], "2025-01-10");
+    assert.equal(last.body.meta?.["rule"], "FRCP-6");
+    assert.equal(last.body.meta?.["jurisdiction"], "US-FED");
+    assert.equal(last.body.meta?.["direction"], "forward");
+    assert.equal(last.body.meta?.["days"], 21);
+
+    await close();
+  });
+
+  // deadline-2 (anti-forgery): kind:quality in body is ignored; receipt is always kind:deadline
+  it("POST /receipts/deadline anti-forgery: kind:quality in body is ignored; receipt is kind:deadline", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const dlSha = sha256hex("forger-sha");
+    const { status } = await postDeadlineReceipt(baseUrl, {
+      kind: "quality",   // attacker-supplied — MUST be ignored server-side
+      matterId: "matter-DL-2",
+      payloadSha256: dlSha,
+      meta: VALID_DEADLINE_META,
+    });
+
+    assert.equal(status, 200, "request must succeed (kind field in body is ignored)");
+    const last = receipts.entries().at(-1)!;
+    assert.equal(
+      last.body.kind,
+      "deadline",
+      `kind must be deadline (got ${last.body.kind}); server must never read kind from request body`,
+    );
+    assert.notEqual(last.body.kind, "quality", "kind must NOT be quality — forgery must not succeed");
+
+    const v = receipts.verify();
+    assert.equal(v.ok, true, "chain must still verify after anti-forgery test");
+
+    await close();
+  });
+
+  // deadline-3: missing matterId → 4xx + error receipt with kind:deadline
+  it("POST /receipts/deadline: missing matterId → 400 + error receipt kind:deadline", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postDeadlineReceipt(baseUrl, {
+      // no matterId
+      payloadSha256: sha256hex("no-matter"),
+      meta: VALID_DEADLINE_META,
+    });
+
+    assert.ok(status >= 400 && status < 500, `must be 4xx, got ${status}`);
+    assert.ok(typeof (json as Record<string, unknown>)["error"] === "string", "must have error field");
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "deadline", "error receipt kind must be deadline");
+    assert.equal(last.body.outcome, "error");
+
+    await close();
+  });
+
+  // deadline-4: bad payloadSha256 → 4xx + error receipt
+  it("POST /receipts/deadline: bad payloadSha256 → 400 + error receipt", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status } = await postDeadlineReceipt(baseUrl, {
+      matterId: "matter-DL-4",
+      payloadSha256: "not-64-hex", // invalid
+      meta: VALID_DEADLINE_META,
+    });
+
+    assert.ok(status >= 400 && status < 500, `must be 4xx, got ${status}`);
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "deadline");
+    assert.equal(last.body.outcome, "error");
+
+    await close();
+  });
+
+  // deadline-5: extra field in meta → 4xx (reject extra/oversized meta)
+  it("POST /receipts/deadline: extra field in meta → 400 + error receipt", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status, json } = await postDeadlineReceipt(baseUrl, {
+      matterId: "matter-DL-5",
+      payloadSha256: sha256hex("meta-extra"),
+      meta: { ...VALID_DEADLINE_META, extra: "attacker-value" },
+    });
+
+    assert.ok(status >= 400 && status < 500, `must be 4xx, got ${status}`);
+    assert.ok(String((json as Record<string, unknown>)["error"]).includes("invalid_meta"));
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "deadline");
+    assert.equal(last.body.outcome, "error");
+
+    await close();
+  });
+
+  // deadline-6: wrong rule value → 4xx
+  it("POST /receipts/deadline: rule not FRCP-6 → 400", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const { status } = await postDeadlineReceipt(baseUrl, {
+      matterId: "matter-DL-6",
+      payloadSha256: sha256hex("bad-rule"),
+      meta: { ...VALID_DEADLINE_META, rule: "CPR-1.3" }, // unsupported
+    });
+
+    assert.ok(status >= 400 && status < 500, `must be 4xx, got ${status}`);
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "deadline");
+    assert.equal(last.body.outcome, "error");
+
+    await close();
+  });
+
+  // deadline-7: deadline receipt appears in bundle's deadlines section for that matter
+  it("POST /receipts/deadline: deadline appears in GET /receipts/bundle deadlines section", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const dlSha = sha256hex("bundle-deadline-sha");
+    const { status } = await postDeadlineReceipt(baseUrl, {
+      matterId: "matter-DL-7",
+      payloadSha256: dlSha,
+      meta: VALID_DEADLINE_META,
+    });
+    assert.equal(status, 200);
+
+    // Fetch the bundle and verify the deadlines section
+    const bundleRes = await fetch(`${baseUrl}/receipts/bundle?issueId=matter-DL-7`);
+    assert.equal(bundleRes.status, 200);
+    const bundle = await bundleRes.json() as Record<string, unknown>;
+    const deadlines = bundle["deadlines"] as Array<Record<string, unknown>>;
+    assert.ok(Array.isArray(deadlines) && deadlines.length === 1, "bundle must have one deadline entry");
+    const dl = deadlines[0];
+    assert.equal(dl["deadline"], "2025-01-10");
+    assert.equal(dl["rule"], "FRCP-6");
+    assert.equal(dl["jurisdiction"], "US-FED");
+    assert.equal(dl["direction"], "forward");
+    assert.equal(dl["days"], 21);
+    assert.equal(dl["payloadSha256"], dlSha);
+
+    // Markdown bundle also shows the section
+    const mdRes = await fetch(`${baseUrl}/receipts/bundle?issueId=matter-DL-7&format=md`);
+    assert.equal(mdRes.status, 200);
+    const md = await mdRes.text();
+    assert.ok(md.includes("## Computed Deadlines"), "Markdown must include Computed Deadlines section");
+    assert.ok(md.includes("2025-01-10"), "Markdown must include the deadline date");
+    assert.ok(md.includes("FRCP-6"), "Markdown must include the rule");
+
+    // Chain must still verify
+    const v = receipts.verify();
+    assert.equal(v.ok, true);
+
+    await close();
+  });
+
+  // deadline-8: malformed JSON body → 400 + error receipt kind:deadline
+  it("POST /receipts/deadline: malformed JSON → 400 invalid_json + error receipt kind:deadline", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client: null,
+      performers: {},
+      localModelAvailable: false,
+    });
+
+    const httpRes = await fetch(`${baseUrl}/receipts/deadline`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "NOT VALID JSON {{{",
+    });
+    assert.equal(httpRes.status, 400);
+    const j = await httpRes.json() as Record<string, unknown>;
+    assert.ok(String(j["error"]).includes("invalid_json"), `expected invalid_json, got ${j["error"]}`);
+
+    const last = receipts.entries().at(-1)!;
+    assert.equal(last.body.kind, "deadline");
+    assert.equal(last.body.outcome, "error");
+
+    await close();
+  });
+
   // GET /receipts/bundle missing/invalid issueId → 400
   it("GET /receipts/bundle without issueId → 400", async () => {
     const dir = tmpDir();
