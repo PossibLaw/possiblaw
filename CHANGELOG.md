@@ -7,6 +7,63 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.31.0] — 2026-06-27 — Orchestration eval: Harvey LAB A/B thesis experiment harness
+
+New `orchestration-eval/` package measuring whether chief-of-staff orchestration (Arm B) outperforms
+the strongest single-agent one-shot (Arm A) on a curated subset of Harvey LAB legal tasks, and at
+what cost. Honest scope: 9 structurally-fitting tasks from a ~1,200-task dataset; live runs are
+operator-gated on a disposable Paperclip instance.
+
+### Added
+
+- **`orchestration-eval/` package** (Tasks 1–9). Standalone TypeScript CLI (`bin/orchestration-eval`)
+  with five modules: `paperclip-client` (issue create, document put, budget patch, cost summary),
+  `extract` (deliverable fetcher + Harvey `parse_doc` bridge for DOCX/PDF/XLSX/EML via `uv`),
+  `await-completion` (issue-status poller with configurable timeout), `runner` (Arm A single-agent
+  and Arm B chief-of-staff execution), `judge` (Harvey LAB `run_eval` bridge; default judge model
+  `claude-sonnet-4-6`, requires `ANTHROPIC_API_KEY`). Report module aggregates K-run all-pass rates,
+  mean cost, and variance per (task, arm, config) cell and renders a Markdown A-vs-B delta table
+  with a SKIPPED section. 23 node:test tests.
+
+- **LAB adapter** (`eval-harness/src/adapters/lab.ts`). Maps Harvey LAB `lab-manifest.yaml` entries
+  into `Case[]` for the eval harness. Structural inclusion rule only (single parent issue: fixed
+  document set in, one reconstituted deliverable out); non-fitting tasks listed in
+  `layer/evals/datasets/lab/lab-manifest.yaml` under `excluded` with reasons. Covered by the
+  eval-harness test suite (32 tests total, including `loadLabCases` tests).
+
+- **`layer/evals/datasets/lab/lab-manifest.yaml`** — 9 curated tasks (immigration, banking-finance,
+  real-estate, ip, employment, tax, privacy, estates, healthcare), 2 explicitly excluded with reasons.
+  Schema: `possiblaw/lab-manifest/v1`. Pinned LAB submodule SHA recorded in the manifest.
+
+- **`harvey-lab/` submodule** — pinned to Harvey LAB public repo (MIT). Initialized separately:
+  `git submodule update --init harvey-lab`. Not auto-initialized by `pnpm -C paperclip install`.
+
+- **`openrouter-cost` variant** (`companies/legal-operations/variants.yaml`). New eleventh variant
+  pinning GLM 5.2 (`openrouter/z-ai/glm-5.2`) across all lanes for cost-frontier measurement.
+  Requires `OPENROUTER_API_KEY`. GLM 5.2 quality vs. Claude Opus is **UNCONFIRMED** — this is
+  the thesis under test in Experiment 2.
+
+### Docs
+
+- `docs/operator-test-checklist.md` — new section G: Orchestration eval (Harvey LAB) runbook:
+  submodule init, prereqs (`uv`, `pandoc`, API keys), disposable-instance launch on port 3199
+  (never 3100), ID collection, exact `orchestration-eval run` command, teardown.
+- `docs/known-limitations.md` — new "Orchestration eval" section: curated subset caveats, SKIPPED
+  semantics, non-determinism / K-run averaging, text fidelity caveat vs. native .docx, cost metering
+  scope, Arm A is the ceiling (not a strawman), GLM 5.2 claim UNCONFIRMED.
+- `docs/operator-walkthrough.md` — "Measure the thesis (Harvey LAB A/B)" pointer section.
+- `CLAUDE.md` — Code Map: `orchestration-eval/`, `harvey-lab/`, LAB adapter; Commands: test + submodule init.
+
+### Tests
+
+- `pnpm -C orchestration-eval test`: **23/23 pass**, 0 fail, 0 skip.
+- `pnpm -C orchestration-eval typecheck`: tsc clean (no errors).
+- `pnpm -C eval-harness test`: **32/32 pass** (includes 2 new `loadLabCases` tests for the LAB adapter).
+- `python3 bin/_possiblaw_variants.py --self-test`: OK.
+- `bash -n bin/possiblaw`: silent (BASH-OK).
+
+---
+
 ## [0.30.0] — 2026-06-27 — Phase 5 (docs): clone-to-demo polish; trust pipeline Phases 0–4 complete
 
 Documentation-only release. Tightens the README so a newcomer cloning the repo

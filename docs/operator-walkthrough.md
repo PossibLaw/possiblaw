@@ -865,6 +865,18 @@ facade (v1)".
 
 ---
 
+---
+
+## Measure the thesis (Harvey LAB A/B)
+
+The orchestration eval measures whether chief-of-staff orchestration (Arm B) outperforms the strongest single-agent one-shot (Arm A) on a curated subset of Harvey LAB legal tasks, and at what cost premium. GLM 5.2 via OpenRouter is the cost frontier under test.
+
+The full operator runbook — submodule init, prereqs, disposable-instance launch, ID collection, exact `orchestration-eval run` command, and teardown — is in `docs/operator-test-checklist.md` section **G**.
+
+See `docs/known-limitations.md` → "Orchestration eval" for honest scope: this covers 9 curated tasks, not the full Harvey LAB dataset; GLM 5.2 quality vs. Claude Opus is UNCONFIRMED until measured.
+
+---
+
 ## Reset
 
 The launcher uses `~/.possiblaw/paperclip-data` by default. To start from scratch:

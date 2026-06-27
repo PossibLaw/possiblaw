@@ -520,6 +520,38 @@ Residual: when `PAPERCLIP_API_KEY` is absent on a `local_trusted` instance AND
 `PAPERCLIP_COMPANY_ID` is not set, the scope check is skipped (backward-compatible
 with unconfigured deployments). The launcher always sets both variables.
 
+## Orchestration eval (Harvey LAB A/B)
+
+### Curated subset only — not a full Harvey LAB run
+
+The orchestration eval covers a **curated subset of 9 tasks** from Harvey LAB, selected purely on structural fit (one parent issue: fixed document set in, one reconstituted deliverable out). Harvey LAB contains ~1,200 tasks across 24 practice areas; the vast majority do not fit PossibLaw's single-issue model and are explicitly **excluded**. The excluded tasks are logged in `layer/evals/datasets/lab/lab-manifest.yaml` with their exclusion reasons.
+
+Results should be described as "a curated subset of Harvey LAB (9 tasks)" — never as "we ran Harvey LAB" or "Harvey LAB results."
+
+### Non-fitting tasks are SKIPPED, not failed
+
+Tasks in the curated set whose documents cannot be parsed (unsupported format, parser error) or whose paperclip issue cannot be created are **SKIPPED** and logged in the run report with their skip reason. A SKIPPED task does not count as a failure or a pass — it is excluded from the A/B score computation. The SKIPPED count is surfaced in the report header.
+
+### Non-determinism: averaged over K runs with variance
+
+Each task is run K times (default 3) per arm. The reported score is the **mean all-pass rate** across K runs; variance is included in the report. A single run should not be interpreted as a stable result. Variance above ~0.15 on a task indicates meaningful non-determinism in that agent/document combination.
+
+### Deliverable quality: text fidelity caveat
+
+Harvey LAB tasks expect a legal work product. PossibLaw agents write deliverables as Markdown text and the orchestration runner reads the issue's primary work product as UTF-8 text. The Harvey LAB judge also reads UTF-8, so the comparison is structurally sound. However, the judge was designed against native `.docx` outputs; formatting cues (table layout, heading hierarchy, numbered lists) may be rendered differently in the text round-trip. This introduces a **fidelity gap** relative to a native-DOCX submission.
+
+### Cost metering: OpenRouter only (`openrouter-cost` variant)
+
+The `openrouter-cost` variant pins GLM 5.2 (`openrouter/z-ai/glm-5.2`) across all lanes and is the only variant that produces per-token cost data via the OpenRouter usage API. Subscription variants (`codex`, `claude`, `gemini`) are billed at a flat rate and report `costCents: 0`; cost columns in their reports are structurally present but uninformative.
+
+### Arm A is the strongest single-agent one-shot, not a strawman
+
+Arm A assigns the highest-capability single agent for each task (the relevant practice-area lead, as declared in the manifest's `arm_a_agent` field). It is not a naive or strawman baseline — it represents the best one-shot single-agent performance PossibLaw can achieve on that task. Arm B (chief-of-staff orchestration) is measured against this ceiling.
+
+### GLM 5.2 quality vs. Claude Opus is UNCONFIRMED
+
+The claim that GLM 5.2 is cost-competitive with Claude Opus 4 on legal tasks is **UNCONFIRMED**. It is the thesis under test in Experiment 2. Until the orchestration eval produces measurements, treat any quality equivalence claim as a hypothesis, not a fact.
+
 ### Facade key is write-once; hosted deployments must set `PAPERCLIP_PUBLIC_URL`
 
 The minted agent key is returned once by Paperclip and written to

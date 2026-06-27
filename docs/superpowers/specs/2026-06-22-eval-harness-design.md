@@ -262,8 +262,11 @@ Independent workstreams on `feat/eval-harness`, merged to `main` together:
 
 ## 13. Future milestones (post-v1, enabled by this design)
 
-- **`lab` adapter** — map Harvey LAB `tasks/` → `Case[]`; all-pass rubric already supported.
-  Long-horizon tasks need a document-sandbox runner (future).
+- **`lab` adapter** — **shipped (curated subset, 2026-06-27).** `eval-harness/src/adapters/lab.ts`
+  maps Harvey LAB `lab-manifest.yaml` entries into `Case[]`; 9 tasks included on structural fit.
+  The full orchestration runner (`orchestration-eval/`) is also shipped; see
+  `docs/operator-test-checklist.md` section G. Long-horizon multi-deliverable tasks remain
+  excluded (single-issue constraint).
 - **In-paperclip judge path** — build `eval-runner` skill + `eval-judge` agent to run cases as real
   paperclip issues for production-fidelity (routing + gates). Same case files.
 - **Coverage fill** — author the remaining per-agent/per-skill cases against `COVERAGE.md`.
