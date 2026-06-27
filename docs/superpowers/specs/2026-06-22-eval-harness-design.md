@@ -28,7 +28,7 @@ Three eval-related assets already exist but do not form a working pipeline:
    for interpretation; happy / edge / failure coverage.
 
 **External target:** the operator wants the harness to eventually run against
-[Harvey LAB](https://github.com/harveyai/harvey-labs) (MIT) — 1,200+ tasks across 24 practice areas,
+[Harvey LAB](https://github.com/harveyai/harvey-labs) (MIT) — 1,749 tasks across 25 practice-area directories (Harvey README badges ~1,660 / 24+contracting),
 75,000+ expert rubric criteria, graded **all-pass** (every rubric criterion must pass; no partial
 credit) plus LLM-judge. Each LAB task = instruction + client matter (documents) + a work-product
 requirement. This maps closely onto PossibLaw's structure and dictates two design requirements: a
@@ -262,8 +262,11 @@ Independent workstreams on `feat/eval-harness`, merged to `main` together:
 
 ## 13. Future milestones (post-v1, enabled by this design)
 
-- **`lab` adapter** — map Harvey LAB `tasks/` → `Case[]`; all-pass rubric already supported.
-  Long-horizon tasks need a document-sandbox runner (future).
+- **`lab` adapter** — **shipped (curated subset, 2026-06-27).** `eval-harness/src/adapters/lab.ts`
+  maps Harvey LAB `lab-manifest.yaml` entries into `Case[]`; 9 tasks included on structural fit.
+  The full orchestration runner (`orchestration-eval/`) is also shipped; see
+  `docs/operator-test-checklist.md` section G. Long-horizon multi-deliverable tasks remain
+  excluded (single-issue constraint).
 - **In-paperclip judge path** — build `eval-runner` skill + `eval-judge` agent to run cases as real
   paperclip issues for production-fidelity (routing + gates). Same case files.
 - **Coverage fill** — author the remaining per-agent/per-skill cases against `COVERAGE.md`.

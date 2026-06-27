@@ -469,6 +469,39 @@ variants:
         model: gemini-2.5-flash-lite
     per_agent: {}
 
+  openrouter-cost:
+    label: "OpenRouter cost-tuned (GLM 5.2 cheap lanes, SOTA reasoning lanes)"
+    dataTerms:
+      tier: cloud
+      zdr: false
+      trains: false
+      humanReview: false
+      tenantIsolated: false
+      consumerEndpoint: false
+    requires_cli: opencode
+    secret_env:
+      OPENROUTER_API_KEY: "OpenRouter API Key"
+    default:
+      adapterType: opencode_local
+      adapterConfig:
+        model: openrouter/anthropic/claude-opus-4.7
+        timeoutSec: 600
+        dangerouslySkipPermissions: true
+    lanes:
+      primary:
+        model: openrouter/anthropic/claude-opus-4.7
+      routing:
+        model: openrouter/z-ai/glm-5.2
+      drafting:
+        model: openrouter/anthropic/claude-opus-4.7
+        timeoutSec: 900
+      review:
+        model: openrouter/z-ai/glm-5.2
+        timeoutSec: 900
+      extractive:
+        model: openrouter/z-ai/glm-5.2
+    per_agent: {}
+
   # hybrid: DEFERRED.
   # Paperclip's `assigneeAdapterOverrides` can only merge config within the same
   # adapter type — it cannot swap adapter types per issue today. A true hybrid
