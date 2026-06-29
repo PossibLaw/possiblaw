@@ -151,6 +151,13 @@ OPTIONS:
                         If businesses/<slug>/ does not exist, it is created
                         from businesses/_template/ automatically.
   --no-browser          Don't auto-open the dashboard URL.
+  --no-routines         Skip auto-provisioning the matter-intake-sweep routine.
+                        By default, after import the launcher creates a routine
+                        (a recurring issue assigned to chief-of-staff) on the
+                        schedule */15 8-18 * * 1-5 (America/Chicago) that claims
+                        unassigned To Do matters so the delegator picks them up.
+                        Idempotent (skipped if already present). Pass this to
+                        manage routines yourself in the Paperclip UI.
   --firm-facade         After a successful import, provision a company-scoped
                         agent key (attached to the chief-of-staff agent) and
                         write a ready-to-paste MCP-client config block to
@@ -307,6 +314,7 @@ LIST_VARIANTS_ONLY="false"
 NO_BROWSER="false"
 SKIP_MODEL_PROBE="false"
 SKIP_MCP="false"
+PROVISION_ROUTINES="true"
 THEME="${POSSIBLAW_THEME:-possiblaw}"
 ONBOARD_EXTRA_ENV=""
 DEMO_PROFILE=""
@@ -332,6 +340,7 @@ while [ "$#" -gt 0 ]; do
         --list-variants) LIST_VARIANTS_ONLY="true"; shift ;;
         --skip-model-probe) SKIP_MODEL_PROBE="true"; shift ;;
         --skip-mcp) SKIP_MCP="true"; shift ;;
+        --no-routines) PROVISION_ROUTINES="false"; shift ;;
         --theme) [ "$#" -ge 2 ] || { err "--theme requires a value"; exit 2; }; THEME="$2"; shift 2 ;;
         --demo) [ "$#" -ge 2 ] || { err "--demo requires a value"; exit 2; }; DEMO_PROFILE="$2"; shift 2 ;;
         --teams) [ "$#" -ge 2 ] || { err "--teams requires a value"; exit 2; }; TEAMS="$2"; shift 2 ;;
@@ -1660,6 +1669,108 @@ if [ -n "$COMPANY_ID" ] && [ -n "$MISSION" ]; then
         warn "Mission was not stored as company description. Response: $(head -c 256 "$PATCH_RESPONSE" 2>/dev/null)"
         warn "You can edit the description in the Paperclip UI."
     fi
+fi
+
+# ---------------------------------------------------------------------------
+# Provision the matter-intake-sweep routine (auto-delegation intake)
+# ---------------------------------------------------------------------------
+# A paperclip routine is a recurring issue: on schedule it creates an issue
+# assigned to chief-of-staff, which runs the matter-intake-sweep skill (claim
+# unassigned To Do matters so the delegator picks them up). The package
+# .paperclip.yaml only declares the schedule INTENT; the importer does not
+# create the routine, so we create it here via the REST API (board-authed
+# loopback, same as the mission PATCH). Idempotent (skipped if already there),
+# best-effort (never aborts the launch). --no-routines opts out; dry-run skips.
+provision_intake_routine() {
+    local cos_id existing routines_json body resp http rid tbody thttp
+    cos_id="$( { python3 - "$IMPORT_RESPONSE_FILE" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+agents = d.get("agents") or []
+for a in agents:
+    if isinstance(a, dict) and a.get("slug") == "chief-of-staff":
+        print(a.get("id") or ""); sys.exit(0)
+for a in agents:
+    if isinstance(a, dict) and a.get("id"):
+        print(a.get("id")); sys.exit(0)
+PY
+} || true )"
+    if [ -z "$cos_id" ]; then
+        warn "routines: no chief-of-staff agent id in import response; skipping matter-intake-sweep"
+        return 0
+    fi
+
+    # Idempotency: skip if a routine titled "Matter intake sweep" already exists.
+    routines_json="$(curl --silent --max-time 5 "$API_BASE/api/companies/$COMPANY_ID/routines" || true)"
+    existing="$(printf '%s' "$routines_json" | python3 -c '
+import json, sys
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+items = d if isinstance(d, list) else (d.get("routines") or d.get("data") or d.get("items") or [])
+for it in (items or []):
+    if isinstance(it, dict) and it.get("title") == "Matter intake sweep":
+        print(it.get("id") or "present"); break
+' 2>/dev/null || true)"
+    if [ -n "$existing" ]; then
+        log "routines: matter-intake-sweep already present (skipping)"
+        return 0
+    fi
+
+    milestone "provisioning matter-intake-sweep routine (auto-delegation intake)"
+    body="$(python3 -c '
+import json, sys
+print(json.dumps({
+  "title": "Matter intake sweep",
+  "description": "Automated intake sweep. Run the matter-intake-sweep skill: find unassigned, top-level, human-untouched To Do matters and assign each to yourself (Chief of Staff) so they enter normal triage. Claim-only.",
+  "assigneeAgentId": sys.argv[1],
+  "status": "active",
+}))' "$cos_id")"
+    resp="$DATA_DIR/possiblaw-routine.response"
+    http="$(curl --silent --max-time 10 \
+        --request POST \
+        --header "Content-Type: application/json" \
+        --data "$body" \
+        --output "$resp" \
+        --write-out '%{http_code}' \
+        "$API_BASE/api/companies/$COMPANY_ID/routines" || echo 000)"
+    if [ "$http" != "201" ] && [ "$http" != "200" ]; then
+        warn "routines: create returned HTTP $http; matter-intake-sweep not provisioned"
+        warn "  Create it in the Paperclip routines UI (title 'Matter intake sweep',"
+        warn "  assignee chief-of-staff, schedule '*/15 8-18 * * 1-5' America/Chicago)."
+        rm -f "$resp"
+        return 0
+    fi
+    rid="$( { python3 - "$resp" <<'PY'
+import json, sys
+try: d = json.load(open(sys.argv[1]))
+except Exception: d = {}
+print(d.get("id") or "")
+PY
+} || true )"
+    rm -f "$resp"
+    if [ -z "$rid" ]; then
+        warn "routines: routine created but no id returned; cannot add schedule trigger"
+        return 0
+    fi
+    tbody='{"kind":"schedule","cronExpression":"*/15 8-18 * * 1-5","timezone":"America/Chicago","enabled":true}'
+    thttp="$(curl --silent --max-time 10 \
+        --request POST \
+        --header "Content-Type: application/json" \
+        --data "$tbody" \
+        --output /dev/null \
+        --write-out '%{http_code}' \
+        "$API_BASE/api/routines/$rid/triggers" || echo 000)"
+    if [ "$thttp" = "201" ] || [ "$thttp" = "200" ]; then
+        log "  matter-intake-sweep active (every 15 min, Mon-Fri 8-18 Central; --no-routines to skip)"
+    else
+        warn "routines: trigger create returned HTTP $thttp; routine exists but is UNSCHEDULED"
+        warn "  Add a schedule trigger in the UI: '*/15 8-18 * * 1-5' (America/Chicago)."
+    fi
+    return 0
+}
+
+if [ "$PROVISION_ROUTINES" = "true" ] && [ "$DRY_RUN" != "true" ] && [ -n "$COMPANY_ID" ]; then
+    provision_intake_routine || true
 fi
 
 # ---------------------------------------------------------------------------

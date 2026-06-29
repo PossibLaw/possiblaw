@@ -51,6 +51,8 @@ When it needs a fact from you, it raises a `missing-info-gate` BLOCKED comment (
 
 ## Auto-intake (drop-in-To-Do, no manual assignment)
 
-If you would rather just **drop an unassigned issue into To Do and have the delegator pick it up**, that is the `matter-intake-sweep` routine: a scheduled sweep that finds unassigned To Do issues and hands each to Chief of Staff, which then delegates. Like the other package routines (`learning-sweep`, `delivery-sweep`), it is declared as intent in `.paperclip.yaml`; the operator enables/schedules it in the paperclip routines UI. See the routine's skill for the exact cadence and behavior.
+If you would rather just **drop an unassigned issue into To Do and have the delegator pick it up**, that is the `matter-intake-sweep` routine: a scheduled sweep that finds unassigned, top-level, human-untouched To Do matters and assigns each to Chief of Staff (the assignment-wake then runs normal per-issue triage).
 
-> **Cost note:** every intake spawns a Chief-of-Staff run plus the downstream delegation chain. Keep the sweep cadence sane (the default is conservative) and rely on per-agent/company budgets as the backstop.
+**The launcher provisions this automatically.** After a successful import, `bin/possiblaw` creates the routine via the paperclip REST API — a recurring issue assigned to `chief-of-staff` on the schedule `*/15 8-18 * * 1-5` (America/Chicago) — so **a new operator gets auto-intake with zero manual setup.** It is idempotent (skipped if already present) and best-effort (a failure never aborts the launch); pass `--no-routines` to manage routines yourself. (A paperclip routine is a recurring issue, and the package `.paperclip.yaml` only declares the schedule intent — the importer does not create routines — so the launcher creates it over the API the same way it sets the company mission and mints the firm-facade key.)
+
+> **Cost note:** every intake spawns a Chief-of-Staff run plus the downstream delegation chain. The default cadence is conservative (weekday business hours); per-agent/company budgets are the backstop. To slow it down, lower the cadence rather than touch the batch cap.

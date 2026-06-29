@@ -7,6 +7,31 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.33.0] — 2026-06-28 — Launcher auto-provisions the matter-intake-sweep routine
+
+The `matter-intake-sweep` routine no longer requires a manual UI setup step — a
+new operator gets auto-intake out of the box.
+
+- **`bin/possiblaw` provisions the routine after import** via the paperclip REST
+  API: it resolves the `chief-of-staff` agent id from the import response (same
+  resolver as `--firm-facade`), `POST`s a routine (`title: "Matter intake sweep"`,
+  `assigneeAgentId: chief-of-staff`, `status: active`), then `POST`s a schedule
+  trigger (`*/15 8-18 * * 1-5`, America/Chicago, enabled). Idempotent (skips if a
+  "Matter intake sweep" routine already exists), best-effort (a failure warns and
+  never aborts the launch), and skipped on `--dry-run`.
+- **`--no-routines`** opts out (manage routines yourself in the Paperclip UI).
+- **Behavior change to flag:** a live launch now creates a routine on the
+  instance. A paperclip routine *is* a recurring issue, and the package
+  `.paperclip.yaml` only declares the schedule intent — the importer does not
+  create routines — so the launcher creates it over the API (the other declared
+  sweeps, e.g. `learning-sweep`/`delivery-sweep`, remain UI-wired for now; the
+  same mechanism could provision them later).
+- Verified live on a disposable instance (port 3199; 3100 untouched): routine
+  created `status: active`, assignee = chief-of-staff, trigger `*/15 8-18 * * 1-5`
+  America/Chicago enabled — confirmed via `GET /api/companies/:id/routines`.
+
+---
+
 ## [0.32.0] — 2026-06-28 — Matter intake & auto-delegation
 
 Canonical intake workflow + an optional auto-intake sweep, so an operator states
