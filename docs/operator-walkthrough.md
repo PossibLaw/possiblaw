@@ -15,7 +15,7 @@ The first hands-on step below exercises exactly that loop: a simulated court
 filing pauses at the human gate, you approve it in the dashboard, and the
 receipt trail shows the whole exchange.
 
-The 178 agents, 173 skills, and 34 teams are the interchangeable parts
+The 178 agents, 174 skills, and 34 teams are the interchangeable parts
 inside that pipeline. The rest of this walkthrough — variants, demo
 profiles, team subsets, delivery, the NDA matter — is how you choose which
 parts to run and watch them work.
@@ -111,7 +111,7 @@ To preview only (no DB writes):
 
 ```bash
 ./bin/possiblaw --variant codex --dry-run --non-interactive --yes
-# preview: agents=178 skills=173 projects=3 issues=3 warnings=0 errors=0
+# preview: agents=178 skills=174 projects=3 issues=3 warnings=0 errors=0
 ```
 
 Common flags:

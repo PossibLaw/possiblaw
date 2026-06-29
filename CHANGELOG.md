@@ -7,6 +7,30 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.32.0] — 2026-06-28 — Matter intake & auto-delegation
+
+Canonical intake workflow + an optional auto-intake sweep, so an operator states
+a matter and the `chief-of-staff` delegator decides assignment/decomposition —
+not the operator hand-picking leads, specialists, or models.
+
+- **`docs/workflows/matter-intake.md`** — the canonical flow: create an issue in
+  **To Do** → assign **Chief of Staff** → it delegates via child issues. Documents
+  who decides each issue-form field (assignee = Chief of Staff only; model is the
+  per-agent lane set at import; project is optional grouping) and the
+  assignment-wake trigger (`assignmentWakeSkipped = !assigneeAgentId || status ===
+  "backlog"` — so a To Do assignment auto-runs the agent; Backlog does not).
+- **`matter-intake-sweep` skill** (attached to `chief-of-staff`) + **routine**
+  (`.paperclip.yaml`, schedule `*/15 8-18 * * 1-5` America/Chicago). The sweep is
+  **claim-only**: it finds unassigned, top-level, human-untouched To Do matters
+  and assigns each to Chief of Staff (20-matter batch cap), letting the
+  assignment-wake run normal per-issue triage. So an operator can drop a matter in
+  To Do without assigning anyone. Like the other package routines, the importer
+  does not lift routine bindings — the operator wires the schedule + chief-of-staff
+  binding once in the Paperclip routines UI.
+- Counts: **178 agents / 174 skills** (skills 173 → 174).
+
+---
+
 ## [0.31.0] — 2026-06-27 — Orchestration eval: Harvey LAB A/B thesis experiment harness
 
 New `orchestration-eval/` package measuring whether chief-of-staff orchestration (Arm B) outperforms

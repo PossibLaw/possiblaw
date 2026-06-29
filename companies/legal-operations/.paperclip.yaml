@@ -4781,3 +4781,18 @@ routines:
         enabled: true
     concurrencyPolicy: coalesce_if_active
     catchUpPolicy: skip_missed
+  matter-intake-sweep:
+    # Intent declaration: chief-of-staff sweeps for unassigned, top-level,
+    # human-untouched To Do matters and assigns itself to each (claim-only). The
+    # assignment-wake then runs chief-of-staff's normal per-issue triage +
+    # delegation, so an operator can drop a matter in To Do without assigning
+    # anyone. Every-15-min on weekday business hours (Central). The importer does
+    # not lift routine bindings; the operator wires the schedule + the
+    # chief-of-staff binding in the routines UI.
+    triggers:
+      - kind: schedule
+        cronExpression: "*/15 8-18 * * 1-5"
+        timezone: America/Chicago
+        enabled: true
+    concurrencyPolicy: coalesce_if_active
+    catchUpPolicy: skip_missed
