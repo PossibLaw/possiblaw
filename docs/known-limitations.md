@@ -408,6 +408,39 @@ with `PAPERCLIP_GATE_API_KEY` enabled get the structural boundary. Good-law
 and currency checks (KeyCite / Shepard's) are never performed by the gate and
 remain operator/counsel follow-ups.
 
+### Per-segment provenance is citation-backing only (Phase A)
+
+The gate records **per-paragraph** provenance on every citation-gated egress
+(see the "Provenance (per-segment)" section of the Matter Trust Report): it
+segments the outbound document and labels each paragraph `sourced` when it
+carries a citation that was **actually retrieved** (registered with the
+authority registry via the legal-data MCP), else `unsourced`. This is a real,
+verifiable, gate-computed signal — but it is deliberately narrow today:
+
+- **`sourced` means "carries a retrieved citation," not "this paragraph is
+  faithful to that authority."** The faithfulness link is still the
+  `legal-citation-checker` workflow, attributed by `agentId` — not proven
+  per-segment.
+- **There is no verbatim `quoted` kind yet.** True per-paragraph
+  quote-fidelity needs the *source text* at egress, but the gate only ever
+  holds source *shas* (the registries store hashes, never text). Verbatim
+  quote verification therefore requires producer-supplied per-segment source
+  passages — the deferred **Phase D** producer registry
+  (`POST /quality/provenance`). See `docs/designs/per-segment-provenance-phase-d.md`.
+- **`unsourced` is honest, not an alarm.** It covers original analysis/argument
+  (which has no external source by nature) as well as paragraphs whose only
+  citation was never retrieved. The document-level unbacked-citation signal
+  (anti-hallucination) remains the sharper hook for the latter.
+- **Non-citation / internal-document provenance is not modeled.** A paragraph
+  drawn from a contract, memo, or prior work product has no source binding;
+  only recognized legal-citation tokens participate today.
+- **Recording is flag-only.** Provenance is audited, never blocking. Strict
+  blocking on unsourced/unverified segments is an opt-in Phase D policy
+  (`requireSegmentProvenance`, default off).
+- The per-segment detail array is capped at 500 entries per document
+  (`segmentsTruncated` flags truncation); the summary counts always reflect the
+  full document.
+
 ## Firm-facing MCP facade (v1)
 
 ### stdio only
