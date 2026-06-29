@@ -175,6 +175,31 @@ below.
 
 ## Variant setup
 
+A variant sets the **default** model for every agent at import time — it is not
+a lock-in. You do **not** rebuild an agent to change its model. After import you
+can override the model two ways from the Paperclip dashboard, with no re-import:
+
+- **Per agent (permanent).** Open the agent → its config form. You can change
+  the agent's `model`, and even swap its **adapter type** — e.g. move one agent
+  from `claude` to `opencode`/`ollama` to reach a local model or an OpenRouter
+  model, while every other agent stays put. (Under the hood this is a
+  `PATCH /api/agents/:id`; the dashboard populates the model dropdown from the
+  adapter's available-models endpoint.)
+- **Per matter (one-off).** On a new issue (or an existing one's properties),
+  the assignee model override dropdown picks `primary` / `cheap` / `custom` for
+  that matter only. This is model-only **within the same adapter type** — it
+  does not swap adapter types per matter (that "hybrid" mode is deferred; see
+  `companies/legal-operations/variants.yaml`).
+
+The variant matrix in `variants.yaml` is therefore just sensible per-lane
+defaults you can change anytime. **One guardrail still applies:** any runtime
+model choice is subject to the gate-proxy `dataTerms` tier-floor (set by the
+variant), so a confidential/privileged matter cannot be routed to a non-ZDR
+cloud lane regardless of how the model was picked — the gate blocks it.
+
+To change the baked-in defaults for the *whole* package instead, re-run
+`./bin/possiblaw --variant <other>` (adds a second company, or `--reset` first).
+
 ### codex (default)
 
 1. Install Codex CLI: see [openai/codex-cli](https://github.com/openai/codex-cli).
@@ -262,8 +287,9 @@ the demo data is fictional.
 
 ### Team subset import (`--teams`)
 
-The catalog is the menu — import what your firm practices. By default the
-launcher imports all 178 agents; `--teams` imports only the named teams:
+The catalog is the menu — import what your firm or in-house team practices. By
+default the launcher imports all 178 agents; `--teams` imports only the named
+teams:
 
 ```bash
 ./bin/possiblaw --teams litigation,commercial   # two practices
@@ -274,6 +300,13 @@ launcher imports all 178 agents; `--teams` imports only the named teams:
                                                 # privacy, corporate, regulatory,
                                                 # ai-governance + the business teams
 ```
+
+The `inhouse` preset is a first-class way to run PossibLaw, not just a demo
+flavor: an in-house legal team imports the practices it actually owns, does
+first-pass contracts, intakes, and reviews with its own agents, and escalates
+to outside counsel only for the judgment it doesn't own. `--demo inhouse-legal`
+is the guided synthetic walkthrough of that same operating model (Meridian
+Robotics' five-person department).
 
 Team names are the lead slugs without the `-lead` suffix (`tax`,
 `real-estate`, `bd`, ...). Every subset always includes the chiefs
@@ -613,11 +646,12 @@ If `privacy-encoder` reports the key directory is on a synced cloud folder (iClo
 
 If the launcher hangs on `paperclipai onboard`, kill it (`Ctrl-C` or `kill $(cat $DATA_DIR/possiblaw.pid)`) and inspect `$DATA_DIR/possiblaw.log` for the failure. The most common cause is port 3100 already in use; pass `--port <free-port>` to work around it.
 
-## Teach your firm's agents
+## Teach your firm's or team's agents
 
-PossibLaw includes a Tier-1 learning loop that lets the firm accumulate
-persistent preferences and instructions that every drafting, reviewing, and
-delegating agent applies to future matters. Pure data-extraction agents
+PossibLaw includes a Tier-1 learning loop that lets your firm or in-house team
+accumulate persistent preferences and instructions that every drafting,
+reviewing, and delegating agent applies to future matters. Pure data-extraction
+agents
 (lane: extractive) are excluded — they run read-only workflows where firm
 style preferences do not apply.
 
@@ -739,10 +773,11 @@ the ledger and will feed SkillOpt when it lands.
 
 ---
 
-## Drive your firm from your assistant (firm-facing MCP facade)
+## Drive your firm or team from your assistant (firm-facing MCP facade)
 
-After a successful launch, you can expose the firm AS an MCP server to any
-outside MCP client — Claude Desktop, Codex, or any assistant that speaks the
+After a successful launch, you can expose the firm or in-house workspace AS an
+MCP server to any outside MCP client — Claude Desktop, Codex, or any assistant
+that speaks the
 Model Context Protocol over stdio. The facade presents a five-noun allowlist
 (`create_matter`, `get_matter_status`, `list_work_products`,
 `fetch_work_product`, `request_approval`), routes approval requests to a human
