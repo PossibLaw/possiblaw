@@ -51,8 +51,13 @@ SIDEBAR_PERF_STYLE = """<style id="possiblaw-sidebar-perf">
 
 POSSIBLAW_STYLE = """<style id="possiblaw-theme">
 /* PossibLaw launch theme: warm, light-first overrides of paperclip's
-   :root (light mode) design tokens. Dark mode is left stock. */
-:root {
+   light-mode design tokens. Scoped to :root:not(.dark) ON PURPOSE: a bare
+   :root has the SAME specificity (0,1,0) as paperclip's .dark token block
+   and, loading later in source order, would override the dark tokens and
+   break the in-app dark toggle. :not(.dark) raises specificity to (0,2,0)
+   and, crucially, stops matching once <html class="dark"> is set, so dark
+   mode keeps paperclip's stock tokens untouched. */
+:root:not(.dark) {
   --background: oklch(0.992 0.008 90);
   --secondary: oklch(0.962 0.016 85);
   --muted: oklch(0.962 0.016 85);
@@ -124,6 +129,16 @@ def self_test() -> int:
     assert '<style id="possiblaw-theme">' in out2, "palette style missing"
     assert out2.index("possiblaw-theme") < out2.index("</head>"), "style must sit inside <head>"
     assert out2.index(SEED_SCRIPT) < out2.index("possiblaw-theme"), "seed first, style last"
+    # Dark-mode isolation: the palette overrides MUST be scoped to :not(.dark).
+    # An unscoped ":root" has equal specificity (0,1,0) to paperclip's ".dark"
+    # token block and, loading later in source order, would win — leaking the
+    # warm light palette into dark mode and breaking the in-app dark toggle.
+    assert ":root:not(.dark)" in out2, (
+        "possiblaw palette must scope its token overrides to :root:not(.dark)"
+    )
+    assert "\n:root {" not in out2, (
+        "possiblaw palette must not use an unscoped :root (leaks into dark mode)"
+    )
 
     # sidebar perf block: every overlay theme gets it, exactly once, in <head>.
     # Selector must be the escaped Tailwind named-group class on
