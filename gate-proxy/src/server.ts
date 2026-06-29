@@ -28,6 +28,7 @@ import type { AuthorityRegistry } from "./quality/authority-registry.ts";
 import { assembleSignoffBundle, renderSignoffMarkdown } from "./quality/signoff.ts";
 import { documentSha256, extractCitations } from "./citations.ts";
 import { extractDocumentText } from "./document-text.ts";
+import { buildProvenance } from "./provenance/provenance.ts";
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -57,6 +58,11 @@ const SAFE_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
 /** I2 (c): entity list / per-entity caps — mirrored from anonymize.ts for server-level 400 guard. */
 const MAX_ENTITIES = 256;
 const MAX_ENTITY_LENGTH = 256;
+// Cap the per-segment provenance detail recorded in a receipt's meta so a
+// pathological document cannot bloat the hash-chained ledger. The summary counts
+// always reflect the FULL document; only the per-segment array is capped, and a
+// segmentsTruncated flag is set so truncation is never silent.
+const MAX_PROVENANCE_SEGMENTS = 500;
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -1185,6 +1191,27 @@ async function handleEgress(
         return;
       }
     }
+
+    // 5d. Per-segment provenance (verifiable-first). Segment the outbound
+    // document and label each paragraph: `sourced` if it carries a citation that
+    // was ACTUALLY retrieved (authorityRegistry.hasCitation), else `unsourced`.
+    // Recorded on the egress receipt's meta (rides via authorityReceiptMeta →
+    // extraReceiptMeta) — segment shas/indices/kinds only, never segment text.
+    // The signoff bundle projects this into the Matter Trust Report.
+    const prov = buildProvenance(documentText, {
+      isCitationBacked: (c) => authorityRegistry.hasCitation(c),
+    });
+    const provSegments = prov.segments.slice(0, MAX_PROVENANCE_SEGMENTS);
+    authorityReceiptMeta = {
+      ...authorityReceiptMeta,
+      provenance: {
+        documentSha256: prov.documentSha256,
+        segmentCount: prov.segmentCount,
+        summary: prov.summary,
+        segments: provSegments,
+        ...(prov.segments.length > provSegments.length ? { segmentsTruncated: true } : {}),
+      },
+    };
   }
 
   // 6. Dispatch by decision

@@ -14,7 +14,7 @@
 // Hash-only invariant: a SegmentProvenance carries the segment's sha, NEVER its
 // text. The whole-document sha is retained too, so a receipt can bind both the
 // document and each of its segments without persisting any payload text.
-import { documentSha256 } from "../citations.ts";
+import { documentSha256, extractCitations } from "../citations.ts";
 import { segmentDocument } from "./segments.ts";
 
 export type SegmentProvenanceKind = "sourced" | "quoted" | "unsourced";
@@ -45,16 +45,49 @@ export interface DocumentProvenance {
   summary: ProvenanceSummary;
 }
 
+export interface BuildProvenanceOptions {
+  /**
+   * Returns true if the given citation token (raw, as extracted from the
+   * segment) was actually retrieved from a real source — i.e. registered with
+   * the authority registry. The gate passes
+   * `(c) => authorityRegistry.hasCitation(c)`. A segment carrying a backed
+   * citation is labeled `sourced`; this is the verifiable-first signal (the cite
+   * ties back to a retrieval the firm's own pipeline saw), not self-assertion.
+   */
+  isCitationBacked?: (citation: string) => boolean;
+}
+
 /**
- * Build the baseline provenance record for a document: one entry per segment,
- * each labeled `unsourced`. Deterministic and side-effect free.
+ * Build the per-segment provenance record for a document.
+ *
+ * Without options, every segment is `unsourced` (the honest baseline). With an
+ * `isCitationBacked` predicate, a segment that carries at least one backed
+ * (retrieved) citation is labeled `sourced` and the first such citation is
+ * recorded. Segments with no citation, or only unbacked citations, stay
+ * `unsourced`. The `quoted` kind (verbatim quote-fidelity against source text)
+ * requires producer-supplied source passages and is added in a later phase.
+ *
+ * Deterministic and side-effect free.
  */
-export function buildProvenance(documentText: string): DocumentProvenance {
-  const segments: SegmentProvenance[] = segmentDocument(documentText).map((s) => ({
-    index: s.index,
-    segmentSha256: s.sha256,
-    kind: "unsourced",
-  }));
+export function buildProvenance(
+  documentText: string,
+  opts: BuildProvenanceOptions = {},
+): DocumentProvenance {
+  const segments: SegmentProvenance[] = segmentDocument(documentText).map((s) => {
+    const rec: SegmentProvenance = {
+      index: s.index,
+      segmentSha256: s.sha256,
+      kind: "unsourced",
+    };
+    if (opts.isCitationBacked !== undefined) {
+      const backed = extractCitations(s.text).find((c) => opts.isCitationBacked!(c));
+      if (backed !== undefined) {
+        rec.kind = "sourced";
+        rec.citation = backed;
+      }
+    }
+    return rec;
+  });
 
   const summary: ProvenanceSummary = { sourced: 0, quoted: 0, unsourced: 0 };
   for (const s of segments) summary[s.kind]++;

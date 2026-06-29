@@ -149,6 +149,42 @@ export interface AuthorityProvenance {
   unbacked: UnbackedCitationRecord[];
 }
 
+/** One segment's provenance as projected into the report (hashes/indices only — never text). */
+export interface SegmentProvenanceRow {
+  index: number;
+  segmentSha256: string;
+  /** "sourced" | "quoted" | "unsourced". */
+  kind: string;
+  /** The backing citation token when kind === "sourced". */
+  citation?: string;
+}
+
+/** Per-segment provenance recorded on one outbound document's egress receipt. */
+export interface DocumentProvenanceRecord {
+  seq: number;
+  ts: string;
+  tool: string;
+  outcome: ReceiptOutcome;
+  documentSha256: string;
+  segmentCount: number;
+  summary: { sourced: number; quoted: number; unsourced: number };
+  segments: SegmentProvenanceRow[];
+}
+
+/** Matter-wide rollup of per-segment provenance. */
+export interface ProvenanceTotals {
+  documents: number;
+  segments: number;
+  sourced: number;
+  quoted: number;
+  unsourced: number;
+}
+
+export interface ProvenanceProjection {
+  totals: ProvenanceTotals;
+  documents: DocumentProvenanceRecord[];
+}
+
 export interface SignoffBundle {
   issueId: string;
   generatedAt: string;
@@ -157,6 +193,12 @@ export interface SignoffBundle {
   anonymizationEvents: BundleReceipt[];
   citationVerifications: BundleReceipt[];
   authorityProvenance: AuthorityProvenance;
+  /**
+   * Per-segment provenance for this matter's outbound documents, recorded on the
+   * egress receipt's meta.provenance by the citation gate. Document-level rollup
+   * plus the per-segment kinds/shas — never any segment text (hash-only).
+   */
+  provenance: ProvenanceProjection;
   tierFloorDecisions: TierFloorDecision[];
   blockedEgress: BlockedEgress[];
   attestations: Attestation[];
@@ -191,6 +233,54 @@ function metaBool(body: ReceiptBody, key: string): boolean {
 function metaStringArray(body: ReceiptBody, key: string): string[] {
   const v = body.meta?.[key];
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+function num(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+/**
+ * Parse the meta.provenance object the citation gate records on a document-
+ * bearing egress receipt. Defensive: any field with the wrong type is coerced to
+ * a safe default; a missing/non-object provenance returns null. Reads shas,
+ * indices, kinds, and citation tokens only — never any segment text.
+ */
+function metaProvenance(body: ReceiptBody): {
+  documentSha256: string;
+  segmentCount: number;
+  summary: { sourced: number; quoted: number; unsourced: number };
+  segments: SegmentProvenanceRow[];
+} | null {
+  const p = body.meta?.["provenance"];
+  if (p === null || typeof p !== "object" || Array.isArray(p)) return null;
+  const obj = p as Record<string, unknown>;
+
+  const s = obj["summary"];
+  const so = s !== null && typeof s === "object" && !Array.isArray(s)
+    ? (s as Record<string, unknown>)
+    : {};
+  const summary = { sourced: num(so["sourced"]), quoted: num(so["quoted"]), unsourced: num(so["unsourced"]) };
+
+  const rawSegs = Array.isArray(obj["segments"]) ? obj["segments"] : [];
+  const segments: SegmentProvenanceRow[] = [];
+  for (const r of rawSegs) {
+    if (r === null || typeof r !== "object" || Array.isArray(r)) continue;
+    const ro = r as Record<string, unknown>;
+    const row: SegmentProvenanceRow = {
+      index: num(ro["index"]),
+      segmentSha256: typeof ro["segmentSha256"] === "string" ? ro["segmentSha256"] : "",
+      kind: typeof ro["kind"] === "string" ? ro["kind"] : "unsourced",
+    };
+    if (typeof ro["citation"] === "string") row.citation = ro["citation"];
+    segments.push(row);
+  }
+
+  return {
+    documentSha256: typeof obj["documentSha256"] === "string" ? obj["documentSha256"] : "",
+    segmentCount: num(obj["segmentCount"]),
+    summary,
+    segments,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +396,38 @@ export function assembleSignoffBundle(
     unbacked: unbackedRecords,
   };
 
+  // Per-segment provenance — projected from THIS matter's egress receipts whose
+  // meta.provenance the citation gate recorded. Document-level rollup + the
+  // per-segment kinds/shas/citations only (never text).
+  const provenanceDocuments: DocumentProvenanceRecord[] = [];
+  const provenanceTotals: ProvenanceTotals = {
+    documents: 0, segments: 0, sourced: 0, quoted: 0, unsourced: 0,
+  };
+  for (const e of matter) {
+    if (e.body.kind !== "egress") continue;
+    const p = metaProvenance(e.body);
+    if (p === null) continue;
+    provenanceDocuments.push({
+      seq: e.seq,
+      ts: e.ts,
+      tool: e.body.tool,
+      outcome: e.body.outcome,
+      documentSha256: p.documentSha256,
+      segmentCount: p.segmentCount,
+      summary: p.summary,
+      segments: p.segments,
+    });
+    provenanceTotals.documents++;
+    provenanceTotals.segments += p.segmentCount;
+    provenanceTotals.sourced += p.summary.sourced;
+    provenanceTotals.quoted += p.summary.quoted;
+    provenanceTotals.unsourced += p.summary.unsourced;
+  }
+  const provenance: ProvenanceProjection = {
+    totals: provenanceTotals,
+    documents: provenanceDocuments,
+  };
+
   const tierFloorDecisions: TierFloorDecision[] = matter
     .filter((e) => metaBool(e.body, "routedLocal") || metaString(e.body, "dataTermsTier") !== undefined)
     .map((e) => {
@@ -418,6 +540,7 @@ export function assembleSignoffBundle(
     anonymizationEvents,
     citationVerifications,
     authorityProvenance,
+    provenance,
     tierFloorDecisions,
     blockedEgress,
     attestations,
@@ -547,6 +670,43 @@ export function renderSignoffMarkdown(bundle: SignoffBundle): string {
       out.push(
         `| ${u.seq} | ${cell(u.ts)} | ${cell(u.tool)} | ${cell(u.outcome)} ` +
           `| ${cell(u.unbackedCitations.join("; "))} | \`${cell(u.payloadSha256)}\` |`,
+      );
+    }
+  }
+  out.push("");
+
+  // Provenance (per-segment)
+  out.push("## Provenance (per-segment)");
+  out.push("");
+  out.push(
+    "_Per-paragraph provenance for this matter's outbound documents, computed by " +
+      "the citation gate. A segment is **sourced** when it carries a citation that " +
+      "was actually retrieved from a real source (registered with the gate); " +
+      "**unsourced** is original analysis/argument or a segment whose citation was " +
+      "never retrieved. Hashes/indices only — no segment text. (Verbatim " +
+      "quote-fidelity — the **quoted** kind — requires producer-supplied source " +
+      "passages and is not yet computed here.)_",
+  );
+  out.push("");
+  if (bundle.provenance.documents.length === 0) {
+    out.push("_No per-segment provenance recorded for this matter._");
+  } else {
+    const t = bundle.provenance.totals;
+    out.push(
+      `Totals: ${t.documents} document(s), ${t.segments} segment(s) — ` +
+        `**${t.sourced} sourced**, ${t.quoted} quoted, ${t.unsourced} unsourced.`,
+    );
+    out.push("");
+    out.push("| seq | ts | tool | outcome | segments | sourced | quoted | unsourced | sourced citations | documentSha256 |");
+    out.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    for (const d of bundle.provenance.documents) {
+      const sourcedCites = d.segments
+        .filter((s) => s.kind === "sourced" && s.citation !== undefined)
+        .map((s) => s.citation as string);
+      out.push(
+        `| ${d.seq} | ${cell(d.ts)} | ${cell(d.tool)} | ${cell(d.outcome)} | ${d.segmentCount} ` +
+          `| ${d.summary.sourced} | ${d.summary.quoted} | ${d.summary.unsourced} ` +
+          `| ${cell(sourcedCites.join("; "))} | \`${cell(d.documentSha256)}\` |`,
       );
     }
   }

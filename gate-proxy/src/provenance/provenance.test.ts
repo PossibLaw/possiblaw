@@ -48,3 +48,30 @@ test("provenance entries never carry segment text (hash-only invariant)", () => 
     assert.equal((s as unknown as Record<string, unknown>).text, undefined);
   }
 });
+
+test("labels a segment sourced when it carries a backed (retrieved) citation", () => {
+  const doc = "Background analysis.\n\nThe court held in Roe v. Wade, 410 U.S. 113 (1973), that the right applies.";
+  const prov = buildProvenance(doc, { isCitationBacked: (c) => c === "410 U.S. 113" });
+  assert.equal(prov.segments[0].kind, "unsourced");
+  assert.equal(prov.segments[1].kind, "sourced");
+  assert.equal(prov.segments[1].citation, "410 U.S. 113");
+});
+
+test("labels a segment unsourced when its citation was never retrieved (unbacked)", () => {
+  const doc = "We rely on Smith v. Jones, 999 F.3d 100 (9th Cir. 2030).";
+  const prov = buildProvenance(doc, { isCitationBacked: () => false });
+  assert.equal(prov.segments[0].kind, "unsourced");
+  assert.equal(prov.segments[0].citation, undefined);
+});
+
+test("a segment with no citation is unsourced even when a predicate is supplied", () => {
+  const prov = buildProvenance("Pure argument, no authority cited here.", { isCitationBacked: () => true });
+  assert.equal(prov.segments[0].kind, "unsourced");
+});
+
+test("summary tallies sourced vs unsourced across segments", () => {
+  const doc = "Intro, no cite.\n\nSee 410 U.S. 113.\n\nMore argument.\n\nAlso 123 F.3d 456.";
+  const backed = new Set(["410 U.S. 113", "123 F.3d 456"]);
+  const prov = buildProvenance(doc, { isCitationBacked: (c) => backed.has(c) });
+  assert.deepEqual(prov.summary, { sourced: 2, quoted: 0, unsourced: 2 });
+});
