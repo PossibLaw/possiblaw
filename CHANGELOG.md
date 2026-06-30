@@ -7,6 +7,40 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.34.0] — 2026-06-29 — Per-segment provenance (Phase A) + co-equal positioning
+
+Review-driven batch (PR #14). The legal-data audit trail moves from
+whole-document + case-law-citation granularity to **per-paragraph** provenance,
+and the product is repositioned as a practice layer for law firms **and**
+in-house legal teams.
+
+- **Per-segment provenance, Phase A (`gate-proxy/`).** On every citation-gated
+  egress the gate now segments the outbound document and labels each paragraph
+  `sourced` (carries a citation that was actually retrieved / registered with the
+  authority registry) or `unsourced` (original analysis, or a never-retrieved
+  citation). New `gate-proxy/src/provenance/{segments,provenance}.ts`
+  (deterministic segmentation + per-segment record; segment shas computed via the
+  same `documentSha256` path as the citation gate). Recorded on the egress
+  receipt's meta (rides the existing `authorityReceiptMeta` channel — no new
+  receipt kind, chain shape unchanged; shas/indices/kinds only, never text;
+  capped at 500 detail rows with a `segmentsTruncated` flag). The Matter Trust
+  Report gains a "Provenance (per-segment)" section with a matter-wide rollup.
+  Honest scope: no verbatim `quoted` kind, no non-citation/internal-doc
+  provenance, audit-only (no blocking) — all deferred to Phase D
+  (`docs/designs/per-segment-provenance-phase-d.md`). gate-proxy 310/310, tsc clean.
+- **Co-equal positioning (docs).** Reframed from a law-firm tool to a "practice
+  layer" — a law firm **or** an in-house legal team running its own AI-native
+  practice, escalating to outside counsel only for the judgment it doesn't own
+  (README, `CLAUDE.md`, `COMPANY.md`, `announcement.md`, `operator-walkthrough.md`;
+  `--teams inhouse` / `--demo inhouse-legal` promoted to a first-class path).
+- **Runtime model selection documented.** A variant only seeds import-time
+  defaults; models are switchable per-agent (`PATCH /api/agents/:id`, incl.
+  adapter-type swap) and per-matter (issue assignee dropdown) at runtime with no
+  rebuild, subject to the gate-proxy `dataTerms` tier-floor (README + walkthrough).
+- **New design doc** `docs/designs/escalate-to-outside-counsel.md` — a first-class
+  escalate-to-outside-counsel concept (design only, reuses the firm-facade
+  primitives inverted). Not implemented.
+
 ## [0.33.0] — 2026-06-28 — Launcher auto-provisions the matter-intake-sweep routine
 
 The `matter-intake-sweep` routine no longer requires a manual UI setup step — a

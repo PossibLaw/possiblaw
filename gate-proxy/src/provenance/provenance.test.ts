@@ -1,0 +1,77 @@
+// gate-proxy/src/provenance/provenance.test.ts
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { buildProvenance } from "./provenance.ts";
+import { documentSha256 } from "../citations.ts";
+import { segmentDocument } from "./segments.ts";
+
+test("builds one provenance entry per segment, all unsourced in the baseline", () => {
+  const doc = "First claim.\n\nSecond claim.\n\nThird claim.";
+  const prov = buildProvenance(doc);
+  assert.equal(prov.segmentCount, 3);
+  assert.equal(prov.segments.length, 3);
+  assert.deepEqual(prov.segments.map((s) => s.kind), ["unsourced", "unsourced", "unsourced"]);
+});
+
+test("each entry carries its segment index and segmentSha256 from segmentDocument", () => {
+  const doc = "Alpha.\n\nBravo.";
+  const segs = segmentDocument(doc);
+  const prov = buildProvenance(doc);
+  assert.deepEqual(prov.segments.map((s) => s.index), [0, 1]);
+  assert.deepEqual(
+    prov.segments.map((s) => s.segmentSha256),
+    segs.map((s) => s.sha256),
+  );
+});
+
+test("documentSha256 binds the whole document and matches citations.documentSha256", () => {
+  const doc = "Only paragraph.";
+  assert.equal(buildProvenance(doc).documentSha256, documentSha256(doc));
+});
+
+test("summary counts each kind; baseline is all unsourced", () => {
+  const prov = buildProvenance("One.\n\nTwo.\n\nThree.\n\nFour.");
+  assert.deepEqual(prov.summary, { sourced: 0, quoted: 0, unsourced: 4 });
+});
+
+test("empty document yields zero segments and a zeroed summary", () => {
+  const prov = buildProvenance("");
+  assert.equal(prov.segmentCount, 0);
+  assert.deepEqual(prov.segments, []);
+  assert.deepEqual(prov.summary, { sourced: 0, quoted: 0, unsourced: 0 });
+  assert.equal(prov.documentSha256, documentSha256(""));
+});
+
+test("provenance entries never carry segment text (hash-only invariant)", () => {
+  const prov = buildProvenance("Sensitive matter detail.\n\nMore detail.");
+  for (const s of prov.segments) {
+    assert.equal((s as unknown as Record<string, unknown>).text, undefined);
+  }
+});
+
+test("labels a segment sourced when it carries a backed (retrieved) citation", () => {
+  const doc = "Background analysis.\n\nThe court held in Roe v. Wade, 410 U.S. 113 (1973), that the right applies.";
+  const prov = buildProvenance(doc, { isCitationBacked: (c) => c === "410 U.S. 113" });
+  assert.equal(prov.segments[0].kind, "unsourced");
+  assert.equal(prov.segments[1].kind, "sourced");
+  assert.equal(prov.segments[1].citation, "410 U.S. 113");
+});
+
+test("labels a segment unsourced when its citation was never retrieved (unbacked)", () => {
+  const doc = "We rely on Smith v. Jones, 999 F.3d 100 (9th Cir. 2030).";
+  const prov = buildProvenance(doc, { isCitationBacked: () => false });
+  assert.equal(prov.segments[0].kind, "unsourced");
+  assert.equal(prov.segments[0].citation, undefined);
+});
+
+test("a segment with no citation is unsourced even when a predicate is supplied", () => {
+  const prov = buildProvenance("Pure argument, no authority cited here.", { isCitationBacked: () => true });
+  assert.equal(prov.segments[0].kind, "unsourced");
+});
+
+test("summary tallies sourced vs unsourced across segments", () => {
+  const doc = "Intro, no cite.\n\nSee 410 U.S. 113.\n\nMore argument.\n\nAlso 123 F.3d 456.";
+  const backed = new Set(["410 U.S. 113", "123 F.3d 456"]);
+  const prov = buildProvenance(doc, { isCitationBacked: (c) => backed.has(c) });
+  assert.deepEqual(prov.summary, { sourced: 2, quoted: 0, unsourced: 2 });
+});

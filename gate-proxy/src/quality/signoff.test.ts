@@ -638,3 +638,97 @@ function assertNoPlaintext(bundle: unknown, md: string): void {
   assert.equal(json.includes("quote-text"), false, "quote fragment leaked into bundle JSON");
   assert.equal(md.includes("quote-text"), false, "quote fragment leaked into Markdown");
 }
+
+// ---------------------------------------------------------------------------
+// PROVENANCE (per-segment) — projected from egress receipt meta.provenance
+// ---------------------------------------------------------------------------
+
+test("PROVENANCE: projects per-segment provenance, aggregates totals, filters other matters", () => {
+  const { chain } = freshChainPath();
+
+  // Other matter — must be filtered out of the projection.
+  chain.append({
+    kind: "egress", tool: "file_court_document", boundary: "COURT_FILING",
+    decision: "allow", outcome: "performed", payloadSha256: sha256hex("other-doc"),
+    agentId: "agent-x", issueId: "POS-999",
+    meta: {
+      provenance: {
+        documentSha256: sha256hex("other-doc-text"), segmentCount: 1,
+        summary: { sourced: 0, quoted: 0, unsourced: 1 },
+        segments: [{ index: 0, segmentSha256: sha256hex("o0"), kind: "unsourced" }],
+      },
+    },
+  });
+
+  // Our matter — a filed brief with 3 segments, 1 backed by a retrieved authority.
+  chain.append({
+    kind: "egress", tool: "file_court_document", boundary: "COURT_FILING",
+    decision: "human", outcome: "performed", payloadSha256: sha256hex("brief"),
+    agentId: "agent-1", issueId: "POS-123", approvalId: "approval-1",
+    meta: {
+      claimedConfidentiality: "standard",
+      provenance: {
+        documentSha256: sha256hex("brief-text"), segmentCount: 3,
+        summary: { sourced: 1, quoted: 0, unsourced: 2 },
+        segments: [
+          { index: 0, segmentSha256: sha256hex("s0"), kind: "unsourced" },
+          { index: 1, segmentSha256: sha256hex("s1"), kind: "sourced", citation: "410 U.S. 113" },
+          { index: 2, segmentSha256: sha256hex("s2"), kind: "unsourced" },
+        ],
+      },
+    },
+  });
+
+  const bundle = assembleSignoffBundle(chain, "POS-123");
+
+  assert.equal(bundle.provenance.documents.length, 1);
+  const doc = bundle.provenance.documents[0];
+  assert.equal(doc.documentSha256, sha256hex("brief-text"));
+  assert.equal(doc.segmentCount, 3);
+  assert.deepEqual(doc.summary, { sourced: 1, quoted: 0, unsourced: 2 });
+  assert.equal(doc.segments.length, 3);
+  assert.equal(doc.segments[1].kind, "sourced");
+  assert.equal(doc.segments[1].citation, "410 U.S. 113");
+
+  assert.deepEqual(bundle.provenance.totals, {
+    documents: 1, segments: 3, sourced: 1, quoted: 0, unsourced: 2,
+  });
+});
+
+test("PROVENANCE: markdown renders a provenance section with counts and no segment text", () => {
+  const { chain } = freshChainPath();
+  chain.append({
+    kind: "egress", tool: "file_court_document", boundary: "COURT_FILING",
+    decision: "allow", outcome: "performed", payloadSha256: sha256hex("b"),
+    agentId: "a1", issueId: "POS-1",
+    meta: {
+      provenance: {
+        documentSha256: sha256hex("btext"), segmentCount: 2,
+        summary: { sourced: 1, quoted: 0, unsourced: 1 },
+        segments: [
+          { index: 0, segmentSha256: sha256hex("x0"), kind: "sourced", citation: "410 U.S. 113" },
+          { index: 1, segmentSha256: sha256hex("x1"), kind: "unsourced" },
+        ],
+      },
+    },
+  });
+  const md = renderSignoffMarkdown(assembleSignoffBundle(chain, "POS-1"));
+  assert.match(md, /## Provenance/);
+  assert.match(md, /410 U\.S\. 113/);
+  assert.ok(md.includes(sha256hex("btext")));
+});
+
+test("PROVENANCE: matter with no provenance gets an empty section and zeroed totals", () => {
+  const { chain } = freshChainPath();
+  chain.append({
+    kind: "egress", tool: "send_email", boundary: "THIRD_PARTY_EGRESS",
+    decision: "allow", outcome: "performed", payloadSha256: sha256hex("e"),
+    agentId: "a1", issueId: "POS-2",
+  });
+  const bundle = assembleSignoffBundle(chain, "POS-2");
+  assert.deepEqual(bundle.provenance.documents, []);
+  assert.deepEqual(bundle.provenance.totals, {
+    documents: 0, segments: 0, sourced: 0, quoted: 0, unsourced: 0,
+  });
+  assert.match(renderSignoffMarkdown(bundle), /## Provenance/);
+});

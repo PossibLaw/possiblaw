@@ -2,7 +2,7 @@
 
 Repo Root (absolute path, required): /Users/salvadorcarranza/possiblaw
 
-PossibLaw is a proof-of-concept layer on the paperclip control plane that demonstrates how to operate a legal business with AI — legal practice plus marketing, finance, admin, BD, and ops. Public, Apache 2.0, layer-not-fork posture; paperclip is wired as a pinned git submodule and never modified.
+PossibLaw is a proof-of-concept layer on the paperclip control plane that demonstrates how to operate a legal business with AI — whether a law firm or an in-house legal team running its own AI-native practice — legal practice plus marketing, finance, admin, BD, and ops. Public, Apache 2.0, layer-not-fork posture; paperclip is wired as a pinned git submodule and never modified.
 
 ## Startup Contract
 1. This file is the only startup instruction. Do not read other files unless triggered.

@@ -9,7 +9,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
 [![paperclip layer](https://img.shields.io/badge/paperclip-layer%2C%20not%20a%20fork-lightgrey.svg)](FOUNDATION.md)
 
-Agents do the legal and business work autonomously. The product is the path that work travels: egress writes cross hard-gated trust boundaries, every gate decision lands in a tamper-evident receipt chain, and humans decide at the boundaries that matter — not on every step. PossibLaw ships this as a *layer* on the paperclip control plane (wired as a pinned git submodule, never modified), not a fork.
+Agents do the legal and business work autonomously. The product is the path that work travels: egress writes cross hard-gated trust boundaries, every gate decision lands in a tamper-evident receipt chain, and humans decide at the boundaries that matter — not on every step. PossibLaw ships this as a *layer* on the paperclip control plane (wired as a pinned git submodule, never modified), not a fork. Run it as a law firm, or as an in-house legal team that handles first-pass work with its own agents and escalates to outside counsel only for the judgment it doesn't own.
 
 ## The thesis: atomic units of work
 
@@ -23,7 +23,7 @@ The catalog is the supporting cast. The atomic pipeline — decompose, gate, rec
 
 ## Where this sits in the market
 
-Legal AI is sorting into a data layer (law as an API/MCP with provenance), a guardrails layer (the sign-off, audit trail, and hallucination control a regulator needs once AI did the work), and a firm layer (lawyers running an AI backend). **PossibLaw is the open-source guardrails + firm layer** — the audit trail, human gates, anonymization, and receipts wrapped around an atomic agent catalog — and the first slice of the **data layer** is now shipped: a trust-adapter that fronts CourtListener's official MCP (`mcp.courtlistener.com`) and **registers every retrieved authority with the gate**, so the gate can flag any authority an agent cites in an outbound filing that was never retrieved — an anti-hallucination check, not just a metadata wrapper ([`mcp-servers/legal-data/`](mcp-servers/legal-data/)). The guardrails layer is productized end-to-end — every gate decision is hash-chained and exportable as a regulator-readable [Matter Trust Report](#whats-enforced-vs-routed-vs-advisory). It competes on being *legible and open* where the rest of the market is opaque and closed. Build specs: [`docs/builds/`](docs/builds/).
+Legal AI is sorting into a data layer (law as an API/MCP with provenance), a guardrails layer (the sign-off, audit trail, and hallucination control a regulator needs once AI did the work), and a **practice layer** — whoever runs the AI backend: a law firm, or an in-house legal team acting as its own AI-native practice, doing first-pass work with its own agents and escalating to outside counsel only for the judgment it doesn't own. **PossibLaw is the open-source guardrails + practice layer** — the audit trail, human gates, anonymization, and receipts wrapped around an atomic agent catalog — and the first slice of the **data layer** is now shipped: a trust-adapter that fronts CourtListener's official MCP (`mcp.courtlistener.com`) and **registers every retrieved authority with the gate**, so the gate can flag any authority an agent cites in an outbound filing that was never retrieved — an anti-hallucination check, not just a metadata wrapper ([`mcp-servers/legal-data/`](mcp-servers/legal-data/)). The guardrails layer is productized end-to-end — every gate decision is hash-chained and exportable as a regulator-readable [Matter Trust Report](#whats-enforced-vs-routed-vs-advisory). It competes on being *legible and open* where the rest of the market is opaque and closed. Build specs: [`docs/builds/`](docs/builds/).
 
 ## The trust pipeline
 
@@ -101,7 +101,7 @@ Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); 
 | **Firm learning loop** | `remember this:` comments on issues are sanitized (fail-closed ethical-wall), proposed as Paperclip approval cards, and accumulated in `businesses/<slug>/learnings/`. Approved lessons are injected into the `firm-memory` skill on the next `--business <slug>` launch. **Tier-2 edit-learning:** agents also learn from the lawyer's finalized edits made directly in OneDrive/Google Drive (external-destination capture) — a nightly sweep diffs each delivered file against its delivered draft, distills a sanitized skill-overlay proposal, and surfaces it in the morning digest for yes/no/edit review; approved overlays apply on the next `--business <slug>` launch. Tier-2 SkillOpt (eval-validated automatic refinement) and Box connector remain deferred. |
 | **Projects & tasks** | NDA Matters, Commercial Reviews, Eval Results; starter issues + a recurring renewal scan |
 | **Model lanes** | Per-agent `modelLane` metadata (primary / routing / drafting / review / extractive) — variants map each lane to the right model automatically |
-| **Team subsets** | `--teams litigation,commercial` (or presets `boutique` / `inhouse`) — import only the practices your firm runs; chiefs, meta-reviewers, and the skill closure come along automatically |
+| **Team subsets** | `--teams litigation,commercial` (or presets `boutique` / `inhouse`) — import only the practices your firm or in-house team runs; chiefs, meta-reviewers, and the skill closure come along automatically. The `inhouse` preset is a first-class operating model, not just a demo: an in-house legal team runs first-pass work with its own agents and escalates to outside counsel only for the judgment it doesn't own |
 | **Demos** | `--demo law-firm` / `inhouse-legal` / `biglaw-practice-group` — synthetic demo matters for a boutique firm, an in-house department, and a BigLaw practice group |
 | **Delivery** | `deliverables-courier` files finished work products to your own OneDrive/SharePoint, Google Drive, or Notion per an operator policy file — auto-file or on-request per work-product type, privacy-tier gated, local copy always retained |
 | **Theme** | `--theme possiblaw` (default) — light-first dashboard with a warm launch palette; `light` / `dark` also available |
@@ -110,7 +110,9 @@ Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); 
 
 ## Model variants
 
-The launcher picks the model-provider variant at import time. Ten are shipped:
+The launcher picks the model-provider variant at import time — this sets the
+*default* model per agent, not a lock-in (see "Changing models after import"
+below). Ten are shipped:
 
 | Variant | Provider | When |
 |---|---|---|
@@ -129,6 +131,16 @@ Live launches preflight-probe each lane model with a tiny CLI request (and
 check OpenRouter pins against its public catalog), so "you don't have access
 to this model" surfaces before import, not mid-matter (`--skip-model-probe`
 to bypass).
+
+**Changing models after import (no rebuild).** A variant just seeds defaults.
+From the Paperclip dashboard you can change any single agent's model — or swap
+its adapter type (e.g. one agent from `claude` to a local `ollama` or an
+`openrouter` model) — without re-importing, and you can override the model for a
+single matter from the issue's assignee dropdown (`primary` / `cheap` /
+`custom`, within the same adapter type). Runtime choices still obey the
+gate-proxy `dataTerms` tier-floor, so a confidential/privileged matter can't be
+routed to a non-ZDR cloud lane. To change the package-wide defaults instead,
+re-run with a different `--variant`. Full steps: [docs/operator-walkthrough.md](docs/operator-walkthrough.md#variant-setup).
 
 ### MCP registry — declare MCP servers once
 
