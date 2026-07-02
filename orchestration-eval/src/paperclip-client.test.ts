@@ -56,3 +56,25 @@ test("I3: listChildIssues GETs company issues with parentId query param (url-enc
   assert.ok(calls[0].url.includes("parentId=iss-parent"), "should include parentId query param");
   assert.equal(calls[0].init?.method, "GET");
 });
+
+test("1.1: listAgents GETs the company agents endpoint and surfaces urlKey rows", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = new PaperclipEvalClient({
+    baseUrl: "http://127.0.0.1:3199", companyId: "co-1", apiKey: "k",
+    fetchImpl: fakeFetch(calls, [{ id: "ag-1", name: "Immigration Lead", urlKey: "immigration-lead" }]) as any,
+  });
+  const agents = await client.listAgents();
+  assert.equal(calls[0].url, "http://127.0.0.1:3199/api/companies/co-1/agents");
+  assert.equal(agents[0].urlKey, "immigration-lead");
+});
+
+test("1.2: getIssueCostSummary surfaces the costCents field the route actually returns", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = new PaperclipEvalClient({
+    baseUrl: "http://127.0.0.1:3199", companyId: "co-1", apiKey: "k",
+    fetchImpl: fakeFetch(calls, { issueId: "iss-9", includeDescendants: true, costCents: 456 }) as any,
+  });
+  const summary = await client.getIssueCostSummary("iss-9");
+  assert.equal(calls[0].url, "http://127.0.0.1:3199/api/issues/iss-9/cost-summary");
+  assert.equal(summary.costCents, 456);
+});

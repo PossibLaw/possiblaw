@@ -31,3 +31,17 @@ test("extractDeliverable reads the primary work product's document", async () =>
   assert.equal(r.text, "BODY:memo");
   assert.equal(r.source, "work-product");
 });
+
+test("1.3: failureReasonFor — done is judgeable, cancelled and timeout are failures", async () => {
+  const { failureReasonFor } = await import("./await-completion.ts");
+  assert.equal(failureReasonFor({ status: "done", timedOut: false }), null);
+  assert.equal(failureReasonFor({ status: "cancelled", timedOut: false }), "cancelled");
+  assert.equal(failureReasonFor({ status: "in_progress", timedOut: true }), "timed_out");
+});
+
+test("1.3: awaitIssueClosed still stops polling on cancelled (terminal for polling, failed for scoring)", async () => {
+  const client = clientWithStatuses(["in_progress", "cancelled"]);
+  const r = await awaitIssueClosed(client, "iss", { intervalMs: 0, timeoutMs: 1000, sleep: async () => {} });
+  assert.equal(r.status, "cancelled");
+  assert.equal(r.timedOut, false);
+});

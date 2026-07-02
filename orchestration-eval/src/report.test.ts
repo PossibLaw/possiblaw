@@ -77,3 +77,58 @@ test("I3: renderReport omits decomposition section when armADecomposed is empty 
   const md = renderReport(cells, { runsPerCell: 1, skipped: [] });
   assert.doesNotMatch(md, /Arm A Decomposition/i, "should not show decomposition section when none occurred");
 });
+
+// ---- Task 1.2/1.3: run-level details in the rendered report ----
+
+test("1.2 edge: a timed-out run is visibly flagged in the rendered report", () => {
+  const records = [
+    { task: "t1", arm: "A" as const, config: "sota", allPass: false, failReason: "timed_out", timedOut: true, wallClockSeconds: 1800, costCents: 50, decomposition: null },
+    { task: "t1", arm: "B" as const, config: "sota", allPass: true, failReason: null, timedOut: false, wallClockSeconds: 120, costCents: 80, decomposition: null },
+  ];
+  const md = renderReport(aggregate(records), { runsPerCell: 1, skipped: [], records });
+  assert.match(md, /TIMED OUT/, "timed-out run must be visibly marked");
+  assert.match(md, /FAILED \(timed_out\)/, "timed-out run must show as failed with reason");
+});
+
+test("1.3: a cancelled run shows as FAILED with reason cancelled", () => {
+  const records = [
+    { task: "t1", arm: "B" as const, config: "sota", allPass: false, failReason: "cancelled", timedOut: false, wallClockSeconds: 60, costCents: null, decomposition: null },
+  ];
+  const md = renderReport(aggregate(records), { runsPerCell: 1, skipped: [], records });
+  assert.match(md, /FAILED \(cancelled\)/);
+});
+
+test("1.2: run details include wall clock seconds and Arm B decomposition shape", () => {
+  const records = [
+    {
+      task: "t1", arm: "B" as const, config: "sota", allPass: true, failReason: null, timedOut: false,
+      wallClockSeconds: 421.5, costCents: 900,
+      decomposition: {
+        childIssueCount: 2, maxDepth: 2,
+        children: [
+          { id: "c1", assignee: "commercial-lead", costCents: 300 },
+          { id: "c2", assignee: null, costCents: null },
+        ],
+      },
+    },
+  ];
+  const md = renderReport(aggregate(records), { runsPerCell: 1, skipped: [], records });
+  assert.match(md, /421\.5/, "wall clock seconds must appear");
+  assert.match(md, /2 child/, "child count must appear");
+  assert.match(md, /commercial-lead/, "child assignee labels must appear");
+  assert.match(md, /depth 2/, "max depth must appear");
+});
+
+test("1.2 failure: report renders without crashing when decomposition/wall-clock data is absent — shows n/a", () => {
+  const records = [
+    { task: "t-old", arm: "A" as const, config: "sota", allPass: true }, // older/partial run: no new fields
+  ];
+  const md = renderReport(aggregate(records), { runsPerCell: 1, skipped: [], records });
+  assert.match(md, /n\/a/, "absent instrumentation must render as n/a");
+});
+
+test("1.2: renderReport without records meta still renders (backwards compatible)", () => {
+  const cells = aggregate([{ task: "t1", arm: "A" as const, config: "sota", allPass: true }]);
+  const md = renderReport(cells, { runsPerCell: 1, skipped: [] });
+  assert.doesNotMatch(md, /Run Details/i, "no run-details section when records are not provided");
+});

@@ -41,7 +41,9 @@ included:
 
   - task: trusts-estates-private-client/compare-charitable-trust-structures-against-client-goals
     work_type: analyze
-    arm_a_agent: estates-lead
+    # urlKey of the imported agent ("Trusts & Estates Lead" → trusts-estates-lead);
+    # the package dir slug estates-lead is not persisted by paperclip and cannot resolve.
+    arm_a_agent: trusts-estates-lead
     note: "5 docs → one trust-structure-recommendation-memo; single parent issue"
 
   - task: healthcare-life-sciences/compare-clinical-trial-protocol-against-fda-regulatory-requirements

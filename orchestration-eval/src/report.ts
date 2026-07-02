@@ -1,7 +1,17 @@
 // orchestration-eval/src/report.ts
-import type { Arm } from "./runner.ts";
+import type { Arm, RunDecomposition } from "./runner.ts";
 
-export interface RunRecord { task: string; arm: Arm; config: string; allPass: boolean; costCents?: number | null; }
+export interface RunRecord {
+  task: string; arm: Arm; config: string; allPass: boolean; costCents?: number | null;
+  /** True when the run hit the await timeout — must be visibly flagged in the report. */
+  timedOut?: boolean;
+  /** "cancelled" | "timed_out" when the run was scored FAILED without judging; null/absent otherwise. */
+  failReason?: string | null;
+  /** Real elapsed seconds for the arm run; absent on older/partial records → rendered as n/a. */
+  wallClockSeconds?: number;
+  /** Decomposition shape (both arms); absent/null on older or failed-early records → rendered as n/a. */
+  decomposition?: RunDecomposition | null;
+}
 export interface CellResult {
   task: string; arm: Arm; config: string;
   allPassRuns: number; totalRuns: number; allPassRate: number; meanCostCents: number | null;
@@ -28,12 +38,29 @@ export function aggregate(records: RunRecord[]): CellResult[] {
   return cells;
 }
 
+function renderDecomposition(d: RunRecord["decomposition"]): string {
+  if (d === undefined || d === null) return "n/a";
+  if (d.childIssueCount === 0) return "none";
+  const kids = d.children
+    .map((c) => `${c.assignee ?? "unassigned"}${typeof c.costCents === "number" ? ` (${c.costCents}¢)` : ""}`)
+    .join(", ");
+  return `${d.childIssueCount} child(ren), depth ${d.maxDepth}${kids ? `: ${kids}` : ""}`;
+}
+
+function renderRunResult(r: RunRecord): string {
+  if (r.failReason) return `FAILED (${r.failReason})${r.timedOut ? " ⏱ TIMED OUT" : ""}`;
+  const base = r.allPass ? "pass" : "fail";
+  return r.timedOut ? `${base} ⏱ TIMED OUT` : base;
+}
+
 export function renderReport(
   cells: CellResult[],
   meta: {
     runsPerCell: number;
     skipped: Array<{ task: string; reason: string }>;
     armADecomposed?: Array<{ task: string; childCount: number }>;
+    /** Per-run records; when provided, a Run Details section is rendered. */
+    records?: RunRecord[];
   },
 ): string {
   const lines: string[] = [];
@@ -52,6 +79,18 @@ export function renderReport(
     const bDisp = b ? `${(b.allPassRate * 100).toFixed(0)}% (${b.allPassRuns}/${b.totalRuns})` : "—";
     const ar = a?.allPassRate ?? 0, br = b?.allPassRate ?? 0;
     lines.push(`| ${task} | ${config} | ${aDisp} | ${bDisp} | ${((br - ar) * 100).toFixed(0)}pp | ${a?.meanCostCents ?? "—"} | ${b?.meanCostCents ?? "—"} |`);
+  }
+  // Per-run details: timed-out/cancelled runs visibly marked; wall clock + decomposition per run.
+  const records = meta.records ?? [];
+  if (records.length > 0) {
+    lines.push(``, `## Run Details`, ``);
+    lines.push(`| Task | Arm | Config | Result | Wall clock (s) | Cost¢ | Decomposition |`);
+    lines.push(`|---|---|---|---|---|---|---|`);
+    for (const r of records) {
+      const wall = typeof r.wallClockSeconds === "number" ? String(r.wallClockSeconds) : "n/a";
+      const cost = typeof r.costCents === "number" ? String(r.costCents) : "n/a";
+      lines.push(`| ${r.task} | ${r.arm} | ${r.config} | ${renderRunResult(r)} | ${wall} | ${cost} | ${renderDecomposition(r.decomposition)} |`);
+    }
   }
   // Arm A decomposition warnings (monolithic assumption verification).
   const decomposed = meta.armADecomposed ?? [];

@@ -39,8 +39,11 @@ export class PaperclipEvalClient {
   getDocument(issueId: string, key: string) {
     return this.req("GET", `/api/issues/${encodeURIComponent(issueId)}/documents/${encodeURIComponent(key)}`) as Promise<{ id: string; body?: string }>;
   }
+  /** Agent rows carry no `slug` field. paperclip serializes `urlKey = normalizeAgentUrlKey(name)`
+   * (paperclip/server/src/services/agents.ts withUrlKey), which for imported package agents
+   * equals the package slug — see agent-resolver.ts for the resolution strategy. */
   listAgents() {
-    return this.req("GET", `/api/companies/${this.cfg.companyId}/agents`) as Promise<Array<{ id: string; slug?: string; name?: string }>>;
+    return this.req("GET", `/api/companies/${this.cfg.companyId}/agents`) as Promise<Array<{ id: string; name?: string; urlKey?: string }>>;
   }
   patchCompanyBudget(cents: number): Promise<void> {
     return this.req("PATCH", `/api/companies/${this.cfg.companyId}/budgets`, { budgetMonthlyCents: cents }).then(() => undefined);
@@ -48,12 +51,16 @@ export class PaperclipEvalClient {
   patchAgentBudget(agentId: string, cents: number): Promise<void> {
     return this.req("PATCH", `/api/agents/${encodeURIComponent(agentId)}/budgets`, { budgetMonthlyCents: cents }).then(() => undefined);
   }
+  /** Subtree cost rollup. The route returns `costCents`
+   * (paperclip/server/src/services/costs.ts issueTreeSummary via
+   * GET /api/issues/:id/cost-summary); `totalCents` retained only as a legacy fallback key. */
   getIssueCostSummary(issueId: string) {
-    return this.req("GET", `/api/issues/${encodeURIComponent(issueId)}/cost-summary`) as Promise<{ totalCents?: number; [k: string]: unknown }>;
+    return this.req("GET", `/api/issues/${encodeURIComponent(issueId)}/cost-summary`) as Promise<{ costCents?: number; totalCents?: number; [k: string]: unknown }>;
   }
-  /** List child issues of a parent issue. Used to detect Arm A decomposition.
-   * Calls GET /api/companies/:companyId/issues?parentId=<id> (fail-soft). */
-  listChildIssues(parentIssueId: string): Promise<Array<{ id: string }>> {
-    return this.req("GET", `/api/companies/${this.cfg.companyId}/issues?parentId=${encodeURIComponent(parentIssueId)}`) as Promise<Array<{ id: string }>>;
+  /** List child issues of a parent issue. Used to measure decomposition on both arms.
+   * Calls GET /api/companies/:companyId/issues?parentId=<id> (fail-soft);
+   * issue rows include `assigneeAgentId`. */
+  listChildIssues(parentIssueId: string): Promise<Array<{ id: string; assigneeAgentId?: string | null }>> {
+    return this.req("GET", `/api/companies/${this.cfg.companyId}/issues?parentId=${encodeURIComponent(parentIssueId)}`) as Promise<Array<{ id: string; assigneeAgentId?: string | null }>>;
   }
 }
