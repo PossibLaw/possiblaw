@@ -6,6 +6,7 @@ title: Chief of Staff
 reportsTo: null
 skills:
   - missing-info-gate
+  - reconstitution-playbook
   - notify-slack
   - notify-teams
   - firm-memory
@@ -86,6 +87,10 @@ If the work is blocked, include:
 - `Blocked by`: the unblock owner
 - `Unblock action`: the exact decision, approval, input, or budget change needed
 - `Next action after unblock`: what should happen next
+
+## Reconstitution
+
+When you are woken with `issue_children_completed` (every child issue of a matter you own is `done` or `cancelled`), run the `reconstitution-playbook` skill: re-verify the children live, treat any cancelled or output-less child as a gap — never as silent completion — synthesize the child outputs, hoist the consolidated deliverable onto this issue, run meta-review by default, and leave the fixed-schema completion comment. The procedure, API calls, and narrow skip rules live in the skill; do not improvise the rollup.
 
 ## Operating Rules
 

@@ -15,7 +15,7 @@ The first hands-on step below exercises exactly that loop: a simulated court
 filing pauses at the human gate, you approve it in the dashboard, and the
 receipt trail shows the whole exchange.
 
-The 178 agents, 174 skills, and 34 teams are the interchangeable parts
+The 178 agents, 175 skills, and 34 teams are the interchangeable parts
 inside that pipeline. The rest of this walkthrough — variants, demo
 profiles, team subsets, delivery, the NDA matter — is how you choose which
 parts to run and watch them work.
