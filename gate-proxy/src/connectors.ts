@@ -144,10 +144,31 @@ function makeUploadDocument(env: PerformerEnv, fetchImpl: typeof fetch): Perform
       }
       const name = p["name"] as string;
       const content = p["content"] as string;
+      const folderId = p["folderId"];
+
+      // Optional folder placement: when the delivery playbook supplies a
+      // destination folderId, the file is created inside it (Drive `parents`);
+      // absent → lands in My Drive root (backward compatible).
+      // folderId is an OPAQUE vendor id — validate fail-closed: non-empty string
+      // with no '/', whitespace, or control chars (path-traversal / injection
+      // guard). The static error message never echoes the supplied value.
+      let parents: string[] | undefined;
+      if (folderId !== undefined) {
+        if (
+          typeof folderId !== "string" ||
+          folderId.length === 0 ||
+          /[/\s\u0000-\u001f\u007f]/.test(folderId)
+        ) {
+          throw new PerformerError(
+            "invalid_payload: folderId must be a non-empty vendor id with no path, whitespace, or control characters",
+          );
+        }
+        parents = [folderId];
+      }
 
       // minor: random boundary per call (crypto.randomUUID); check content doesn't contain it
       const boundary = crypto.randomUUID().replace(/-/g, "");
-      const metadata = JSON.stringify({ name });
+      const metadata = JSON.stringify(parents ? { name, parents } : { name });
       if (content.includes(boundary)) {
         // Astronomically unlikely but guard per spec
         throw new PerformerError("invalid_payload: content conflicts with multipart boundary");
@@ -165,7 +186,7 @@ function makeUploadDocument(env: PerformerEnv, fetchImpl: typeof fetch): Perform
       ].join("\r\n");
 
       const res = await fetchImpl(
-        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink",
         {
           method: "POST",
           headers: {
@@ -177,7 +198,14 @@ function makeUploadDocument(env: PerformerEnv, fetchImpl: typeof fetch): Perform
       );
       assertOk(res, "gdrive");
       const data = (await res.json()) as Record<string, unknown>;
-      return { id: data["id"] };
+      // Finding 1: without an explicit `fields` query param, Drive's create
+      // response omits webViewLink by default — the delivery link would never
+      // exist end-to-end for the primary vendor. webUrl is included only when
+      // the vendor actually returned a string (defensive per the ReceiptBody
+      // contract downstream: never assign an undefined/non-string webUrl).
+      const result: Record<string, unknown> = { id: data["id"] };
+      if (typeof data["webViewLink"] === "string") result["webUrl"] = data["webViewLink"];
+      return result;
     }
 
     if (destination === "notion") {

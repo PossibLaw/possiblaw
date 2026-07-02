@@ -71,6 +71,16 @@ const MAX_PROVENANCE_SEGMENTS = 500;
 function noop(_line: string): void { /* intentional no-op */ }
 
 /**
+ * Bounded, single-line audit string (no payload text) — citation/source/url/
+ * delivery fields. Hoisted to module scope (shared by createGateServer's
+ * /quality/authority validation and performAndReceipt's delivery gating below)
+ * so both call sites enforce the same bounded-length + no-CR/LF contract.
+ */
+function isSafeAuthorityString(v: unknown, max: number): boolean {
+  return typeof v === "string" && v.length >= 1 && v.length <= max && !/[\r\n]/.test(v);
+}
+
+/**
  * C2: readBody with:
  *   - body-size cap (I2 a): resolves with null + sets the limitExceeded flag when
  *     > MAX_BODY_BYTES are received (caller responds 413).
@@ -179,6 +189,28 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
     if (dataTermsTier !== undefined) receiptMeta["dataTermsTier"] = dataTermsTier;
     if (deanonymizeMap) receiptMeta["maskedTokenCount"] = Object.keys(deanonymizeMap).length;
 
+    // Task 4.5: thread the delivered-artifact link onto the egress receipt so the
+    // Matter Trust Report can point at WHERE the work product landed. Only on a
+    // performed upload_document, and only an explicit whitelist of result fields
+    // (vendor file id + webUrl) — these are delivery METADATA, never payload text
+    // (per the ReceiptBody contract). Never set on blocked/pending/error (those
+    // paths never reach this success branch).
+    //
+    // Each field is additionally gated through isSafeAuthorityString (bounded
+    // length + no CR/LF) before entering the hash-chained receipt — an
+    // unbounded or CRLF-carrying vendor response must not bloat or corrupt the
+    // ledger. A field that fails the check is silently omitted from delivery;
+    // this NEVER fails the egress itself (the upload already happened), it
+    // just means the receipt carries less delivery metadata.
+    if (tool === "upload_document") {
+      const delivery: Record<string, unknown> = {};
+      const vendor = egressReq.payload["destination"];
+      if (typeof vendor === "string" && isSafeAuthorityString(vendor, 64)) delivery["vendor"] = vendor;
+      if (typeof result["id"] === "string" && isSafeAuthorityString(result["id"], 512)) delivery["fileId"] = result["id"];
+      if (typeof result["webUrl"] === "string" && isSafeAuthorityString(result["webUrl"], 2048)) delivery["webUrl"] = result["webUrl"];
+      if (Object.keys(delivery).length > 0) receiptMeta["delivery"] = delivery;
+    }
+
     receipts.append({
       kind: "egress",
       tool,
@@ -226,9 +258,8 @@ export function createGateServer(deps: GateServerDeps): http.Server {
   const { policy, receipts, client, performers, localModelAvailable } = deps;
   const log = deps.log ?? noop;
   const SAFE_SHA_RE = /^[0-9a-f]{64}$/;
-  /** Bounded, single-line audit string (no payload text) — citation/source/url. */
-  const isSafeAuthorityString = (v: unknown, max: number): boolean =>
-    typeof v === "string" && v.length >= 1 && v.length <= max && !/[\r\n]/.test(v);
+  // isSafeAuthorityString is hoisted to module scope above (shared with
+  // performAndReceipt's delivery-field gating).
 
   // POST /receipts/facade (firm-facade audit channel) — hoisted to closure scope
   // so they are allocated once per server, not per request.

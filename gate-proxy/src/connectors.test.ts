@@ -204,6 +204,12 @@ describe("upload_document", () => {
     );
     assert.equal(req.method, "POST");
     assert.equal(req.headers["authorization"], "Bearer gdrive-tok");
+    // Finding 1: request the webViewLink field so the delivery link exists
+    // end-to-end — without this, Drive's default response omits it.
+    assert.ok(
+      req.url.includes("fields=id,webViewLink"),
+      `upload URL must request id,webViewLink fields; got: ${req.url}`,
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -264,6 +270,106 @@ describe("upload_document", () => {
       },
     );
     assert.equal(captured.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 4.3a — gdrive folder placement via optional folderId → parents
+// ---------------------------------------------------------------------------
+
+describe("upload_document gdrive folderId (parents placement)", () => {
+  // Happy: folderId present → multipart metadata carries parents:[folderId]
+  it("gdrive with folderId → metadata part contains \"parents\":[folderId]; upload proceeds", async () => {
+    // Finding 1: mock a real-gdrive-shaped response (id + webViewLink, as Drive
+    // returns once `fields=id,webViewLink` is requested) so this test covers the
+    // end-to-end webUrl contract, not just the id.
+    const webUrl = "https://drive.google.com/file/d/gdrive-file-2/view";
+    const { fetchImpl, captured } = makeFakeFetch(200, { id: "gdrive-file-2", webViewLink: webUrl });
+    const performers = buildPerformers({ GDRIVE_ACCESS_TOKEN: "gdrive-tok" }, fetchImpl);
+    const result = await performers["upload_document"](
+      {
+        tool: "upload_document",
+        payload: { destination: "gdrive", name: "doc.txt", content: "file content", folderId: "abc123" },
+        meta: {},
+      },
+      {},
+    );
+
+    assert.equal(captured.length, 1, "upload must proceed (fetch called once)");
+    const req = captured[0];
+    assert.ok(
+      req.body!.includes('"parents":["abc123"]'),
+      `multipart body must contain parents:[folderId]; got: ${req.body}`,
+    );
+    assert.deepEqual(result, { id: "gdrive-file-2", webUrl });
+  });
+
+  // Edge: no folderId → metadata is {name} exactly (no parents) — backward compatible
+  it("gdrive without folderId → metadata is {name} exactly, no parents key", async () => {
+    const { fetchImpl, captured } = makeFakeFetch(200, { id: "gdrive-file-3" });
+    const performers = buildPerformers({ GDRIVE_ACCESS_TOKEN: "gdrive-tok" }, fetchImpl);
+    await performers["upload_document"](
+      {
+        tool: "upload_document",
+        payload: { destination: "gdrive", name: "doc.txt", content: "file content" },
+        meta: {},
+      },
+      {},
+    );
+
+    assert.equal(captured.length, 1);
+    const req = captured[0];
+    assert.ok(!req.body!.includes("parents"), `metadata must not contain parents when folderId absent; got: ${req.body}`);
+    assert.ok(req.body!.includes('{"name":"doc.txt"}'), `metadata must be {name} exactly; got: ${req.body}`);
+  });
+
+  // Failure/security: folderId with traversal / whitespace / control chars → invalid_payload, fetch NOT called
+  it("gdrive with path-traversal folderId → invalid_payload, fetch NOT called, value not echoed", async () => {
+    const { fetchImpl, captured } = makeFakeFetch(200, { id: "x" });
+    const performers = buildPerformers({ GDRIVE_ACCESS_TOKEN: "gdrive-tok" }, fetchImpl);
+    const badFolder = "../../etc";
+    await assert.rejects(
+      () =>
+        performers["upload_document"](
+          {
+            tool: "upload_document",
+            payload: { destination: "gdrive", name: "doc.txt", content: "c", folderId: badFolder },
+            meta: {},
+          },
+          {},
+        ),
+      (err: unknown) => {
+        assert.ok(err instanceof PerformerError);
+        assert.ok(err.message.includes("invalid_payload"), `message should be invalid_payload; got: ${(err as Error).message}`);
+        assert.ok(!err.message.includes(badFolder), `error must not echo folderId value; got: ${(err as Error).message}`);
+        return true;
+      },
+    );
+    assert.equal(captured.length, 0, "fetch must NOT be called on invalid folderId");
+  });
+
+  it("gdrive with whitespace/control-char/empty folderId → invalid_payload, fetch NOT called", async () => {
+    for (const bad of ["has space", "tab\tid", "line\nid", "ctrl\u0001id", ""]) {
+      const { fetchImpl, captured } = makeFakeFetch(200, {});
+      const performers = buildPerformers({ GDRIVE_ACCESS_TOKEN: "gdrive-tok" }, fetchImpl);
+      await assert.rejects(
+        () =>
+          performers["upload_document"](
+            {
+              tool: "upload_document",
+              payload: { destination: "gdrive", name: "doc.txt", content: "c", folderId: bad },
+              meta: {},
+            },
+            {},
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof PerformerError, `should be PerformerError for folderId=${JSON.stringify(bad)}`);
+          assert.ok(err.message.includes("invalid_payload"));
+          return true;
+        },
+      );
+      assert.equal(captured.length, 0, `fetch must NOT be called for folderId=${JSON.stringify(bad)}`);
+    }
   });
 });
 
