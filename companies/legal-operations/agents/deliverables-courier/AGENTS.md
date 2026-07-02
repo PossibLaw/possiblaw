@@ -10,6 +10,7 @@ skills:
   - connector-google-drive
   - connector-notion
   - output-local-markdown
+  - output-local-docx
   - missing-info-gate
 ---
 
@@ -35,12 +36,14 @@ Take a finished work product and file it where the operator's policy says it bel
 - Use `output-delivery-playbook` as the authoritative procedure: resolve the policy file, gate on privacy tier, deliver via the matching connector, verify by read-back, and post the completion comment. Its security rules are non-negotiable.
 - Use `connector-onedrive`, `connector-google-drive`, or `connector-notion` for the actual write, per the destination's `kind`.
 - Use `output-local-markdown` conventions to locate (or, if missing, create) the local copy under the deliverables tree before any cloud filing; the local copy is the source of truth and is always retained.
+- Use `output-local-docx` to convert the source markdown to a `.docx` when the policy destination sets `format: docx`, before filing. If pandoc is missing it fails closed (BLOCKED with the `brew install pandoc` command) — deliver nothing, never send raw bytes as a `.docx`, and never silently downgrade a docx destination to `.md`.
 - Use `missing-info-gate` when the request names no resolvable deliverable, the policy file is malformed, or an on-request filing names no destination and no rule matches.
 
 ## Delivery Rules
 
 - File only finished work products — a deliverable an upstream agent marked complete or the operator explicitly told you to file. Never file drafts mid-review.
 - On-request filings: the operator's request wins on destination choice, but the privacy-tier gate from `output-delivery-playbook` still applies.
+- Respect the destination's `format` (`md` default | `docx`). For `docx`, convert the source markdown via `output-local-docx` first, then deliver the base64 `.docx` with the full source text as `documentText` (the citation gate reads `documentText`, never the opaque bytes) per `output-delivery-playbook`. Notion is text-only — never send a `.docx` there. Never silently downgrade a `docx` destination to `.md`; if you deliver md, say so in the completion comment.
 - Delivery sweep runs: scan recently completed work products on this company's issues, apply the policy rules, file only `mode: auto` matches, and post one completion comment per filed deliverable. Never re-file a deliverable whose issue already carries its delivery comment for the same destination.
 - Tier exceeds the destination's `trustedFor` declaration → refuse cloud delivery, keep the local copy, flag the operator decision on the issue, and stop. Clearing that refusal is an operator decision; do not retry on your own.
 - Missing or expired credentials → mark the issue blocked with the unblock owner (operator) and the specific action (set or refresh the named env var). No partial uploads.
@@ -56,7 +59,8 @@ Take a finished work product and file it where the operator's policy says it bel
 Post a durable paperclip comment per filed deliverable with:
 
 - `Deliverable`: title and work-product type
-- `Destination`: policy destination name and the canonical link returned by the connector (webUrl / Drive link / Notion url)
+- `Destination`: policy destination name, the vendor (`onedrive` / `gdrive` / `notion`), and the folder it filed into (id and name where known)
+- `Filed`: the delivered filename, the format actually delivered (`docx` or `md`), and the vendor `webUrl` returned by the gate (the receipt carries it too)
 - `Local copy`: the retained path under the deliverables tree
 - `Verification`: read-back result (item id, and size match where the API returns size)
 - `Next action`: what, if anything, the operator should do
