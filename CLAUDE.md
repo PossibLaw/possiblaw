@@ -89,8 +89,8 @@ When resuming prior work, read `${REPO_ROOT}/.claude/history.md` first.
 `pnpm -C paperclip install` - Install the paperclip submodule's dependencies (the only pnpm usage left).
 `pnpm -C deadline-engine test` - Run the deadline-engine node:test suite (35 tests: FRCP Rule 6 forward/backward, mail +3, federal holidays, business-day roll, invalid-days guard, multi-TZ UTC guard).
 `pnpm -C learning-loop test` - Run the learning-loop node:test suite (45 tests: sanitizer, ledger, memory, recurrence, remember-parser, store, CLI, manifest, diff, proposals).
-`pnpm -C mcp-servers/firm-facade test` - Run the firm-facade node:test suite (129 tests: catalog, paperclip-client, hash, handlers, policy, deeplink, receipts, server).
-`pnpm -C orchestration-eval test` - Run the orchestration-eval node:test suite (32 tests: paperclip-client, extract, await-completion, runner, judge, report, index).
+`pnpm -C mcp-servers/firm-facade test` - Run the firm-facade node:test suite (137 tests: catalog, paperclip-client, hash, handlers, policy, deeplink, receipts, server).
+`pnpm -C orchestration-eval test` - Run the orchestration-eval node:test suite (61 tests: paperclip-client, agent-resolver, extract, await-completion, runner, judge, report, index).
 `git submodule update --init harvey-lab` - Initialize the pinned Harvey LAB dataset submodule (not auto-initialized by the launcher).
 
 Run the launcher dry-run + helper self-tests before handoff. Expected dry-run plan summary: 0 warnings, 0 errors.
