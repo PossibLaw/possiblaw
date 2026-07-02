@@ -15,7 +15,7 @@ The first hands-on step below exercises exactly that loop: a simulated court
 filing pauses at the human gate, you approve it in the dashboard, and the
 receipt trail shows the whole exchange.
 
-The 178 agents, 176 skills, and 34 teams are the interchangeable parts
+The 179 agents, 178 skills, and 34 teams are the interchangeable parts
 inside that pipeline. The rest of this walkthrough — variants, demo
 profiles, team subsets, delivery, the NDA matter — is how you choose which
 parts to run and watch them work.
@@ -111,7 +111,7 @@ To preview only (no DB writes):
 
 ```bash
 ./bin/possiblaw --variant codex --dry-run --non-interactive --yes
-# preview: agents=178 skills=174 projects=3 issues=3 warnings=0 errors=0
+# preview: agents=179 skills=178 projects=3 issues=3 warnings=0 errors=0
 ```
 
 Common flags:
@@ -295,7 +295,7 @@ the demo data is fictional.
 ### Team subset import (`--teams`)
 
 The catalog is the menu — import what your firm or in-house team practices. By
-default the launcher imports all 178 agents; `--teams` imports only the named
+default the launcher imports all 179 agents; `--teams` imports only the named
 teams:
 
 ```bash
@@ -431,6 +431,7 @@ and verify operations; must be scoped read-only):
 | `MS_GRAPH_READ_TOKEN` | agents | OneDrive / SharePoint read and verify (read-only scope; must not carry write permissions) |
 | `GDRIVE_READ_TOKEN` | agents | Google Drive read and list (read-only scope; must not carry write permissions) |
 | `NOTION_READ_KEY` | agents | Notion search, query, and page fetch (read-only scope; must not carry write permissions) |
+| `GMAIL_ACCESS_TOKEN` / `OUTLOOK_ACCESS_TOKEN` | agents (correspondence-clerk) | Mailbox read + draft for inbound triage. **Scope caution:** `gmail.compose` is send-capable at the scope level — provision read/draft-only and never grant `gmail.send` / `Mail.Send`; all sends go through the gate proxy's `GMAIL_TOKEN` |
 | `GATE_POLLER_INTERVAL_MS` | proxy | Rejection-poller cadence in milliseconds (default 30000) |
 
 Operational notes:

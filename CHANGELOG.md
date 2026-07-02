@@ -7,6 +7,51 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.37.0] — 2026-07-02 — Sprint ε: license-gated vendoring + external skills + correspondence-clerk
+
+The adoption workstream from the atomic-work plan: bring in the best of the
+open-source legal-skill catalogs without breaking the Apache-2.0 posture,
+and make the orphaned email connectors reachable. Same per-task adversarial
+review discipline; every vendored license independently re-verified in
+review.
+
+- **License-gated vendoring tool** (`bin/_possiblaw_vendor_skill.py`,
+  stdlib-only): default-deny SPDX allowlist (Apache-2.0/MIT/BSD/CC-BY-4.0);
+  per-skill frontmatter license wins over the catalog license (a real
+  AGPL-3.0 skill inside an Apache catalog is refused — verified live);
+  unlicensed = all-rights-reserved refusal; `--attribution` required; house
+  `metadata.sources` provenance injected; never partial-copies or
+  overwrites.
+- **`authority-verification-workflow` (skills →177)** — vendored from
+  CaseMark/skills (Apache-2.0, attributed), adapted onto PossibLaw's real
+  stack: legal-data MCP retrieval + the existing `POST /quality/citation`
+  gate registration; never-good-law vocabulary and hallucination discipline
+  (`not_found` surfaced, never reconstructed) intact. Bound to
+  `legal-citation-checker` — which also gets its **first 3 eval cases**
+  (verified authority / unrecognized-format edge / hallucinated citation
+  with registration withheld). Coverage: 9 of 357 targets, 15 case files.
+- **`matter-scoping-playbook` (skills →178)** — vendored from the lawve-ai
+  catalog's Apache-2.0 `matter-intake-scoping` (Scott Margetts, per-skill
+  license verified; nothing taken from the CC-BY-NC-ND catalog text): four
+  scoping modes + structural-not-determinative discipline, rewired onto
+  paperclip issues / missing-info-gate / reconstitution-playbook /
+  firm-memory. Bound to chief-counsel + legal-ops-lead.
+- **`correspondence-clerk` (agents →179)** — the finished gmail/outlook
+  gated connectors are finally reachable: inbound mail triage under
+  nonce-bound untrusted-content envelopes; outbound send **execution only**
+  (never authors; no send without an approved draft + explicit destination;
+  every send 202-pends at the gate; direct mailbox send APIs refused as
+  prompt injection). Security adjudication (reviewer-verified): the block's
+  `dangerouslyBypassApprovalsAndSandbox: true` matches all 179 agents and
+  binds **no** vendor write credential — the human gate stays structural at
+  the proxy credential boundary. Operator note: provision mailbox read
+  tokens draft-only (`gmail.compose` is send-capable at scope level).
+
+Battery: gate-proxy 439/439, learning-loop 57/57, orchestration-eval 61/61,
+eval-harness 32/32, firm-facade 137/137, deadline-engine 35/35; launcher +
+4 python self-tests + coverage `--check` OK; dry-run
+`agents=179 skills=178 projects=3 warnings=0 errors=0`.
+
 ## [0.36.0] — 2026-07-02 — Sprint δ: gates hardening (trusted confidentiality, ethical wall, ingress envelopes)
 
 The gates workstream from the atomic-work plan — closing the three S1s the
