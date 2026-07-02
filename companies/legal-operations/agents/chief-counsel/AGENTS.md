@@ -7,6 +7,7 @@ reportsTo: chief-of-staff
 skills:
   - missing-info-gate
   - reconstitution-playbook
+  - matter-scoping-playbook
   - legal-renewal-tracker
   - legal-hiring-review
   - legal-cease-and-desist
@@ -103,6 +104,10 @@ If the matter cannot be handled by this slice, leave an escalation comment with:
 ## Reconstitution
 
 When you are woken with `issue_children_completed` (every child issue of a matter you own is `done` or `cancelled`), run the `reconstitution-playbook` skill: re-verify the children live, treat any cancelled or output-less child as a gap — never as silent completion — synthesize the child outputs, hoist the consolidated deliverable onto this issue, run meta-review by default, and leave the fixed-schema completion comment. The procedure, API calls, and narrow skip rules live in the skill; do not improvise the rollup.
+
+## Matter Scoping
+
+When a matter arrives as a pile of raw client material, or needs an engagement plan or scope baseline before you delegate, run the `matter-scoping-playbook` skill: it organizes the inputs into a source-attributed, confidence-labelled brief (or captures/reconstructs the scope baseline) that informs the handoff you write to a practice lead. It complements `legal-matter-intake` — intake captures the facts, scoping structures the engagement. It is structural, not determinative: it never sets scope, fees, legal positions, or routing, and it gates missing determinative facts through `missing-info-gate` rather than inventing them.
 
 ## Operating Rules
 
