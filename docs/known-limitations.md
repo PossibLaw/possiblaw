@@ -141,20 +141,27 @@ Westlaw, midpage, iManage (upload), and NetDocuments (upload) are flagged
 `UNCONFIRMED` and need operator verification against current vendor docs
 before live use.
 
-### Delivery ships Markdown, not DOCX (v1)
+### DOCX delivery: residual limits (binary egress shipped in 0.35.0)
 
-`deliverables-courier`'s cloud filing path (`output-delivery-playbook` →
-`connector-onedrive` / `connector-google-drive` → the gate proxy's
-`upload_document` egress tool) sends the deliverable as a **text content
-string** — the connector payload reads the local file with `cat` and embeds
-it as a JSON `content` field; the gate's payload schema has no binary/base64
-field. A locally generated DOCX (via `output-local-docx` + pandoc — see
-`docs/operator-walkthrough.md` → "Runtime troubleshooting") is not what gets
-filed to OneDrive/Google Drive/Notion; only the Markdown/plain-text
-deliverable is. Binary upload through the gate — DOCX or PDF, verbatim — is
-not yet supported. See also "Box connector and native Google Docs export are
-deferred" under Skill-improvement loop for the matching limitation on the
-read/diff side of the learning loop.
+`upload_document` now accepts a binary body (`contentBase64` + a REQUIRED
+`documentText` plain-text companion + `mimeType` inferred from the `name`
+extension), and `output-delivery-playbook` files a pandoc-converted `.docx`
+when the delivery policy sets `format: docx` — so a real Word file reaches
+OneDrive/Google Drive. The remaining limits:
+
+- **The citation gate reads `documentText`, not the bytes.** The proxy cannot
+  decode a DOCX; the courier is instructed (and audited via the receipt sha)
+  to pass the full source markdown, but the text↔bytes correspondence is
+  workflow-enforced, not cryptographic.
+- **25 MB decoded cap** (`GATE_MAX_UPLOAD_BYTES` to override).
+- **Notion is text-only** — a binary payload to notion is refused fail-closed
+  (`502`, `error` naming `unsupported_binary_destination`); its text path is
+  chunked to the pages API limits.
+- **pandoc is a courier-host prerequisite** for `format: docx`; missing pandoc
+  blocks delivery (never a silent Markdown fallback).
+- Delivered `.docx` files are **not yet diffable** by the learning-loop sweep —
+  see "Box connector and native Google Docs export are deferred" under
+  Skill-improvement loop; that read/diff-side gap is now live, not moot.
 
 ## Legal-data MCP / research-query privacy
 
@@ -432,10 +439,13 @@ line-level plain-text diff with no DOCX or PDF text-extraction step. Genuine
 binary-document diffing needs a text-extraction stage that is not yet wired
 into the learning loop — a parse bridge exists, but only inside
 `orchestration-eval` (for scoring Harvey LAB deliverables), and it is not
-reused here. In practice this is moot for delivered files today anyway: see
-"Delivery ships Markdown, not DOCX (v1)" under Connectors — the delivery path
-itself cannot upload a binary DOCX/PDF, so nothing but text/Markdown reaches
-OneDrive or Google Drive through the courier to be diffed in the first place.
+reused here. As of 0.35.0 this gap is **live, not moot**: the delivery path
+CAN now file a real `.docx` to OneDrive/Google Drive (see "DOCX delivery:
+residual limits" under Connectors), so a lawyer's in-place edits to a
+delivered Word file are invisible to the sweep's text diff until DOCX text
+extraction is wired in. Firms that want the learn-from-edits loop today
+should deliver `format: md` (the default) for documents they expect to edit
+in place.
 
 Box connector support is not yet implemented — files delivered to Box are not
 tracked in the manifest and are invisible to the sweep. Native Google Docs
