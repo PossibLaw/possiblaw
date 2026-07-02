@@ -72,6 +72,13 @@ export interface GateServerDeps {
 const MAX_BODY_BYTES = 1_000_000;
 
 /** I1 (a): safe ID pattern — only alphanumeric + hyphen, 1–64 chars. */
+/** Receipts carry enums only: clamp the caller-supplied confidentiality
+ * string so arbitrary (attacker-steered) text never enters the hash chain. */
+function sanitizeClaimedConfidentiality(v: unknown): string {
+  if (v === undefined || v === null) return "unspecified";
+  return isConfidentiality(v) ? (v as string) : "invalid";
+}
+
 const SAFE_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
 
 /** I2 (c): entity list / per-entity caps — mirrored from anonymize.ts for server-level 400 guard. */
@@ -210,7 +217,7 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
   } = opts;
 
   // I5: claimedConfidentiality in every egress receipt meta
-  const claimedConfidentiality = meta.confidentiality ?? "unspecified";
+  const claimedConfidentiality = sanitizeClaimedConfidentiality(meta.confidentiality);
 
   const performer = performers[tool];
   try {
@@ -1290,7 +1297,7 @@ async function handleEgress(
         payloadSha256: sha256hex(rawBody),
         agentId: meta.agentId,
         issueId: meta.issueId,
-        meta: { error: errorCode, claimedConfidentiality: meta.confidentiality ?? "unspecified" },
+        meta: { error: errorCode, claimedConfidentiality: sanitizeClaimedConfidentiality(meta.confidentiality) },
       });
       sendJson(res, status, { error: message });
     };
@@ -1382,7 +1389,7 @@ async function handleEgress(
   // I5: claimedConfidentiality in every egress receipt meta (what the caller
   // SENT); effectiveConfidentiality + confidentialityFloorApplied record what
   // the gate actually enforced, only when they differ from the claim.
-  const claimedConfidentiality = meta.confidentiality ?? "unspecified";
+  const claimedConfidentiality = sanitizeClaimedConfidentiality(meta.confidentiality);
   const confidentialityAudit: Record<string, unknown> = {};
   if (effectiveConfidentiality !== undefined && effectiveConfidentiality !== meta.confidentiality) {
     confidentialityAudit["effectiveConfidentiality"] = effectiveConfidentiality;

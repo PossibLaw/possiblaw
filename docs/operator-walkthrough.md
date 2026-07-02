@@ -15,7 +15,7 @@ The first hands-on step below exercises exactly that loop: a simulated court
 filing pauses at the human gate, you approve it in the dashboard, and the
 receipt trail shows the whole exchange.
 
-The 178 agents, 175 skills, and 34 teams are the interchangeable parts
+The 178 agents, 176 skills, and 34 teams are the interchangeable parts
 inside that pipeline. The rest of this walkthrough — variants, demo
 profiles, team subsets, delivery, the NDA matter — is how you choose which
 parts to run and watch them work.
@@ -695,7 +695,11 @@ style preferences do not apply.
    `--business <slug>`, the approved lessons in `businesses/<slug>/memory/`
    are overlaid into the `firm-memory` skill, which ships empty in the stock
    package. Every agent that references `firm-memory` will apply those
-   standing instructions to all subsequent matters.
+   standing instructions to all subsequent matters. Two preconditions
+   (0.36.0): `pnpm -C learning-loop install` must have been run, and the
+   memory file must pass the ethical-wall screen — the screen fails closed,
+   so a missing install or a failing file means the overlay is SKIPPED with
+   a warning and the launch continues without firm memory.
 
 ### The `--business` flag
 

@@ -275,6 +275,26 @@ call the board or a vendor directly. Production deployments with auth
 enabled (export `PAPERCLIP_GATE_API_KEY`, minted via `paperclipai auth
 login`) get the structural gate as well.
 
+### Matter-classification floor (v1)
+
+`POST /matters/classification` registers a matter's confidentiality tier as a
+raise-only floor; at egress the gate applies `max(floor, per-request claim)`.
+Honest limits:
+
+- **The floor binds registered matters only.** A request that claims
+  `standard` on an *unregistered* matter (or omits `issueId`) passes exactly
+  as before. The fail-closed `unspecifiedConfidentialityDefault` covers only
+  unlabeled `query_external_model` traffic. Registering the floor at intake
+  (see `legal-matter-intake`) is what makes the guarantee bind.
+- **The registration route is loopback-only but unauthenticated.** Raise-only
+  merge means a hostile registration can never *lower* a floor — the worst
+  case is an unwanted raise (availability, fail-closed direction) — and every
+  registration attempt is hash-chain receipted. Route auth plus an opt-in
+  strict registered-matters-only mode are the follow-up hardening pass.
+- **Raise-only is irreversible by design.** A mistaken over-registration
+  cannot be lowered; re-import into a fresh data dir if a floor was set in
+  error.
+
 ### Receipt chain assumes a single writer
 
 The hash-chained receipts file (`receipts.jsonl`) is append-only under a
@@ -433,7 +453,11 @@ When a lawyer approves a firm-memory lesson, the `learning-scribe` writes it
 into `businesses/<slug>/memory/firm-memory.md` and re-renders the skill body.
 Running agents do **not** pick up the new content immediately. They receive
 the updated memory on the next `./bin/possiblaw --business <slug>` launch,
-which re-imports the firm-memory skill body from disk.
+which re-imports the firm-memory skill body from disk. As of 0.36.0 the
+overlay is also gated by the ethical-wall screen (`learn check-memory`),
+fail-closed: if `learning-loop` deps are not installed, or the memory file
+fails the screen, the overlay is SKIPPED with a warning and the launch
+proceeds without firm memory.
 
 The reason is a Paperclip API constraint: the `install-update` endpoint 422s
 when `sourceLocator` is null (i.e., for a locally-stored skill), and fires no

@@ -364,7 +364,8 @@ describe("unspecified-confidentiality fail-closed default (query_external_model)
   });
 
   it("security: an unrecognized confidentiality value is treated as unspecified (fail-closed)", async () => {
-    const receipts = new ReceiptChain(path.join(tmpDir(), "r.jsonl"));
+    const receiptsPath = path.join(tmpDir(), "r.jsonl");
+    const receipts = new ReceiptChain(receiptsPath);
     let called = 0;
     const performers: PerformerRegistry = {
       query_external_model: (async () => { called++; return {}; }) as Performer,
@@ -380,6 +381,11 @@ describe("unspecified-confidentiality fail-closed default (query_external_model)
 
     assert.equal(status, 403);
     assert.equal(called, 0);
+
+    // Receipts carry enums only: the raw invalid string must never enter the chain.
+    const raw = fs.readFileSync(receiptsPath, "utf8");
+    assert.ok(!raw.includes("totally-not-a-tier"));
+    assert.ok(raw.includes('"claimedConfidentiality":"invalid"'));
 
     await close();
   });

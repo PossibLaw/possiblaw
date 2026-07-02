@@ -26,6 +26,13 @@ Use this skill before drafting or routing a new legal matter. Capture what is kn
 8. Conflicts seed data: all party names, affiliates, counsel, and related matter names needed for conflicts screening.
 9. Related documents: existing drafts, templates, prior agreements, emails, term sheets, or instructions.
 10. Confidentiality level: client-confidential, internal, public, or otherwise restricted.
+    Once captured, register it as the matter's floor with the gate proxy so a later
+    mislabeled request cannot downgrade it (raise-only; at egress the gate applies
+    `max(registered floor, per-request claim)`):
+    `curl -sS -X POST "$GATE_PROXY_URL/matters/classification" -H 'Content-Type: application/json' -d '{"issueId":"<matter issue id>","tier":"<standard|confidential|privileged>"}'`
+    Map client-confidential → `confidential`, privileged/attorney-client material →
+    `privileged`, public/internal → `standard`. Registration is one-time per matter
+    and cannot be lowered afterward — when in doubt, register the higher tier.
 11. Special instructions: formatting, house style, required clauses, excluded clauses, or approval workflow.
 12. Responsible professional: supervising lawyer, partner, operator, or other reviewer responsible for the matter.
 13. Missing information: list absent facts, distinguish defaults from blockers, and flag any fact that must be confirmed before drafting.

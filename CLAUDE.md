@@ -104,7 +104,7 @@ Run the launcher dry-run + helper self-tests before handoff. Expected dry-run pl
 
 ## Code Map
 - Entry point: `bin/possiblaw` (bash launcher).
-- Package root: `companies/legal-operations/` — 178 agents under `agents/`, 175 skills under `skills/`, 3 projects under `projects/`, eval convention under `evals/`, `variants.yaml`, `.paperclip.yaml`.
+- Package root: `companies/legal-operations/` — 178 agents under `agents/`, 176 skills under `skills/`, 3 projects under `projects/`, eval convention under `evals/`, `variants.yaml`, `.paperclip.yaml`.
 - Org chart: chief-of-staff (orchestrator), chief-counsel, 34 leads (28 legal practices: commercial, employment, ip, privacy, litigation, corporate, regulatory, research, tax, real-estate, ma, banking-finance, securities, restructuring, immigration, healthcare, antitrust, trade-compliance, insurance, construction, govcon, environmental, estates, family-law, investigations, ai-governance, advertising, benefits; 6 business functions: bd, ops, finance, marketing, admin, legal-ops), plus 141 specialists (incl. meta-reviewers risk-spotter/debate-judge/reconciler, capability-builder — operator-review gated, and skill-improvement-scribe). Each lead's AGENTS.md routing table is the authoritative specialist list; the full catalog is `docs/agent-catalog.md`.
 - Historical source material: `layer/` (agents, skills, workflows, connector YAML, eval datasets) — convert into the package, don't extend.
 - Docs: `docs/operator-walkthrough.md` (canonical getting-started), `docs/paperclip-package.md`, `docs/known-limitations.md`, `docs/ARCHITECTURE.md` (decision log).
