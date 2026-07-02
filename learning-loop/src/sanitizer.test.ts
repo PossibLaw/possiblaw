@@ -30,3 +30,34 @@ test("a short party-name acronym fails closed", () => {
   assert.equal(r.ok, false);
   assert.ok(r.violations.some((v) => v.startsWith("entity")));
 });
+
+// --- Fuzzy floor (Fix 5): case-insensitive already via norm(); add possessive/plural ---
+
+test("a plural form of a multi-word party token fails closed", () => {
+  // Substring path can't catch this (full phrase absent); token path must.
+  const r = sanitizeLesson("Acmes shipped the redlines yesterday.", ["Acme Corp"]);
+  assert.equal(r.ok, false);
+  assert.ok(r.violations.some((v) => v.startsWith("entity")));
+});
+
+test("a possessive form of a party token fails closed (straight and curly apostrophe)", () => {
+  const straight = sanitizeLesson("Acme's preferred term is two years.", ["Acme Corp"]);
+  assert.equal(straight.ok, false);
+  assert.ok(straight.violations.some((v) => v.startsWith("entity")));
+  const curly = sanitizeLesson("Acme’s preferred term is two years.", ["Acme Corp"]);
+  assert.equal(curly.ok, false);
+  assert.ok(curly.violations.some((v) => v.startsWith("entity")));
+});
+
+test("uppercase party token still fails closed (case folding)", () => {
+  const r = sanitizeLesson("ACME wanted a carve-out.", ["Acme Corp"]);
+  assert.equal(r.ok, false);
+  assert.ok(r.violations.some((v) => v.startsWith("entity")));
+});
+
+test("fuzzy floor does not over-match an unrelated longer word", () => {
+  // "academy" must NOT trip the "acme" token — word boundary preserved.
+  const r = sanitizeLesson("The academy shipped a template revision.", ["Acme Corp"]);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.violations, []);
+});

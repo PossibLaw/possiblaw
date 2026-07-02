@@ -10,6 +10,19 @@ export function nextLessonId(existing: Lesson[], dateStr: string): string {
   return `${prefix}${String(next).padStart(3, "0")}`;
 }
 
+// Union of every matter-party entity recorded anywhere in the ledger. Used by
+// the continuous ethical wall: an entity introduced by a later proposal must
+// also block acceptance/rendering of an older lesson that names it.
+export function ledgerEntities(lessons: Lesson[]): string[] {
+  const seen: string[] = [];
+  for (const l of lessons) {
+    for (const e of l.entities ?? []) {
+      if (e && !seen.includes(e)) seen.push(e);
+    }
+  }
+  return seen;
+}
+
 export function serializeLedger(lessons: Lesson[]): string {
   return lessons.map((l) => JSON.stringify(l)).join("\n") + (lessons.length ? "\n" : "");
 }

@@ -30,3 +30,27 @@ test("renderHotMemory enforces the line cap and overflows the rest", () => {
 test("normalizeText collapses whitespace and case", () => {
   assert.equal(normalizeText("  Foo   BAR "), "foo bar");
 });
+
+// --- Render-time ethical wall (Fix 2) ---
+
+test("renderHotMemory excludes a now-contaminated lesson and flags it visibly", () => {
+  // Lesson A was clean when accepted (no entity in scope then).
+  const a = mk("01", "Zenith prefers arbitration in New York.");
+  // Lesson B (added later) introduces the entity into the ledger's known set.
+  const b: Lesson = { ...mk("02", "Prefer arbitration clauses generally."), entities: ["Zenith Corp"] };
+  const { hot, overflow, excluded } = renderHotMemory([a, b]);
+  assert.equal(excluded.length, 1);
+  assert.equal(excluded[0].id, "01");
+  assert.ok(hot.includes("<!-- excluded: 1 lessons failed sanitization -->"));
+  assert.ok(!hot.includes("Zenith prefers"), "excluded lesson text must not leak into HOT body");
+  assert.ok(hot.includes("Prefer arbitration clauses"), "clean lesson still rendered");
+  assert.equal(overflow.length, 0);
+});
+
+test("renderHotMemory renders a clean lesson unchanged with no marker", () => {
+  const a: Lesson = { ...mk("01", "Cap indemnity at fees paid."), entities: ["Globex Corp"] };
+  const { hot, excluded } = renderHotMemory([a]);
+  assert.equal(excluded.length, 0);
+  assert.ok(!hot.includes("excluded:"));
+  assert.ok(hot.includes("Cap indemnity at fees paid."));
+});
