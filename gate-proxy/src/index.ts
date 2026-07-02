@@ -39,6 +39,11 @@ const localModelAvailable = typeof LOCAL_MODEL_URL === "string" && LOCAL_MODEL_U
 
 const POLLER_INTERVAL_MS = parseInt(process.env["GATE_POLLER_INTERVAL_MS"] ?? "30000", 10);
 
+// Task 4.1: decoded-size cap for contentBase64 binary uploads (default 25 MB).
+// createGateServer falls back to its default on NaN/non-positive values.
+const GATE_MAX_UPLOAD_BYTES = process.env["GATE_MAX_UPLOAD_BYTES"];
+const maxUploadBytes = GATE_MAX_UPLOAD_BYTES !== undefined ? parseInt(GATE_MAX_UPLOAD_BYTES, 10) : undefined;
+
 // ---------------------------------------------------------------------------
 // Build deps
 // ---------------------------------------------------------------------------
@@ -72,7 +77,17 @@ const log = (line: string): void => {
 // Start server
 // ---------------------------------------------------------------------------
 
-const server = createGateServer({ policy, receipts, client, performers, localModelAvailable, citationRegistry, authorityRegistry, log });
+const server = createGateServer({
+  policy,
+  receipts,
+  client,
+  performers,
+  localModelAvailable,
+  citationRegistry,
+  authorityRegistry,
+  log,
+  ...(maxUploadBytes !== undefined ? { maxUploadBytes } : {}),
+});
 
 server.listen(PORT, "127.0.0.1", () => {
   log(

@@ -201,7 +201,7 @@ rules:
      Path B.
    - `notion` → `{"parentPageId":"<database-or-page-id>"}`. Notion is
      TEXT-ONLY: use Path A. A `contentBase64` payload to notion is refused
-     `502 {reason:"unsupported_binary_destination"}` (Notion has no binary body
+     a `502` whose `error` names `unsupported_binary_destination` (Notion has no binary body
      upload here; the text is chunked into the page). Do not set `format: docx`
      on a notion destination.
 
@@ -232,7 +232,7 @@ rules:
    the operator must set `<VAR>` in the launcher environment (never agent
    env) and restart.
 
-   **502 `{reason:"unsupported_binary_destination"}`** — a `contentBase64`
+   **502 with `error` naming `unsupported_binary_destination`** — a `contentBase64`
    (docx) payload was sent to a destination with no binary body upload (Notion).
    Deliver that destination as `format: md` (Path A) or file the docx to a drive
    destination; do not retry the same binary payload.

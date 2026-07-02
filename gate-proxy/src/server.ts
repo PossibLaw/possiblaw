@@ -11,6 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import http from "node:http";
+import crypto from "node:crypto";
 import type { Policy } from "./policy.ts";
 import type { ReceiptChain, ReceiptBody, ReceiptOutcome } from "./receipts.ts";
 import { ReceiptChainCorruptError, sha256hex, canonicalJson } from "./receipts.ts";
@@ -29,6 +30,7 @@ import { assembleSignoffBundle, renderSignoffMarkdown } from "./quality/signoff.
 import { documentSha256, extractCitations } from "./citations.ts";
 import { extractDocumentText } from "./document-text.ts";
 import { buildProvenance } from "./provenance/provenance.ts";
+import { DEFAULT_MAX_UPLOAD_BYTES, decodeBase64Strict, isValidMimeType, resolveUploadMimeType } from "./upload.ts";
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -43,6 +45,12 @@ export interface GateServerDeps {
   citationRegistry: CitationRegistry;
   authorityRegistry: AuthorityRegistry;
   log?: (line: string) => void; // NEVER log payload text
+  /**
+   * Task 4.1: decoded-size cap (bytes) for contentBase64 binary uploads.
+   * Defaults to DEFAULT_MAX_UPLOAD_BYTES (25 MB); index.ts wires the
+   * GATE_MAX_UPLOAD_BYTES env override. Invalid values fall back to the default.
+   */
+  maxUploadBytes?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,10 +91,15 @@ function isSafeAuthorityString(v: unknown, max: number): boolean {
 /**
  * C2: readBody with:
  *   - body-size cap (I2 a): resolves with null + sets the limitExceeded flag when
- *     > MAX_BODY_BYTES are received (caller responds 413).
+ *     > maxBytes are received (caller responds 413). Defaults to MAX_BODY_BYTES;
+ *     upload_document egress passes a larger cap sized for base64 binary uploads
+ *     (Task 4.1) — every other endpoint keeps the 1 MB cap.
  *   - 'error' event handler for client aborts (C2 c).
  */
-function readBody(req: http.IncomingMessage): Promise<{ body: string; limitExceeded: boolean }> {
+function readBody(
+  req: http.IncomingMessage,
+  maxBytes: number = MAX_BODY_BYTES,
+): Promise<{ body: string; limitExceeded: boolean }> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let totalBytes = 0;
@@ -95,7 +108,7 @@ function readBody(req: http.IncomingMessage): Promise<{ body: string; limitExcee
     req.on("data", (chunk: Buffer) => {
       if (limitExceeded) return;
       totalBytes += chunk.length;
-      if (totalBytes > MAX_BODY_BYTES) {
+      if (totalBytes > maxBytes) {
         limitExceeded = true;
         // Drain remaining data but don't accumulate it
         chunks.length = 0;
@@ -257,6 +270,14 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
 export function createGateServer(deps: GateServerDeps): http.Server {
   const { policy, receipts, client, performers, localModelAvailable } = deps;
   const log = deps.log ?? noop;
+  // Task 4.1: decoded-size cap for binary uploads. Fail closed to the default
+  // on any invalid override (NaN, non-finite, <= 0) rather than disabling the cap.
+  const maxUploadBytes =
+    typeof deps.maxUploadBytes === "number" &&
+    Number.isFinite(deps.maxUploadBytes) &&
+    deps.maxUploadBytes > 0
+      ? Math.floor(deps.maxUploadBytes)
+      : DEFAULT_MAX_UPLOAD_BYTES;
   const SAFE_SHA_RE = /^[0-9a-f]{64}$/;
   // isSafeAuthorityString is hoisted to module scope above (shared with
   // performAndReceipt's delivery-field gating).
@@ -925,7 +946,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
       const tool = decodeURIComponent(egressMatch[1]);
       // C2 (a): entire egress handler wrapped in try/catch
       try {
-        await handleEgress(tool, req, res, { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, authorityRegistry: deps.authorityRegistry, log });
+        await handleEgress(tool, req, res, { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, authorityRegistry: deps.authorityRegistry, log, maxUploadBytes });
       } catch (outerErr) {
         // Best-effort: try to append an error receipt; if the chain itself is
         // corrupt, log a no-payload line and continue — process stays alive.
@@ -971,8 +992,16 @@ async function handleEgress(
 ): Promise<void> {
   const { policy, receipts, client, performers, localModelAvailable, citationRegistry, authorityRegistry, log } = deps;
 
-  // 1. Read raw body (with size cap)
-  const { body: rawBody, limitExceeded } = await readBody(req);
+  // 1. Read raw body (with size cap). Task 4.1: upload_document may carry a
+  // base64-encoded file, so its body cap scales to hold maxUploadBytes of
+  // decoded content (×4/3 base64 overhead) plus the normal 1 MB envelope
+  // budget (documentText, name, meta, JSON syntax). Every other tool keeps
+  // the strict 1 MB cap.
+  const bodyCap =
+    tool === "upload_document"
+      ? Math.ceil(deps.maxUploadBytes / 3) * 4 + MAX_BODY_BYTES
+      : MAX_BODY_BYTES;
+  const { body: rawBody, limitExceeded } = await readBody(req, bodyCap);
 
   if (limitExceeded) {
     // I2 (a): body exceeded 1 MB cap
@@ -1119,8 +1148,101 @@ async function handleEgress(
     }
   }
 
-  // 3. Compute payloadSha256 over the normalized payload
-  const payloadSha256 = sha256hex(canonicalJson(JSON.parse(JSON.stringify(payload))));
+  // 2b. Task 4.1 — binary upload contract (upload_document + contentBase64).
+  // FIXED payload contract (shared with the courier skill — do not rename):
+  //   contentBase64  base64 file bytes, mutually exclusive with content
+  //   documentText   REQUIRED reviewable text companion (citation gate input)
+  //   mimeType       optional explicit MIME; else derived from name extension
+  // All violations fail closed: 400/413 + error receipt, no dispatch. The
+  // receipt never carries content — errors are static codes; the success
+  // receipt carries only {bytes, mimeType} and the sha of the decoded bytes.
+  let binaryPayloadSha256: string | null = null;
+  // Human-gate binding for binary uploads. The RECEIPT sha stays the decoded-
+  // bytes sha (binaryPayloadSha256), but the human approval must be pinned to
+  // the FULL payload (destination/folderId/name/documentText/...) so an approval
+  // for "upload bytes X to folder A with text T" cannot be replayed with the
+  // SAME bytes but a DIFFERENT destination/name/text. Computed over the payload
+  // with contentBase64 replaced by the decoded-bytes sha (bytes never leave in
+  // the approval channel). Null for text uploads (they bind the full payload
+  // via payloadSha256 already).
+  let binaryApprovalSha256: string | null = null;
+  let binaryReceiptMeta: Record<string, unknown> = {};
+  if (tool === "upload_document" && payload["contentBase64"] !== undefined) {
+    const failBinary = (status: number, errorCode: string, message: string): void => {
+      receipts.append({
+        kind: "egress",
+        tool,
+        boundary: null,
+        decision: null,
+        outcome: "error",
+        payloadSha256: sha256hex(rawBody),
+        agentId: meta.agentId,
+        issueId: meta.issueId,
+        meta: { error: errorCode, claimedConfidentiality: meta.confidentiality ?? "unspecified" },
+      });
+      sendJson(res, status, { error: message });
+    };
+
+    const b64 = payload["contentBase64"];
+    if (typeof b64 !== "string" || b64.length === 0) {
+      failBinary(400, "invalid_content_base64", "invalid_payload: contentBase64 must be a non-empty base64 string");
+      return;
+    }
+    if (payload["content"] !== undefined) {
+      failBinary(400, "content_conflict", "invalid_payload: content and contentBase64 are mutually exclusive");
+      return;
+    }
+    // Fail closed: a binary upload without reviewable text must never pass a
+    // citation-gated boundary — require documentText up front for ALL binary
+    // uploads so citation enforcement cannot be bypassed by shipping bytes.
+    const documentText = payload["documentText"];
+    if (typeof documentText !== "string" || documentText.trim().length === 0) {
+      failBinary(
+        400,
+        "missing_document_text",
+        "invalid_payload: contentBase64 requires a non-empty documentText companion (the reviewable text of the document)",
+      );
+      return;
+    }
+    if (payload["mimeType"] !== undefined && !isValidMimeType(payload["mimeType"])) {
+      failBinary(400, "invalid_mime_type", "invalid_payload: mimeType must be a single valid MIME type token");
+      return;
+    }
+    const decodedBytes = decodeBase64Strict(b64);
+    if (decodedBytes === null) {
+      failBinary(400, "invalid_base64", "invalid_base64: contentBase64 is not valid base64");
+      return;
+    }
+    if (decodedBytes.length > deps.maxUploadBytes) {
+      failBinary(413, "upload_too_large", "upload_too_large: decoded contentBase64 exceeds the maximum upload size");
+      return;
+    }
+    // Receipts: payloadSha256 for a binary upload = sha256 of the DECODED
+    // bytes (what actually egresses), and meta carries size + resolved MIME
+    // only — never content.
+    binaryPayloadSha256 = crypto.createHash("sha256").update(decodedBytes).digest("hex");
+    // Human-gate binding: the FULL payload with contentBase64 replaced by the
+    // decoded-bytes sha. Pins the approval to destination/folderId/name/
+    // documentText/... — not just the bytes — so an approved upload cannot be
+    // replayed with the same bytes but a different destination or text.
+    binaryApprovalSha256 = sha256hex(
+      canonicalJson(JSON.parse(JSON.stringify({ ...payload, contentBase64: binaryPayloadSha256 }))),
+    );
+    const resolvedMime = resolveUploadMimeType(payload["name"], payload["mimeType"]) ?? "application/octet-stream";
+    binaryReceiptMeta = { binary: { bytes: decodedBytes.length, mimeType: resolvedMime } };
+  }
+
+  // 3. Compute payloadSha256 — normalized payload JSON for text egress; the
+  // decoded bytes for binary uploads (Task 4.1). This is the RECEIPT sha.
+  const payloadSha256 = binaryPayloadSha256 ?? sha256hex(canonicalJson(JSON.parse(JSON.stringify(payload))));
+
+  // Human-gate binding sha. Text uploads already bind the full payload via
+  // payloadSha256 (the canonical payload JSON). Binary uploads use
+  // binaryApprovalSha256 (full payload with bytes represented by their sha) so
+  // an approval cannot be replayed with the same bytes but a different
+  // destination/name/documentText — while the receipt keeps the decoded-bytes
+  // sha (audit invariant).
+  const humanGateSha256 = binaryApprovalSha256 ?? payloadSha256;
 
   const egressReq: EgressRequest = { tool, payload, meta };
 
@@ -1245,6 +1367,10 @@ async function handleEgress(
     };
   }
 
+  // Extra non-payload audit meta that rides on the dispatched receipt:
+  // binary upload facts (Task 4.1) + authority/provenance signals (5b–5d).
+  const extraReceiptMeta: Record<string, unknown> = { ...binaryReceiptMeta, ...authorityReceiptMeta };
+
   // 6. Dispatch by decision
   switch (decision) {
     // -----------------------------------------------------------------------
@@ -1271,7 +1397,7 @@ async function handleEgress(
         performers, receipts, tool, boundary, decision, payloadSha256,
         meta, useLocal: false, egressReq, res, log,
         responseDecisionLabel: "allow",
-        extraReceiptMeta: authorityReceiptMeta,
+        extraReceiptMeta,
       });
       return;
     }
@@ -1315,7 +1441,7 @@ async function handleEgress(
           meta, useLocal: tierResult.useLocal, dataTermsTier: tierResult.dataTermsTier,
           egressReq, res, log,
           responseDecisionLabel: "allow",
-          extraReceiptMeta: authorityReceiptMeta,
+          extraReceiptMeta,
         });
         return;
       }
@@ -1369,7 +1495,7 @@ async function handleEgress(
         meta, useLocal: false, egressReq: maskedReq, res, log,
         deanonymizeMap: anonResult.map,
         responseDecisionLabel: "anonymize",
-        extraReceiptMeta: authorityReceiptMeta,
+        extraReceiptMeta,
       });
       return;
     }
@@ -1395,7 +1521,9 @@ async function handleEgress(
 
       let gateResult: Awaited<ReturnType<typeof humanGate>>;
       try {
-        gateResult = await humanGate(client, egressReq, boundary!, payloadSha256);
+        // Bind the approval to humanGateSha256 (full payload), not the receipt
+        // sha — see the humanGateSha256 computation above.
+        gateResult = await humanGate(client, egressReq, boundary!, humanGateSha256);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log(`human_gate_error tool=${tool}`);
@@ -1427,7 +1555,7 @@ async function handleEgress(
             agentId: meta.agentId,
             issueId: meta.issueId,
             approvalId: gateResult.approvalId,
-            meta: { claimedConfidentiality, ...authorityReceiptMeta },
+            meta: { claimedConfidentiality, ...extraReceiptMeta },
           });
           sendJson(res, 202, {
             status: "pending_approval",
@@ -1443,7 +1571,7 @@ async function handleEgress(
             meta, approvalId: gateResult.approvalId, useLocal: false,
             egressReq, res, log,
             responseDecisionLabel: "human",
-            extraReceiptMeta: authorityReceiptMeta,
+            extraReceiptMeta,
           });
           return;
         }
