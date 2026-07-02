@@ -14,6 +14,20 @@ PossibLaw also draws design-pattern inspiration (not code) from:
 Third-party content adapted into companies/legal-operations/
 ================================================================
 
+CaseMark skills (https://github.com/CaseMark/skills)
+  Copyright 2025 CaseMark, Inc. Licensed under the Apache License, Version 2.0.
+  Adapted at commit 326837f for:
+    - companies/legal-operations/skills/authority-verification-workflow
+    - companies/legal-operations/evals/cases/citation-verify-real-authority.md (criteria adapted)
+    - companies/legal-operations/evals/cases/citation-hallucinated-not-found.md (criteria adapted)
+
+awesome-legal-skills (https://github.com/lawve-ai/awesome-legal-skills)
+  skills/matter-intake-scoping-scott-margetts: Copyright Scott Margetts.
+  Licensed per-skill under the Apache License, Version 2.0 (the catalog's
+  top-level CC-BY-NC-ND license does not apply to this per-skill-licensed work).
+  Adapted at commit 7f58aaf for:
+    - companies/legal-operations/skills/matter-scoping-playbook
+
 claude-for-legal (https://github.com/anthropics/claude-for-legal)
   Copyright Anthropic and contributors. Licensed under the Apache License, Version 2.0.
   Adapted at commit b0aeeba for skills:

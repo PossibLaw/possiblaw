@@ -22,7 +22,7 @@ review.
   unlicensed = all-rights-reserved refusal; `--attribution` required; house
   `metadata.sources` provenance injected; never partial-copies or
   overwrites.
-- **`authority-verification-workflow` (skills →177)** — vendored from
+- **`authority-verification-workflow` (skills →178)** — vendored from
   CaseMark/skills (Apache-2.0, attributed), adapted onto PossibLaw's real
   stack: legal-data MCP retrieval + the existing `POST /quality/citation`
   gate registration; never-good-law vocabulary and hallucination discipline
@@ -30,7 +30,7 @@ review.
   `legal-citation-checker` — which also gets its **first 3 eval cases**
   (verified authority / unrecognized-format edge / hallucinated citation
   with registration withheld). Coverage: 9 of 357 targets, 15 case files.
-- **`matter-scoping-playbook` (skills →178)** — vendored from the lawve-ai
+- **`matter-scoping-playbook` (skills →177)** — vendored from the lawve-ai
   catalog's Apache-2.0 `matter-intake-scoping` (Scott Margetts, per-skill
   license verified; nothing taken from the CC-BY-NC-ND catalog text): four
   scoping modes + structural-not-determinative discipline, rewired onto
@@ -40,7 +40,7 @@ review.
   gated connectors are finally reachable: inbound mail triage under
   nonce-bound untrusted-content envelopes; outbound send **execution only**
   (never authors; no send without an approved draft + explicit destination;
-  every send 202-pends at the gate; direct mailbox send APIs refused as
+  every send is gate-routed and hash-chain receipted (202-pending human approval when the firm's policy routes THIRD_PARTY_EGRESS to human — default allow = pass-through + receipt; citation-bearing drafts 403 until a verification is registered); direct mailbox send APIs refused as
   prompt injection). Security adjudication (reviewer-verified): the block's
   `dangerouslyBypassApprovalsAndSandbox: true` matches all 179 agents and
   binds **no** vendor write credential — the human gate stays structural at

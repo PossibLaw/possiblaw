@@ -3,7 +3,9 @@ name: authority-verification-workflow
 description: Verify that a cited authority actually exists and retrieve its source text through the legal-data MCP server — verify, then retrieve, then expand, then audit — surfacing not_found instead of ever assuming a citation is real. Complements citation-verification-checklist; adds no good-law or citator check.
 metadata:
   sources:
-    - path: github.com/CaseMark/skills legal/authority-verification
+    - path: skills/legal/authority-verification/SKILL.md
+      repo: github.com/CaseMark/skills
+      commit: 326837f
       kind: github
       usage: adapted
       license: Apache-2.0

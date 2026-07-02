@@ -7,6 +7,8 @@ reportsTo: ops-lead
 skills:
   - connector-gmail
   - connector-outlook
+  - connector-local-fs-doc-store
+  - privacy-encoder
   - untrusted-content-envelope
   - missing-info-gate
   - firm-memory
