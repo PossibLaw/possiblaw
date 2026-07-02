@@ -4,7 +4,21 @@
 
 The catalog is the menu — import what your firm practices. `./bin/possiblaw --teams <names>` (e.g. `litigation,commercial`, or presets `boutique` / `inhouse`) imports just those teams plus the executives, meta-reviewers, capability builder, and the skills they reference. See the operator walkthrough.
 
-Lanes: **routing** = classify + delegate · **drafting** = produces documents · **review** = adversarial clause-by-clause reading · **extractive** = structured extraction/tracking. Every agent works inside paperclip issues, never sends/files/serves anything externally, and gates external actions on operator approval.
+## Lane rubric
+
+Five lanes, set per agent via `metadata.possiblaw.modelLane` in `.paperclip.yaml`:
+
+- **primary** — org-wide executive judgment + routing at the top of the chain. Reserved for the two executives (`chief-of-staff`, `chief-counsel`); no lead or specialist is `primary`.
+- **routing** — practice/function-lead triage + delegation: classify the matter, dispatch to the right specialist.
+- **drafting** — produces documents.
+- **review** — adversarial clause-by-clause reading.
+- **extractive** — structured extraction/tracking, no interpretation.
+
+Decision rule for a new agent: org-wide judgment + routing over every practice/function → `primary`; classifies and delegates within one practice/function → `routing`; otherwise pick by output shape — produces a document → `drafting`, critiques/red-flags an existing document → `review`, extracts or tabulates facts without judgment → `extractive`.
+
+Exception: `reconciler` (a Chief Counsel meta-review specialist) is `drafting`, not `review` — unlike its meta-review siblings `risk-spotter` and `debate-judge`, it merges resolved positions into one consolidated work product rather than critiquing one, so it takes the lane of the document-producing role it actually plays.
+
+Every agent works inside paperclip issues, never sends/files/serves anything externally, and gates external actions on operator approval.
 
 ## Executives
 

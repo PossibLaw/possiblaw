@@ -34,7 +34,7 @@ What a firm actually gets:
 - **Hard-gated egress (structural).** Every egress write — email send, document upload, e-signature, payment, court filing, external delete — routes through a loopback Gate Proxy (`gate-proxy/`, default `http://127.0.0.1:3801`). Egress credentials exist **only** in the proxy process; the launcher scrubs them from the agent runtime, so a misbehaving agent's direct vendor call fails for want of credentials. Policy is the firm's to tune, per trust boundary, in [`companies/legal-operations/gate-policy.yaml`](companies/legal-operations/gate-policy.yaml): `allow` is pass-through + receipt; `anonymize` / `human` / `block` are hard gates.
 - **Human gates are paperclip-native.** Six boundaries are classified (`THIRD_PARTY_EGRESS`, `CONFIDENTIAL_TO_CLOUD`, `COURT_FILING`, `SIGNATURE`, `MONEY_MOVEMENT`, `IRREVERSIBLE_EXTERNAL_OP`); court filings, signatures, payments, and irreversible external ops default to `human`. The gate opens an approval, the agent stands down, a human decides in the dashboard, and the agent is woken on approve. Approvals are payload-hash-bound — an approval for payload X never authorizes payload Y.
 - **Receipts for everything.** Every gate decision — performed, pending, blocked, error — appends to a SHA-256 hash-chained, append-only receipt log. `GET /receipts/verify` checks the chain; `POST /receipts/anchor` writes the chain head into a paperclip comment. Payloads never appear in receipts — only their sha256.
-- **The agents are the interchangeable parts.** 178 atomic agents / 174 skills across 34 teams do the work inside the pipeline, with ten model variants that swap providers per lane without touching the package. The catalog is the supporting cast; the pipeline is the product.
+- **The agents are the interchangeable parts.** 178 atomic agents / 174 skills across 34 teams do the work inside the pipeline, with eleven model variants that swap providers per lane without touching the package. The catalog is the supporting cast; the pipeline is the product.
 - **Firm-facing MCP facade (Phase 3 — v1).** An outside assistant (Claude Desktop, Codex, or any MCP client) can connect to the firm over stdio as a client. The facade exposes the firm AS an MCP server behind a fixed five-noun allowlist: `create_matter`, `get_matter_status`, `list_work_products`, `fetch_work_product`, `request_approval`. Human-only approvals — the facade has no approve tool, and the company-scoped agent key 403s on board-decide endpoints on authenticated instances. Work-product text is default-closed and opt-in (`firmFacade.allowWorkProductText` in `gate-policy.yaml`). Every facade action is receipted through the gate proxy so it appears in the same hash-chained audit spine as internal egress. Start with `./bin/possiblaw --firm-facade`: the launcher mints a company-scoped agent key and writes a ready-to-paste MCP config to `<data-dir>/firm-facade-mcp.json` (mode 600). Implementation: [`mcp-servers/firm-facade/`](mcp-servers/firm-facade/). Walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md). Honest limits: [docs/known-limitations.md](docs/known-limitations.md) → "Firm-facing MCP facade (v1)".
 - **Deterministic deadline engine (Phase 4 — v1).** Court-filing deadlines are computed by code (FRCP Rule 6, `deadline-engine/`), never by an LLM. The `deadline-calculator` agent routes all deadline questions through the `legal-deadline-calculation` skill, which invokes the engine CLI and reports the exact date with a full rule-application trace. Every computed deadline is audited in the Matter Trust Report via a `deadline` receipt kind. Prerequisite: `pnpm -C deadline-engine install`. Honest limits: US-FED only (`jurisdiction: "US-FED"`); state/CPR courts return `UNCONFIRMED`; audit-only in v1 — the deadline is visible and recorded in the report but does not yet block a late filing. Agent + skill: `companies/legal-operations/`. Engine: [`deadline-engine/`](deadline-engine/). Walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md) → "Compute a filing deadline." Honest limits: [docs/known-limitations.md](docs/known-limitations.md) → "Deadline engine (v1)".
 
@@ -43,10 +43,10 @@ What a firm actually gets:
 | Surface | Status today | Mechanism |
 |---|---|---|
 | Egress writes (email, upload, signature, payment, court filing, external delete) | **Enforced — structural** | Gate Proxy holds the only egress credentials; the launcher scrubs them from the server/agent env; per-boundary policy + hash-chained receipts on every path |
-| Privacy tier — confidential/privileged payloads sent through the gate | **Enforced at the gate** | Deterministic masker over caller-supplied matter entities + pattern classes, recall measured in the test suite (100% on its labeled fixture; gated at ≥95% with zero entity leaks; fail-closed to block when it cannot vouch, e.g. no entity list) — or routed to a local model when one is configured. The tier-floor classifies each cloud lane by its contracted data terms (ZDR / no-train / no-human-review / tenant-isolated) and **hard-blocks any training or consumer endpoint** for matter data — the one configuration the case law condemns ([docs/privilege-and-confidentiality.md](docs/privilege-and-confidentiality.md)) |
+| Privacy tier — confidential/privileged payloads sent through the gate | **Enforced at the gate** | Deterministic masker over caller-supplied matter entities + pattern classes, recall measured in the test suite (100% on its labeled fixture; gated at ≥95% with zero entity leaks; fail-closed to block when it cannot vouch, e.g. no entity list) — or routed to a local model when one is configured ([docs/privilege-and-confidentiality.md](docs/privilege-and-confidentiality.md)). A `dataTerms`-aware tier-floor (ZDR / no-train / no-human-review / tenant-isolated classification, with a hard-block on training/consumer endpoints) exists in code but the live call site never passes `dataTerms` — **staged, not wired at runtime**: [docs/known-limitations.md](docs/known-limitations.md) → "dataTerms tier-floor is staged, not enforced at runtime" |
 | Privacy tier — agents' own primary-lane model calls | **Routed, not proxied** | A routing choice: local-model variants per lane (`ollama`, `llamacpp` in `variants.yaml`) plus the advisory `privacy-encoder` skill. Primary-lane calls do not pass the proxy. |
 | Citation verification | **Enforced at the gate (Phase 2)** | Court/third-party egress **carrying legal citations** is **blocked** until a registered, payload-bound, deterministically re-checked citation verification exists for the document being filed or sent. The `legal-citation-checker` agent executes `citation-verification-checklist` (character-by-character quote-fidelity, side-by-side discrepancy tables), then POSTs the result to `POST /quality/citation`; the gate detects citations in the outbound document and calls `CitationRegistry.has(docSha256)` before any dispatch — including the human gate. A document with no detectable citations has nothing to re-check and passes. Fail-closed: a gated payload with no reviewable document text at all is blocked. Caveat: citation verification itself is an agent step — the gate enforces that it was performed and passed, not that the cited authority is authoritative. |
-| Regulator sign-off bundle | **Exported on demand** | `GET /receipts/bundle?issueId=…[&format=md]` projects the hash-chained receipts for one matter into a **Matter Trust Report** (JSON or Markdown): ordered gate decisions, anonymization events, citation verifications, tier-floor/data-terms decisions, and an operator attestation block — payload **hashes only, never plaintext**. Fail-closed: a corrupt receipt chain refuses to emit a clean report (`503 receipts_corrupt`). This is the artifact an insurer / SRA / GC asks to see. |
+| Regulator sign-off bundle | **Exported on demand** | `GET /receipts/bundle?issueId=…[&format=md]` projects the hash-chained receipts for one matter into a **Matter Trust Report** (JSON or Markdown): ordered gate decisions, anonymization events, citation verifications, and an operator attestation block — payload **hashes only, never plaintext**. (No `dataTerms` tier-floor decision is emitted — that gate isn't reachable at runtime yet; see [docs/known-limitations.md](docs/known-limitations.md).) Fail-closed: a corrupt receipt chain refuses to emit a clean report (`503 receipts_corrupt`). This is the artifact an insurer / SRA / GC asks to see. |
 | Legal data with provenance | **Proxied via MCP; provenance flagged at the gate (block is opt-in)** | [`mcp-servers/legal-data/`](mcp-servers/legal-data/) is a thin trust-adapter in front of CourtListener's **official** MCP (`mcp.courtlistener.com`, OAuth): it forwards each tool call and wraps the result in a provenance envelope (`source`, `source_url`, `decided_date`, `citation`, `sha256`). The `sha256` is the **same fingerprint the citation gate checks**. On a successful retrieval the adapter **registers the authority with the gate** (`POST /quality/authority`, best-effort); the gate then **flags any authority cited in an outbound filing that was never retrieved** (anti-hallucination), recording `unbackedCitations` on the egress receipt. Default is **flag/record, not block** — blocking is policy-opt-in via `citationGate.requireAuthorityProvenance`. Confidential-matter queries are sanitized before egress. We consume the data layer rather than reinvent it. |
 
 ## Confidentiality, privilege, and cloud models
@@ -112,7 +112,7 @@ Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); 
 
 The launcher picks the model-provider variant at import time — this sets the
 *default* model per agent, not a lock-in (see "Changing models after import"
-below). Ten are shipped:
+below). Eleven are shipped:
 
 | Variant | Provider | When |
 |---|---|---|
@@ -124,6 +124,7 @@ below). Ten are shipped:
 | `llamacpp`   | Local HF GGUF via llama.cpp + OpenCode | Fully local without the Ollama client — bring any GGUF |
 | `opencode`   | OpenCode Zen gateway (`OPENCODE_API_KEY`) | One key for OpenCode's curated catalog, no vendor logins |
 | `openrouter` | OpenRouter (`OPENROUTER_API_KEY`) | One key for the multi-vendor cloud catalog |
+| `openrouter-cost` | OpenRouter (`OPENROUTER_API_KEY`), pins GLM 5.2 on cheap lanes | Cost-frontier measurement variant for the orchestration eval — experimental/measurement-only; GLM-5.2-vs-Opus quality is UNCONFIRMED, the thesis under test |
 | `gemini`     | Gemini CLI subscription  | Google models via the gemini CLI's OAuth login |
 | `gemini-api` | Gemini CLI + Gemini API key | Same as `gemini`, billed against the API (`GEMINI_API_KEY`) |
 
@@ -137,10 +138,18 @@ From the Paperclip dashboard you can change any single agent's model — or swap
 its adapter type (e.g. one agent from `claude` to a local `ollama` or an
 `openrouter` model) — without re-importing, and you can override the model for a
 single matter from the issue's assignee dropdown (`primary` / `cheap` /
-`custom`, within the same adapter type). Runtime choices still obey the
-gate-proxy `dataTerms` tier-floor, so a confidential/privileged matter can't be
-routed to a non-ZDR cloud lane. To change the package-wide defaults instead,
-re-run with a different `--variant`. Full steps: [docs/operator-walkthrough.md](docs/operator-walkthrough.md#variant-setup).
+`custom`, within the same adapter type). **Honest limit:** `dataTerms` (declared
+per variant in `variants.yaml`) is a data-handling posture asserted at
+import/selection time, not yet a live runtime guardrail — the gate-proxy's
+tier-floor never receives it (the `anonymize` branch of egress falls back to
+the stricter binary local-vs-cloud decision), and model-inference traffic never
+traverses the gate proxy at all. A runtime model switch to a weaker-terms lane
+is invisible to every guard; the operator's own discipline in picking overrides
+for confidential/privileged matters is the control today, not the gate. See
+[docs/known-limitations.md](docs/known-limitations.md) → "dataTerms tier-floor
+is staged, not enforced at runtime". To change the package-wide defaults
+instead, re-run with a different `--variant`. Full steps:
+[docs/operator-walkthrough.md](docs/operator-walkthrough.md#variant-setup).
 
 ### MCP registry — declare MCP servers once
 
@@ -169,9 +178,10 @@ bypasses. Build spec: [`docs/builds/mcp-registry.md`](docs/builds/mcp-registry.m
 ├─────────────────────────────────────────────────────────┤
 │  gate-proxy/    (loopback egress gate: per-boundary      │
 │                  policy, human approvals, anonymizer,    │
-│                  data-terms tier-floor, hash-chained     │
-│                  receipts + sign-off bundle export —     │
-│                  holds the ONLY egress credentials)      │
+│                  tier-floor (confidentiality), hash-     │
+│                  chained receipts + sign-off bundle      │
+│                  export — holds the ONLY egress          │
+│                  credentials)                            │
 ├─────────────────────────────────────────────────────────┤
 │  mcp-servers/legal-data/  (data layer: trust-adapter in  │
 │                  front of CourtListener's official MCP;  │

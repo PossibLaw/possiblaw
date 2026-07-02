@@ -83,7 +83,7 @@ From the repo root:
 
 The launcher prompts for three things, then does everything else:
 
-1. **Variant** — `codex`, `claude`, `gemini`, `ollama`, `llamacpp`, `opencode`, `openrouter`, or an `-api` twin. The launcher checks the matching CLI is installed and that any required local server (Ollama daemon, llama-server) is reachable.
+1. **Variant** — `codex`, `claude`, `gemini`, `ollama`, `llamacpp`, `opencode`, `openrouter`, `openrouter-cost`, or an `-api` twin. The launcher checks the matching CLI is installed and that any required local server (Ollama daemon, llama-server) is reachable. `openrouter-cost` is an experimental cost-measurement variant for the orchestration eval (pins GLM 5.2 on cheap lanes) rather than a general operating choice — see `docs/known-limitations.md` → "Orchestration eval".
 2. **Org name** — defaults to `PossibLaw Legal Operations`. The launcher renames the imported company via `PATCH /api/companies/{id}` after import.
 3. **Mission** — single line. Saved as the company description so it appears in the Paperclip UI banner.
 
@@ -192,10 +192,17 @@ can override the model two ways from the Paperclip dashboard, with no re-import:
   `companies/legal-operations/variants.yaml`).
 
 The variant matrix in `variants.yaml` is therefore just sensible per-lane
-defaults you can change anytime. **One guardrail still applies:** any runtime
-model choice is subject to the gate-proxy `dataTerms` tier-floor (set by the
-variant), so a confidential/privileged matter cannot be routed to a non-ZDR
-cloud lane regardless of how the model was picked — the gate blocks it.
+defaults you can change anytime. **Honest limit, not a guardrail (yet):**
+`dataTerms` (declared per variant in `variants.yaml`) is a data-handling
+posture asserted at import/selection time — it is not yet a live runtime
+guardrail. The gate-proxy's tier-floor never receives `dataTerms` at its one
+call site (the `anonymize` branch of tool egress falls back to the stricter
+binary local-vs-cloud decision instead), and model-inference traffic never
+traverses the gate proxy at all, so a runtime model switch to a weaker-terms
+cloud lane is invisible to every guard. Picking model overrides for
+confidential/privileged matters with the same discipline as the variant choice
+is the operator's control today. See `docs/known-limitations.md` → "dataTerms
+tier-floor is staged, not enforced at runtime".
 
 To change the baked-in defaults for the *whole* package instead, re-run
 `./bin/possiblaw --variant <other>` (adds a second company, or `--reset` first).
@@ -630,7 +637,7 @@ The launcher emits a non-blocking warning at startup if the package contains con
 
 ## Adapter notes
 
-Adapter + model + reasoning-effort per agent is no longer baked into the package markdown. The `companies/legal-operations/.paperclip.yaml` agent blocks contain a sensible default (`codex_local` + `gpt-5.3-codex`), but the launcher overrides those at import time based on the chosen variant and the agent's `metadata.possiblaw.modelLane`. See `companies/legal-operations/variants.yaml` for the matrix.
+Adapter + model + reasoning-effort per agent is no longer baked into the package markdown. The `companies/legal-operations/.paperclip.yaml` agent blocks contain a sensible default (`codex_local` + `gpt-5.5`), but the launcher overrides those at import time based on the chosen variant and the agent's `metadata.possiblaw.modelLane`. See `companies/legal-operations/variants.yaml` for the matrix.
 
 After import, use Paperclip's agent environment test for one imported agent and confirm the adapter hello probe succeeds.
 
@@ -638,7 +645,7 @@ After import, use Paperclip's agent environment test for one imported agent and 
 
 If Codex reports a subscription usage limit during the demo, Paperclip leaves the affected issue visible as `blocked` with an adapter failure or recovery note. Wait for the quota reset, add credits, or switch the affected agents to another variant via the Paperclip UI before resuming.
 
-If a recovery run reports that a fallback model is unsupported for the current ChatGPT account, keep the package default on the supported `gpt-5.3-codex` lane and resume after the account/model issue is resolved.
+If a recovery run reports that a fallback model is unsupported for the current ChatGPT account, keep the package default on the supported `gpt-5.5` lane and resume after the account/model issue is resolved (per `variants.yaml`'s `codex` notes, `gpt-5.3-codex` and `gpt-5.5-codex` are the models that a ChatGPT-subscription account rejects).
 
 If `output-local-docx` reports BLOCKED with `pandoc not installed`, run `brew install pandoc` and retry; the markdown deliverable still wrote successfully.
 

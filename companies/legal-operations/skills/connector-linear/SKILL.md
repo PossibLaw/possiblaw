@@ -16,7 +16,7 @@ metadata:
 
 Linear is the issue tracker the operations team uses for internal product and engineering work that runs alongside legal matters. Agents call Linear directly for read-only operations (listing teams, listing issues). Write operations — filing new issues, updating issue status — are routed through the gate proxy `share_external` tool. **In v1 the gate returns `502 not_implemented` for `share_external`**, so these writes are visibly blocked rather than silently credentialed. This is an honest posture: Linear write paths are future gate work.
 
-**Credentials live in the gate proxy only.** If you see `credential_missing: LINEAR_API_KEY`, the operator must export it before launching (see the walkthrough Gate Proxy section); never ask for or handle tokens yourself.
+**Write credentials will live in the gate proxy once Linear is implemented gate-side — they do not yet.** The v1 proxy returns `502 not_implemented` for `share_external` unconditionally, before it would ever check for a Linear credential; credential wiring arrives when the connector is implemented gate-side (see "Write operations" below). For the **read** path, the agent holds its own `LINEAR_API_KEY`; a `401` / `AUTHENTICATION_ERROR` means it was invalidated or revoked — the operator must export a fresh one (see the walkthrough Gate Proxy section); never ask for or handle tokens yourself.
 
 ## Required Environment Variables
 

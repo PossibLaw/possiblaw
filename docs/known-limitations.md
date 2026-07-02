@@ -141,6 +141,21 @@ Westlaw, midpage, iManage (upload), and NetDocuments (upload) are flagged
 `UNCONFIRMED` and need operator verification against current vendor docs
 before live use.
 
+### Delivery ships Markdown, not DOCX (v1)
+
+`deliverables-courier`'s cloud filing path (`output-delivery-playbook` →
+`connector-onedrive` / `connector-google-drive` → the gate proxy's
+`upload_document` egress tool) sends the deliverable as a **text content
+string** — the connector payload reads the local file with `cat` and embeds
+it as a JSON `content` field; the gate's payload schema has no binary/base64
+field. A locally generated DOCX (via `output-local-docx` + pandoc — see
+`docs/operator-walkthrough.md` → "Runtime troubleshooting") is not what gets
+filed to OneDrive/Google Drive/Notion; only the Markdown/plain-text
+deliverable is. Binary upload through the gate — DOCX or PDF, verbatim — is
+not yet supported. See also "Box connector and native Google Docs export are
+deferred" under Skill-improvement loop for the matching limitation on the
+read/diff side of the learning loop.
+
 ## Legal-data MCP / research-query privacy
 
 ### Research queries egress directly to CourtListener — not through the gate proxy
@@ -216,6 +231,60 @@ whole file can also recompute every hash, so a wholesale rewrite is caught
 only against an externally anchored chain head (`POST /receipts/anchor`
 posts the head into a paperclip comment). Anchor periodically if receipts
 matter for your audit posture.
+
+### dataTerms tier-floor is staged, not enforced at runtime
+
+`variants.yaml` declares each cloud lane's `dataTerms` (ZDR / no-train /
+no-human-review / tenant-isolated — see the schema comment at the top of that
+file). This is a **declared posture consumed at import/selection time only**,
+not a live runtime guardrail, despite language elsewhere implying otherwise:
+
+- `dataTerms` is never loaded by the launcher or the gate proxy at runtime —
+  nothing reads `variants.yaml` again after import.
+- The tier-floor (`gate-proxy/src/gates/tier-floor.ts`, `evaluateTierFloor`)
+  only fires from one call site, inside the `anonymize` branch of tool egress
+  in `gate-proxy/src/server.ts`, and that call site never passes a `dataTerms`
+  argument. Every ZDR-aware branch in `evaluateTierFloor` is therefore
+  unreachable at runtime; the function always falls back to its legacy binary
+  local-vs-cloud behavior (fail-closed to anonymize/local, not a
+  dataTerms-aware decision).
+- Model-inference traffic — the agent CLI's own calls to its model vendor —
+  never traverses the gate proxy at all; only tool egress does. So a runtime
+  model switch to a weaker-terms lane (for example, moving an agent from
+  `claude-api`'s asserted-ZDR lane to `claude`'s non-ZDR subscription lane, or
+  a per-matter assignee override to a different adapter) is invisible to every
+  guard in this repo.
+
+Net: "runtime model choices obey the gate-proxy `dataTerms` tier-floor" is not
+an accurate description of current behavior. Wiring `dataTerms` through to the
+tier-floor call site is future gate work; until then, the operator's own
+discipline in choosing model overrides for confidential/privileged matters is
+the control, not the gate. See `README.md` → "Changing models after import"
+and `docs/operator-walkthrough.md` → "Variant setup" for the corrected claim.
+
+### Agent read scope is company-wide (no per-matter isolation)
+
+Every imported agent authenticates to paperclip with a company-scoped API key.
+Paperclip's only internal authorization check on an agent actor is
+same-company: `assertCompanyAccess` in
+`paperclip/server/src/routes/authz.ts:44` reduces to `req.actor.type ===
+"agent" && req.actor.companyId !== companyId` — there is no per-matter,
+per-issue, or ethical-wall check below the company level. Any agent in the
+company can read any issue, comment, or work product belonging to any other
+matter in the same company.
+
+The practical read-scope reality is **one company = one shared information
+pool** for every agent in it. This is the same underlying gap the Firm-Facing
+MCP Facade documents at its own layer (see "No ethical wall or cross-matter
+information barriers (deferred)" under "Firm-facing MCP facade (v1)" below) —
+paperclip has no per-matter read-isolation primitive, and PossibLaw does not
+add one internally either.
+
+Interim pattern for a firm or in-house team that needs an ethical wall between
+walled clients or matters: run **separate paperclip companies**, one per
+walled client/matter cluster (a fresh `--data-dir` or a second import), rather
+than relying on scoping within a single company. Per-matter isolation inside
+one company is not implemented.
 
 ## Hybrid variant
 
@@ -357,12 +426,21 @@ morning review is the gate that prevents spurious overlays from applying.
 
 ### Box connector and native Google Docs export are deferred
 
-The v1 sweep covers OneDrive and Google Drive (binary/DOCX round-trip). Box
-connector support is not yet implemented — files delivered to Box are not
+The v1 sweep covers OneDrive and Google Drive, but it diffs **plain-text /
+Markdown content only**: `learning-loop/src/diff.ts` (`diffLines`) is a
+line-level plain-text diff with no DOCX or PDF text-extraction step. Genuine
+binary-document diffing needs a text-extraction stage that is not yet wired
+into the learning loop — a parse bridge exists, but only inside
+`orchestration-eval` (for scoring Harvey LAB deliverables), and it is not
+reused here. In practice this is moot for delivered files today anyway: see
+"Delivery ships Markdown, not DOCX (v1)" under Connectors — the delivery path
+itself cannot upload a binary DOCX/PDF, so nothing but text/Markdown reaches
+OneDrive or Google Drive through the courier to be diffed in the first place.
+
+Box connector support is not yet implemented — files delivered to Box are not
 tracked in the manifest and are invisible to the sweep. Native Google Docs
 files (`.gdoc` / `.gsheet` format) require a separate `files.export` call
-that is not yet wired up; only uploaded DOCX/PDF files stored in Drive are
-diffable today.
+that is not yet wired up.
 
 ### SkillOpt (eval-validated automatic refinement) is deferred
 

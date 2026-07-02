@@ -16,7 +16,7 @@ metadata:
 
 HubSpot is the CRM PossibLaw uses for marketing-intake leads, prospective-client tracking, and deal-pipeline reporting. Agents call HubSpot directly for read-only operations (searching contacts, fetching records). External write operations — creating or updating contacts, companies, and deals — are routed through the gate proxy `share_external` tool. **In v1 the gate returns `502 not_implemented` for `share_external`**, so these writes are visibly blocked rather than silently credentialed. This is an honest posture: HubSpot write paths are future gate work.
 
-**Credentials live in the gate proxy only.** If you see `credential_missing: HUBSPOT_ACCESS_TOKEN`, the operator must export it before launching (see the walkthrough Gate Proxy section); never ask for or handle tokens yourself.
+**Write credentials will live in the gate proxy once HubSpot is implemented gate-side — they do not yet.** The v1 proxy returns `502 not_implemented` for `share_external` unconditionally, before it would ever check for a HubSpot credential; credential wiring arrives when the connector is implemented gate-side (see "Write operations" below). For the **read** path, the agent holds its own `HUBSPOT_ACCESS_TOKEN`; a `401` means it was revoked or is invalid — the operator must export a fresh one (see the walkthrough Gate Proxy section); never ask for or handle tokens yourself.
 
 ## Required Environment Variables
 

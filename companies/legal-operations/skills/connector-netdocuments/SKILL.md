@@ -18,7 +18,7 @@ NetDocuments is a cloud-native document-management system widely used by law fir
 
 For solo / small-firm operators without a NetDocuments subscription, the `connector-local-fs-doc-store` skill is the stand-in.
 
-**Credentials live in the gate proxy only.** If you see `credential_missing: NETDOCS_OAUTH_TOKEN`, the operator must export it before launching (see the walkthrough Gate Proxy section); never ask for or handle tokens yourself.
+**Write (upload) credentials will live in the gate proxy once NetDocuments is implemented gate-side — they do not yet.** The v1 proxy returns `502 not_implemented` for `share_external` unconditionally, before it would ever check for a NetDocuments credential; credential wiring arrives when the connector is implemented gate-side (see "Upload (create)" below). For the **read** path, the agent holds its own `NETDOCS_OAUTH_TOKEN`; a `401` means it expired — the operator must refresh via the refresh token or re-authorize (see the walkthrough Gate Proxy section); never ask for or handle tokens yourself.
 
 ## Required Environment Variables
 
