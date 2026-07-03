@@ -912,6 +912,97 @@ facade (v1)".
 
 ---
 
+## Walling a conflicted client
+
+By default, one imported company holds the whole practice — every agent in it
+can read every matter. When a real conflicts screen requires a client to be
+structurally kept away from the rest of the firm (a lateral hire, a
+concurrent-representation conflict, a former-client matter), wall it: run
+`--add-wall` against your already-running firm.
+
+```bash
+./bin/possiblaw --add-wall "Conflicted Client Inc" --variant codex
+```
+
+`--variant` is required — it decides which model lane the wall's own
+179-agent roster runs on; pass the same variant your running firm uses
+unless you deliberately want the wall on a different one. The client name
+also derives the wall's issue prefix (first three A–Z letters, uppercased —
+`"Conflicted Client Inc"` → `CON`); a collision with an existing company's
+prefix errors precisely and creates nothing:
+
+```
+prefix collision: CON already used by company "Conflicted Client, LLC"
+```
+
+A successful run imports the full package as a brand-new paperclip company,
+starts that company its **own** gate proxy (never the firm's), writes a
+per-wall facade config when `--firm-facade` is active
+(`firm-facade-mcp-CON.json`), provisions the intake routine unless
+`--no-routines`, and records the wall in `<data-dir>/walls.json`:
+
+```
+wall "Conflicted Client Inc" (CON) active — company <uuid>, gate :<port>
+screened team setup: invite ONLY this client's lawyers to the new company
+(dashboard → Company Settings → Members)
+```
+
+Re-running `--add-wall` for the same client name is how you repair a
+partially-wired wall (a dead gate proxy, a missing facade config) — it is
+not an error to avoid.
+
+Against an authenticated instance (`--auth-mode authenticated`), pass
+`--api-key <pcp_board_…>` so the command can call the running firm's API.
+Relaunching against the same `--data-dir` brings every registered wall's
+gate proxy back up alongside the firm's own, every time.
+
+Full runbook — the prefix rule, every exit code, authenticated-mode setup
+(`--auth-mode authenticated`, board claim, `paperclipai auth bootstrap-ceo`,
+per-company invites), and what a screened lawyer sees — lives in
+`docs/workflows/ethical-walls.md`. Honest limits: see
+`docs/known-limitations.md` → "Agent read scope is company-wide (no
+per-matter isolation)" — a wall isolates one company from another; it does
+not give you per-matter isolation inside either one.
+
+## Firm Overview
+
+A loopback dashboard that merges "everything in flight" — issues, pending
+approvals, and recent deliverables — across every paperclip company you're
+authorized to see, with deep links back into the paperclip dashboard and
+approve/reject as yourself.
+
+```bash
+PAPERCLIP_BASE_URL=http://127.0.0.1:3100 pnpm -C firm-overview start
+```
+
+Point it at your one running firm — walls live as more companies on the same
+server, so one `PAPERCLIP_BASE_URL` covers the main company and every wall.
+Open `http://127.0.0.1:3860` (override with `FIRM_OVERVIEW_PORT`) and click
+**Connect**. That opens paperclip's own CLI-auth approval page; sign in and
+approve, and the overview holds a 30-day `pcp_board_…` token in memory only
+(never written to disk) for the rest of the session. Every board fetch and
+every Approve/Reject from then on runs as *you* — the overview adds no
+authorization of its own, so a screened lawyer who isn't invited to a walled
+company never sees it here either.
+
+Running solo on the default `local_trusted` mode? There's nothing to
+connect — the implicit board sees every company, walls included, with zero
+setup.
+
+To revoke the token before its 30 days are up (lost laptop, offboarding),
+call paperclip directly with it:
+
+```bash
+curl -X POST http://127.0.0.1:3100/api/cli-auth/revoke-current \
+  -H "Authorization: Bearer pcp_board_<your-token>"
+```
+
+Full runbook (env vars, the merged-board shape, per-client degradation, the
+bounded 10-issue deliverables fan-out): `docs/workflows/ethical-walls.md`.
+Honest limits: `docs/known-limitations.md` → "Firm Overview (v1)" — it
+trusts loopback the same way the gate proxy does, and the deliverables panel
+only looks at each client's 10 most-recently-updated in-flight issues.
+
 ---
 
 ## Measure the thesis (Harvey LAB A/B)

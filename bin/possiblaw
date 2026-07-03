@@ -168,6 +168,29 @@ OPTIONS:
                         The launcher does NOT start a facade server — the
                         outside assistant's MCP client does.
                         Default: off. No-op in --dry-run mode.
+  --add-wall <client>   Add an ethically-walled client to a RUNNING firm:
+                        imports the full package as a new company, starts a
+                        dedicated gate proxy, emits a per-wall facade config,
+                        and records the wall in <data-dir>/walls.json.
+                        REQUIRES --variant: the walled company's agents get
+                        that variant's adapter lanes — use the same variant
+                        as your running firm (see --list-variants).
+  --api-key <key>       Bearer token for --add-wall against an authenticated
+                        instance (pcp_board_… from the CLI-auth flow).
+  --gate-port-base <n>  Wall gate ports are allocated upward from this base
+                        (default: $DEFAULT_GATE_PORT).
+  --auth-mode <mode>    Server deployment mode: local_trusted (default; no
+                        sign-in, single-operator localhost) or authenticated
+                        (multi-user login for ethical walls). Authenticated
+                        mode boots paperclip with
+                        PAPERCLIP_DEPLOYMENT_MODE=authenticated and a
+                        BETTER_AUTH_SECRET persisted at
+                        <data-dir>/better-auth.secret (generated 0600 on
+                        first use, reused on restart). On the first
+                        authenticated boot of a formerly local_trusted data
+                        dir the launcher surfaces the server's one-time
+                        board-claim URL; see docs/workflows/ethical-walls.md
+                        for the fresh-install bootstrap (bootstrap-ceo).
   -h, --help            Show this help and exit.
 
 EXAMPLES:
@@ -321,6 +344,10 @@ DEMO_PROFILE=""
 TEAMS=""
 BUSINESS_SLUG=""
 FIRM_FACADE="false"
+ADD_WALL=""
+API_KEY=""
+GATE_PORT_BASE="$DEFAULT_GATE_PORT"
+AUTH_MODE="local_trusted"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -347,11 +374,21 @@ while [ "$#" -gt 0 ]; do
         --business) [ "$#" -ge 2 ] || { err "--business requires a value"; exit 2; }; BUSINESS_SLUG="$2"; shift 2 ;;
         --no-browser) NO_BROWSER="true"; shift ;;
         --firm-facade) FIRM_FACADE="true"; shift ;;
+        --add-wall) [ "$#" -ge 2 ] || { err "--add-wall requires a client name"; exit 2; }; ADD_WALL="$2"; shift 2 ;;
+        --api-key) [ "$#" -ge 2 ] || { err "--api-key requires a value"; exit 2; }; API_KEY="$2"; shift 2 ;;
+        --gate-port-base) [ "$#" -ge 2 ] || { err "--gate-port-base requires a value"; exit 2; }; GATE_PORT_BASE="$2"; shift 2 ;;
+        --auth-mode) [ "$#" -ge 2 ] || { err "--auth-mode requires a value"; exit 2; }; AUTH_MODE="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
         *) err "Unknown argument: $1"; usage >&2; exit 2 ;;
     esac
 done
+
+# --auth-mode validation: fail fast, before any pre-flight or filesystem work.
+case "$AUTH_MODE" in
+    local_trusted|authenticated) : ;;
+    *) err "--auth-mode must be 'local_trusted' or 'authenticated' (got: '$AUTH_MODE')"; exit 2 ;;
+esac
 
 # Normalize relative paths against CWD (so the script can be invoked from anywhere).
 for var in DATA_DIR PACKAGE VARIANTS_FILE; do
@@ -441,6 +478,620 @@ if [ -n "$BUSINESS_SLUG" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Function library shared by the main path and --add-wall
+# ---------------------------------------------------------------------------
+# These functions are defined here (ahead of --list-variants and --add-wall)
+# so both the main launch path and the --add-wall attach path (which exits
+# long before the main path would otherwise reach these definitions) can call
+# them. Call sites are unchanged from their original positions further down
+# this file; only the definitions moved — bash has no forward declarations,
+# so a function must be defined before anything can call it.
+
+list_variant_slugs() {
+    python3 - "$VARIANTS_JSON_FILE" <<'PY'
+import json, sys
+with open(sys.argv[1]) as fh:
+    doc = json.load(fh)
+for slug in (doc.get("variants") or {}).keys():
+    print(slug)
+PY
+}
+
+# build_import_body <org_name>: bundles the package (+ demo/teams/business
+# overlays) and generates adapterOverrides for $VARIANT, producing a ready-
+# to-POST body. Sets globals INLINE_FILE, PAPERCLIP_JSON_FILE, OVERRIDES_FILE,
+# BODY_FILE, BODY_SIZE (each call overwrites them — one call per invocation
+# of the launcher, whether the main path or --add-wall). Reads the current
+# values of $PACKAGE, $VARIANT, $VARIANTS_JSON_FILE, $PAPERCLIP_YAML, $TEAMS,
+# $DEMO_DIR, $DEMO_PROFILE, $FIRM_MEMORY_FILE, $BUSINESS_DIR — the caller is
+# responsible for having resolved these first. Returns 1 (after printing an
+# err) on any build failure; the caller owns cleanup (the main path kills the
+# paperclip subshell it already started; --add-wall has nothing to tear down
+# since it never starts a server).
+build_import_body() {
+    local org_name="$1"
+    milestone "building import body (variant=$VARIANT, $(find "$PACKAGE" -type f | wc -l | tr -d ' ') files)"
+
+    DEMO_ARGS=()
+    if [ -n "$DEMO_DIR" ]; then
+        DEMO_ARGS=(--extra-root "$DEMO_DIR")
+        DEMO_PROJECT_COUNT="$(find "$DEMO_DIR" -name PROJECT.md | wc -l | tr -d ' ')"
+        DEMO_TASK_COUNT="$(find "$DEMO_DIR" -name TASK.md | wc -l | tr -d ' ')"
+        log "demo profile: $DEMO_PROFILE (+$DEMO_PROJECT_COUNT projects, +$DEMO_TASK_COUNT tasks; see $DEMO_DIR/README.md for the demo script)"
+    fi
+
+    TEAMS_ARGS=()
+    if [ -n "$TEAMS" ]; then
+        TEAMS_ARGS=(--include-teams "$TEAMS")
+    fi
+
+    FIRM_MEMORY_ARGS=()
+    if [ -n "$FIRM_MEMORY_FILE" ]; then
+        FIRM_MEMORY_ARGS=(--firm-memory-file "$FIRM_MEMORY_FILE")
+    fi
+
+    OVERLAY_ARGS=()
+    if [ -n "$BUSINESS_DIR" ]; then
+        OVERLAY_ARGS=(--business-overlay-root "$BUSINESS_DIR")
+    fi
+
+    # Bundle BEFORE override generation: with --teams the bundle carries a
+    # filtered .paperclip.yaml, and adapter overrides must be generated from that
+    # filtered sidecar so no override references an agent outside the subset.
+    INLINE_FILE="$(mktemp -t possiblaw-inline.XXXXXX.json)"
+    if ! python3 "$INLINE_PY" --package-root "$PACKAGE" \
+            ${DEMO_ARGS+"${DEMO_ARGS[@]}"} ${TEAMS_ARGS+"${TEAMS_ARGS[@]}"} \
+            ${FIRM_MEMORY_ARGS+"${FIRM_MEMORY_ARGS[@]}"} ${OVERLAY_ARGS+"${OVERLAY_ARGS[@]}"} \
+            > "$INLINE_FILE"; then
+        err "inline source bundling failed"
+        return 1
+    fi
+
+    PAPERCLIP_JSON_FILE="$(mktemp -t possiblaw-paperclip.XXXXXX.json)"
+    if [ -n "$TEAMS" ]; then
+        SUBSET_SIDECAR_FILE="$(mktemp -t possiblaw-subset-sidecar.XXXXXX.yaml)"
+        if ! python3 -c 'import json,sys; sys.stdout.write(json.load(open(sys.argv[1]))["source"]["files"][".paperclip.yaml"])' \
+                "$INLINE_FILE" > "$SUBSET_SIDECAR_FILE"; then
+            err "could not extract the filtered sidecar from the bundle"
+            return 1
+        fi
+        yaml_to_json "$SUBSET_SIDECAR_FILE" > "$PAPERCLIP_JSON_FILE"
+    else
+        yaml_to_json "$PAPERCLIP_YAML" > "$PAPERCLIP_JSON_FILE"
+    fi
+
+    OVERRIDES_FILE="$(mktemp -t possiblaw-overrides.XXXXXX.json)"
+    if ! python3 "$VARIANTS_PY" \
+            --variants-json "$VARIANTS_JSON_FILE" \
+            --paperclip-json "$PAPERCLIP_JSON_FILE" \
+            --variant "$VARIANT" \
+            > "$OVERRIDES_FILE"; then
+        err "adapter override generation failed"
+        return 1
+    fi
+
+    BODY_FILE="$(mktemp -t possiblaw-import-body.XXXXXX.json)"
+    python3 - "$INLINE_FILE" "$OVERRIDES_FILE" "$org_name" > "$BODY_FILE" <<'PY'
+import json, sys
+inline = json.load(open(sys.argv[1]))
+overrides = json.load(open(sys.argv[2]))
+org_name = sys.argv[3]
+body = {
+    "source": inline["source"],
+    "target": {"mode": "new_company", "newCompanyName": org_name},
+    "include": {"company": True, "agents": True, "projects": True, "issues": True, "skills": True},
+    "collisionStrategy": "rename",
+    "adapterOverrides": overrides,
+}
+json.dump(body, sys.stdout)
+PY
+
+    BODY_SIZE="$(wc -c < "$BODY_FILE" | tr -d ' ')"
+    log "import body: $BODY_SIZE bytes ($(python3 -c "import json; d=json.load(open('$BODY_FILE')); print(len(d['adapterOverrides']))") agents)"
+    return 0
+}
+
+# run_import <import_url> <body_file> <response_file> <status_file> <err_file>:
+# POSTs body_file to import_url with a heartbeat (every $IMPORT_HEARTBEAT_SECS)
+# and a one-time partial-import company-count check (after
+# $IMPORT_PARTIAL_CHECK_AFTER_SECS), carrying ${AUTH_ARGS[@]} if set (empty on
+# the main/local_trusted path; set by --add-wall for an authenticated
+# instance). Returns 0 on HTTP 200; on failure prints diagnostics (curl
+# stderr + first 1KB of the response) and returns 1 — the caller owns
+# cleanup (main path tears down the paperclip subshell it started; --add-wall
+# has nothing to tear down since it never starts a server).
+run_import() {
+    local import_url="$1" body_file="$2" response_file="$3" status_file="$4" err_file="$5"
+    local curl_exit_file="$response_file.curl_exit"
+    : > "$response_file"; : > "$err_file"; : > "$status_file"
+
+    (
+        curl --silent --show-error \
+             --max-time "$IMPORT_MAX_TIME_SECS" \
+             ${AUTH_ARGS+"${AUTH_ARGS[@]}"} \
+             --header "Content-Type: application/json" \
+             --header "Connection: keep-alive" \
+             --request POST \
+             --data-binary "@$body_file" \
+             --output "$response_file" \
+             --write-out '%{http_code}' \
+             "$import_url" \
+             > "$status_file" 2> "$err_file"
+        echo $? > "$curl_exit_file"
+    ) &
+    local curl_pid=$!
+
+    local post_start_epoch partial_checked elapsed_post cur_count
+    post_start_epoch="$(date +%s)"
+    partial_checked="false"
+    while kill -0 "$curl_pid" 2>/dev/null; do
+        sleep "$IMPORT_HEARTBEAT_SECS"
+        elapsed_post=$(( $(date +%s) - post_start_epoch ))
+        log "  ... import in progress (${elapsed_post}s elapsed)"
+        if [ "$partial_checked" = "false" ] && [ "$elapsed_post" -ge "$IMPORT_PARTIAL_CHECK_AFTER_SECS" ]; then
+            partial_checked="true"
+            cur_count="$(
+                curl --silent --max-time 5 ${AUTH_ARGS+"${AUTH_ARGS[@]}"} "$API_BASE/api/companies" 2>/dev/null \
+                    | python3 -c "
+import json, sys
+try: d=json.load(sys.stdin)
+except: print(0); sys.exit(0)
+items = d if isinstance(d, list) else (d.get('companies') or d.get('data') or d.get('items') or [])
+print(len(items) if isinstance(items, list) else 0)
+" 2>/dev/null || echo 0
+            )"
+            log "  ... ${IMPORT_PARTIAL_CHECK_AFTER_SECS}s elapsed; $cur_count company(ies) currently in DB"
+        fi
+    done
+    wait "$curl_pid" || true
+
+    local http_code curl_exit
+    http_code="$(cat "$status_file" 2>/dev/null || echo 000)"
+    curl_exit="$(cat "$curl_exit_file" 2>/dev/null || echo 99)"
+    rm -f "$curl_exit_file"
+
+    if [ "$curl_exit" != "0" ] || [ "$http_code" != "200" ]; then
+        err "import POST failed (curl exit $curl_exit, HTTP $http_code)"
+        if [ -s "$err_file" ]; then
+            err "stderr:"; sed 's/^/  /' "$err_file" >&2
+        fi
+        if [ -s "$response_file" ]; then
+            err "response (first 1KB):"; head -c 1024 "$response_file" >&2; echo >&2
+        fi
+        return 1
+    fi
+    milestone "import POST returned HTTP 200"
+    return 0
+}
+
+# patch_agent_envs <company_id> <import_response_file> <overrides_file>
+#   <secret_ids_file> <plain_env_file>: builds adapterConfig.env patches from
+# overrides_file (per-agent adapter type) + secret_ids_file (API-key
+# secret_refs) + plain_env_file (GATE_PROXY_URL / business-dir vars), then
+# PATCHes every agent listed in import_response_file. The PATCH curl carries
+# ${AUTH_ARGS[@]} (empty on the main/local_trusted path). Best-effort: never
+# aborts the launch; sets the global SECRET_BIND_FAILED="true" on any
+# failure so the caller can warn.
+patch_agent_envs() {
+    local company_id="$1" import_response_file="$2" overrides_file="$3" secret_ids_file="$4" plain_env_file="$5"
+    milestone "binding adapter env to agents (API-key secret_refs + GATE_PROXY_URL)"
+    local patches_file
+    patches_file="$(mktemp -t possiblaw-env-patches.XXXXXX.json)"
+    if ! python3 "$VARIANTS_PY" --build-env-patches \
+            --overrides-json "$overrides_file" \
+            --secret-ids-json "$secret_ids_file" \
+            --plain-env-json "$plain_env_file" > "$patches_file"; then
+        warn "env patch generation failed; agents keep their import-time adapter config"
+        SECRET_BIND_FAILED="true"
+    else
+        local patched=0 patch_failed=0 agent_slug agent_id agent_patch_body patch_http_code
+        while IFS=$'\t' read -r agent_slug agent_id; do
+            { [ -n "$agent_slug" ] && [ -n "$agent_id" ]; } || continue
+            agent_patch_body="$(python3 - "$patches_file" "$agent_slug" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+entry = d.get(sys.argv[2])
+print(json.dumps(entry) if entry else "")
+PY
+)"
+            [ -n "$agent_patch_body" ] || continue
+            patch_http_code="$(printf '%s' "$agent_patch_body" | curl --silent --output /dev/null --write-out '%{http_code}' --max-time 15 \
+                ${AUTH_ARGS+"${AUTH_ARGS[@]}"} \
+                --request PATCH \
+                --header "Content-Type: application/json" \
+                --data-binary @- \
+                "$API_BASE/api/agents/$agent_id" || echo 000)"
+            if [ "$patch_http_code" = "200" ]; then
+                patched=$((patched + 1))
+            else
+                patch_failed=$((patch_failed + 1))
+                warn "  PATCH /api/agents/$agent_id ($agent_slug) returned HTTP $patch_http_code"
+            fi
+        done < <(python3 - "$import_response_file" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for a in (d.get("agents") or []):
+    slug = a.get("slug") or ""
+    aid = a.get("id") or ""
+    if slug and aid:
+        print(f"{slug}\t{aid}")
+PY
+)
+        log "  adapter env bound on $patched agent(s)"
+        if [ "$patch_failed" -gt 0 ]; then
+            warn "  $patch_failed agent(s) could not be patched; set the env in the"
+            warn "  Paperclip UI instead (agent settings → adapter config → env)."
+            SECRET_BIND_FAILED="true"
+        fi
+    fi
+    rm -f "$patches_file"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Provision the matter-intake-sweep routine (auto-delegation intake)
+# ---------------------------------------------------------------------------
+# A paperclip routine is a recurring issue: on schedule it creates an issue
+# assigned to chief-of-staff, which runs the matter-intake-sweep skill (claim
+# unassigned To Do matters so the delegator picks them up). The package
+# .paperclip.yaml only declares the schedule INTENT; the importer does not
+# create the routine, so we create it here via the REST API (board-authed
+# loopback, same as the mission PATCH). Idempotent (skipped if already there),
+# best-effort (never aborts the launch). --no-routines opts out; dry-run skips.
+# Args: $1 company_id  $2 import_response_file. Curl calls carry
+# "${AUTH_ARGS[@]}" (empty on the main/local_trusted path; set for --add-wall
+# against an authenticated instance).
+provision_intake_routine() {
+    local company_id="$1" import_response_file="$2"
+    local cos_id existing routines_json body resp http rid tbody thttp
+    cos_id="$( { python3 - "$import_response_file" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+agents = d.get("agents") or []
+for a in agents:
+    if isinstance(a, dict) and a.get("slug") == "chief-of-staff":
+        print(a.get("id") or ""); sys.exit(0)
+for a in agents:
+    if isinstance(a, dict) and a.get("id"):
+        print(a.get("id")); sys.exit(0)
+PY
+} || true )"
+    if [ -z "$cos_id" ]; then
+        warn "routines: no chief-of-staff agent id in import response; skipping matter-intake-sweep"
+        return 0
+    fi
+
+    # Idempotency: skip if a routine titled "Matter intake sweep" already exists.
+    routines_json="$(curl --silent --max-time 5 ${AUTH_ARGS+"${AUTH_ARGS[@]}"} "$API_BASE/api/companies/$company_id/routines" || true)"
+    existing="$(printf '%s' "$routines_json" | python3 -c '
+import json, sys
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+items = d if isinstance(d, list) else (d.get("routines") or d.get("data") or d.get("items") or [])
+for it in (items or []):
+    if isinstance(it, dict) and it.get("title") == "Matter intake sweep":
+        print(it.get("id") or "present"); break
+' 2>/dev/null || true)"
+    if [ -n "$existing" ]; then
+        log "routines: matter-intake-sweep already present (skipping)"
+        return 0
+    fi
+
+    milestone "provisioning matter-intake-sweep routine (auto-delegation intake)"
+    body="$(python3 -c '
+import json, sys
+print(json.dumps({
+  "title": "Matter intake sweep",
+  "description": "Automated intake sweep. Run the matter-intake-sweep skill: find unassigned, top-level, human-untouched To Do matters and assign each to yourself (Chief of Staff) so they enter normal triage. Claim-only.",
+  "assigneeAgentId": sys.argv[1],
+  "status": "active",
+}))' "$cos_id")"
+    resp="$DATA_DIR/possiblaw-routine.response"
+    http="$(curl --silent --max-time 10 \
+        ${AUTH_ARGS+"${AUTH_ARGS[@]}"} \
+        --request POST \
+        --header "Content-Type: application/json" \
+        --data "$body" \
+        --output "$resp" \
+        --write-out '%{http_code}' \
+        "$API_BASE/api/companies/$company_id/routines" || echo 000)"
+    if [ "$http" != "201" ] && [ "$http" != "200" ]; then
+        warn "routines: create returned HTTP $http; matter-intake-sweep not provisioned"
+        warn "  Create it in the Paperclip routines UI (title 'Matter intake sweep',"
+        warn "  assignee chief-of-staff, schedule '*/15 8-18 * * 1-5' America/Chicago)."
+        rm -f "$resp"
+        return 0
+    fi
+    rid="$( { python3 - "$resp" <<'PY'
+import json, sys
+try: d = json.load(open(sys.argv[1]))
+except Exception: d = {}
+print(d.get("id") or "")
+PY
+} || true )"
+    rm -f "$resp"
+    if [ -z "$rid" ]; then
+        warn "routines: routine created but no id returned; cannot add schedule trigger"
+        return 0
+    fi
+    tbody='{"kind":"schedule","cronExpression":"*/15 8-18 * * 1-5","timezone":"America/Chicago","enabled":true}'
+    thttp="$(curl --silent --max-time 10 \
+        ${AUTH_ARGS+"${AUTH_ARGS[@]}"} \
+        --request POST \
+        --header "Content-Type: application/json" \
+        --data "$tbody" \
+        --output /dev/null \
+        --write-out '%{http_code}' \
+        "$API_BASE/api/routines/$rid/triggers" || echo 000)"
+    if [ "$thttp" = "201" ] || [ "$thttp" = "200" ]; then
+        log "  matter-intake-sweep active (every 15 min, Mon-Fri 8-18 Central; --no-routines to skip)"
+    else
+        warn "routines: trigger create returned HTTP $thttp; routine exists but is UNSCHEDULED"
+        warn "  Add a schedule trigger in the UI: '*/15 8-18 * * 1-5' (America/Chicago)."
+    fi
+    return 0
+}
+
+# Start one gate proxy bound to a single company. Args:
+#   $1 company_id  $2 gate_port  $3 receipts_path  $4 pid_file  $5 log_file  $6 label
+# Mirrors the original single-company block; warn-only on failure so a wall
+# never aborts the firm launch. Sets GATE_START_ATTEMPTED=true only when a
+# proxy was actually spawned this call (i.e. the pid file was written by us),
+# so callers can tell a fresh start from a skip that left a stale pid file.
+GATE_START_ATTEMPTED="false"
+start_gate_proxy_for() {
+    local company_id="$1" gate_port="$2" receipts_path="$3" pid_file="$4" log_file="$5" label="$6"
+    GATE_START_ATTEMPTED="false"
+    if [ -n "$(lsof -nP -iTCP:"$gate_port" -sTCP:LISTEN -t 2>/dev/null || true)" ]; then
+        warn "[$label] port $gate_port is already in use; skipping gate-proxy start"
+        warn "(stop the other process or re-run with --gate-port <n>)"
+        return 0
+    fi
+    : > "$log_file"
+    if [ ! -d "$REPO_ROOT/gate-proxy/node_modules" ]; then
+        milestone "[$label] installing gate-proxy dependencies (first run)"
+        # </dev/null: this function runs inside while-read loops (wall restore);
+        # a stdin-reading child (e.g. a corepack prompt) would otherwise swallow
+        # the loop's next row from the process substitution.
+        if ! pnpm -C "$REPO_ROOT/gate-proxy" install >>"$log_file" 2>&1 </dev/null; then
+            warn "[$label] gate-proxy dependency install failed (log: $log_file); continuing without the gate proxy"
+            return 0
+        fi
+    fi
+    milestone "[$label] starting gate proxy on http://127.0.0.1:$gate_port (log: $log_file)"
+    mkdir -p "$(dirname "$receipts_path")" "$HOME/.possiblaw/action-packages"
+    # Operator-exported egress creds (EGRESS_CRED_VARS) plus
+    # LOCAL_MODEL_URL / EXTERNAL_MODEL_URL pass through by inheritance —
+    # this is the ONLY child process the launcher starts without the scrub.
+    (
+        exec env \
+            GATE_PROXY_PORT="$gate_port" \
+            GATE_POLICY_PATH="$REPO_ROOT/companies/legal-operations/gate-policy.yaml" \
+            GATE_RECEIPTS_PATH="$receipts_path" \
+            PAPERCLIP_BASE_URL="$API_BASE" \
+            PAPERCLIP_COMPANY_ID="$company_id" \
+            GATE_ACTION_PACKAGE_DIR="$HOME/.possiblaw/action-packages" \
+            pnpm -C "$REPO_ROOT/gate-proxy" start
+    ) >>"$log_file" 2>&1 </dev/null &
+    local gate_proxy_pid="$!"
+    GATE_START_ATTEMPTED="true"
+    echo "$gate_proxy_pid" > "$pid_file"
+    GATE_PID_FILES+=("$pid_file")
+    GATE_PID_PORTS+=("$gate_port")
+
+    local gate_waited=0 gate_healthy="false" gate_http_code
+    while [ "$gate_waited" -lt "$GATE_HEALTH_TIMEOUT_SECS" ]; do
+        if ! kill -0 "$gate_proxy_pid" 2>/dev/null; then break; fi
+        gate_http_code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 "http://127.0.0.1:$gate_port/health" || true)"
+        if [ "$gate_http_code" = "200" ]; then gate_healthy="true"; break; fi
+        sleep 1
+        gate_waited=$(( gate_waited + 1 ))
+    done
+    if [ "$gate_healthy" = "true" ]; then
+        # Replace the subshell PID with the actual listener PID so
+        # `kill $(cat gate-proxy.pid)` does the right thing.
+        local gate_listen_pid
+        gate_listen_pid="$(lsof -nP -iTCP:"$gate_port" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
+        if [ -n "$gate_listen_pid" ]; then
+            echo "$gate_listen_pid" > "$pid_file"
+        fi
+        milestone "[$label] gate proxy healthy at http://127.0.0.1:$gate_port (receipts: $receipts_path)"
+    elif kill -0 "$gate_proxy_pid" 2>/dev/null; then
+        warn "[$label] gate proxy not healthy after ${GATE_HEALTH_TIMEOUT_SECS}s — continuing; gate-dependent"
+        warn "skills will fail visibly until it comes up (log: $log_file)"
+    else
+        warn "[$label] gate proxy exited during startup — continuing; gate-dependent skills will fail visibly"
+        tail -n 20 "$log_file" >&2 || true
+        rm -f "$pid_file"
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Firm facade: provision company-scoped key + emit MCP-client config
+# ---------------------------------------------------------------------------
+#
+# --firm-facade provisions a company-scoped agent key (attached to the
+# chief-of-staff agent; POST /api/agents/:id/keys, board-only loopback) and
+# writes a ready-to-paste MCP-client config JSON to
+# <data-dir>/firm-facade-mcp.json (mode 600; contains the raw key).
+#
+# The facade is spawned on-demand by the OUTSIDE assistant's MCP client over
+# stdio — the launcher does NOT start a server here.
+#
+# Key-mint contract (Step A, confirmed read-only):
+#   paperclip/server/src/routes/agents.ts:2850 — POST /api/agents/:id/keys
+#   body: { "name": "<string>" }   (schema: paperclip/packages/shared/…/agent.ts:112)
+#   response 201: { id, name, token, createdAt }
+#   token = raw key (returned ONCE on create; hashed in DB; never re-listable)
+#   assertBoard enforced → board-authed loopback (local_trusted) can mint
+
+# emit_facade_config <company_id> <import_response_file> <gate_proxy_url>
+#   <facade_mcp_file> <company_short_code>: mints a company-scoped chief-of-
+# staff agent key (POST /api/agents/:id/keys, carrying ${AUTH_ARGS[@]} — empty
+# on the main/local_trusted path) and writes the ready-to-paste MCP-client
+# config to facade_mcp_file (mode 600). Best-effort: never aborts the launch.
+emit_facade_config() {
+    local company_id="$1" import_response_file="$2" gate_proxy_url="$3" facade_mcp_file="$4" company_short_code="$5"
+    milestone "firm facade: provisioning company-scoped key + emitting MCP-client config"
+
+    # Resolve chief-of-staff agent id from import response (fallback: first agent).
+    # Guarded with `|| true` so a Python failure cannot trip `set -e` and kill
+    # the launcher AFTER a successful import (before the final banner).
+    FACADE_AGENT_ID="$( { python3 - "$import_response_file" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+agents = d.get("agents") or []
+for a in agents:
+    if isinstance(a, dict) and a.get("slug") == "chief-of-staff":
+        print(a.get("id") or ""); sys.exit(0)
+for a in agents:
+    if isinstance(a, dict) and a.get("id"):
+        print(a.get("id")); sys.exit(0)
+PY
+} || true )"
+
+    FACADE_KEY_TOKEN=""
+    FACADE_KEY_ERR="false"
+    if [ -z "$FACADE_AGENT_ID" ]; then
+        warn "firm facade: no agent id found in import response; cannot auto-mint company-scoped key"
+        FACADE_KEY_ERR="true"
+    else
+        # Capture the HTTP status separately; the response BODY goes to a 0600
+        # temp file (mktemp default perms) and is NEVER echoed — it contains the
+        # raw token on success. Parse the token from the file, then shred it.
+        FACADE_KEY_RESP_FILE="$(mktemp -t possiblaw-facade-key.XXXXXX.json)"
+        FACADE_KEY_HTTP="$(curl --silent --max-time 10 \
+            ${AUTH_ARGS+"${AUTH_ARGS[@]}"} \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data '{"name":"firm-facade"}' \
+            --output "$FACADE_KEY_RESP_FILE" \
+            --write-out '%{http_code}' \
+            "$API_BASE/api/agents/$FACADE_AGENT_ID/keys" || echo 000)"
+        FACADE_KEY_TOKEN="$(python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    d = {}
+print(d.get("token") or "")' "$FACADE_KEY_RESP_FILE" 2>/dev/null || true)"
+        rm -f "$FACADE_KEY_RESP_FILE"
+        if [ -z "$FACADE_KEY_TOKEN" ]; then
+            warn "firm facade: key mint returned no token (HTTP $FACADE_KEY_HTTP)"
+            warn "  To mint a company-scoped key manually:"
+            warn "    POST $API_BASE/api/agents/$FACADE_AGENT_ID/keys"
+            warn "    body: {\"name\":\"firm-facade\"}"
+            warn "    The response.token is the raw key — add it as PAPERCLIP_API_KEY"
+            warn "    in $facade_mcp_file after this run."
+            FACADE_KEY_ERR="true"
+        else
+            log "  company-scoped agent key minted (agent $FACADE_AGENT_ID; token redacted from log)"
+        fi
+    fi
+
+    FACADE_SERVER_TS="$REPO_ROOT/mcp-servers/firm-facade/src/server.ts"
+    FACADE_MCP_FILE="$facade_mcp_file"
+    FACADE_POLICY_PATH="$REPO_ROOT/companies/legal-operations/gate-policy.yaml"
+
+    # Build JSON with all values via env (avoids quoting/escaping of key token).
+    # PAPERCLIP_PUBLIC_URL = $API_BASE (local loopback for local installs;
+    #   for hosted deployments the operator should update the emitted config
+    #   with the public base URL so approval deep links resolve correctly).
+    # PAPERCLIP_COMPANY_PREFIX = company_short_code (issue-prefix / slug).
+    # Guard the heredoc with `{ ...; } || warn` so a non-zero Python exit
+    # (perm error, KeyError, disk full) cannot trip `set -e`; control always
+    # reaches the -f check below.
+    { PCSF_BASE_URL="$API_BASE" \
+      PCSF_COMPANY_ID="$company_id" \
+      PCSF_GATE_PROXY_URL="$gate_proxy_url" \
+      PCSF_API_KEY="$FACADE_KEY_TOKEN" \
+      PCSF_PUBLIC_URL="$API_BASE" \
+      PCSF_COMPANY_PREFIX="${company_short_code:-}" \
+      PCSF_POLICY_PATH="$FACADE_POLICY_PATH" \
+      PCSF_SERVER_TS="$FACADE_SERVER_TS" \
+      PCSF_OUT_FILE="$FACADE_MCP_FILE" \
+      python3 - <<'PY'
+import json, os
+
+server_ts   = os.environ["PCSF_SERVER_TS"]
+# tsx binary from the facade's own node_modules; fallback to node --import tsx
+tsx_bin = os.path.join(os.path.dirname(os.path.dirname(server_ts)),
+                       "node_modules", ".bin", "tsx")
+if os.path.isfile(tsx_bin) and os.access(tsx_bin, os.X_OK):
+    command, args = tsx_bin, [server_ts]
+else:
+    command, args = "node", ["--import", "tsx", server_ts]
+
+# Required env vars for the facade (server.ts buildDepsFromEnv)
+env = {
+    "PAPERCLIP_BASE_URL":  os.environ["PCSF_BASE_URL"],
+    "PAPERCLIP_COMPANY_ID": os.environ["PCSF_COMPANY_ID"],
+    "GATE_PROXY_URL":      os.environ["PCSF_GATE_PROXY_URL"],
+}
+# Optional — include only when non-empty
+for facade_key, env_key in (
+    ("PAPERCLIP_API_KEY",        "PCSF_API_KEY"),
+    ("PAPERCLIP_PUBLIC_URL",     "PCSF_PUBLIC_URL"),
+    ("PAPERCLIP_COMPANY_PREFIX", "PCSF_COMPANY_PREFIX"),
+    ("GATE_POLICY_PATH",         "PCSF_POLICY_PATH"),
+):
+    v = os.environ.get(env_key, "")
+    if v:
+        env[facade_key] = v
+
+config = {
+    "mcpServers": {
+        "possiblaw-firm-facade": {
+            "command": command,
+            "args": args,
+            "env": env,
+        }
+    }
+}
+out = os.environ["PCSF_OUT_FILE"]
+# Create restricted (0600) from the start — no world-readable TOCTOU window.
+fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w") as fh:
+    json.dump(config, fh, indent=2)
+    fh.write("\n")
+PY
+    } || warn "firm facade: config write failed (Python exited non-zero)"
+
+    if [ -f "$FACADE_MCP_FILE" ]; then
+        # Belt-and-suspenders: re-assert 0600 in case the file pre-existed.
+        chmod 600 "$FACADE_MCP_FILE"
+        log "  MCP-client config written: $FACADE_MCP_FILE (mode 600)"
+    else
+        warn "firm facade: config write failed (no file at $FACADE_MCP_FILE)"
+    fi
+
+    printf '\n'
+    printf '=== Firm Facade MCP Config =============================================\n'
+    printf '  Config file: %s\n' "$FACADE_MCP_FILE"
+    if [ "$FACADE_KEY_ERR" = "true" ]; then
+        printf '\n'
+        printf '  WARNING (Unit-G known limitation): company-scoped key auto-mint\n'
+        printf '  failed. PAPERCLIP_API_KEY is absent from the config. On a\n'
+        printf '  local_trusted instance the facade may still function via\n'
+        printf '  unauthenticated board loopback, but the human-gate structural\n'
+        printf '  guarantee depends on a company-scoped key (cannot assertBoard).\n'
+        printf '  Mint manually and add response.token as PAPERCLIP_API_KEY in\n'
+        printf '  the mcpServers env block of the config file.\n'
+    else
+        printf '  Key:   company-scoped agent key (stored in config file only)\n'
+    fi
+    printf '\n'
+    printf '  Add the "possiblaw-firm-facade" block to your outside assistant'\''s\n'
+    printf '  MCP config, then restart the assistant:\n'
+    printf '    Claude Desktop: ~/.config/claude/claude_desktop_config.json\n'
+    printf '    Codex:          ~/.codex/config.toml  [mcp_servers] block\n'
+    printf '    Other MCP host: paste the mcpServers entry per your host'\''s docs.\n'
+    printf '=======================================================================\n'
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # --list-variants short-circuit
 # ---------------------------------------------------------------------------
 
@@ -475,6 +1126,196 @@ for slug, v in variants.items():
     print(f"  {slug:10s}  {label}{suffix}")
 PY
     rm -f "$LV_TMP"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# --add-wall: attach an ethically-walled client company to a RUNNING instance
+# ---------------------------------------------------------------------------
+# Imports the full package as a NEW company on an already-running firm,
+# starts that company its own dedicated gate proxy (never the firm's), binds
+# GATE_PROXY_URL into its agents, provisions the intake routine (honors
+# --no-routines), emits a per-wall facade config (--firm-facade), and
+# records the wall in $DATA_DIR/walls.json. Never starts a server itself.
+#
+# This block runs before the main path resolves $VARIANT (interactive prompt
+# / --non-interactive requirement) or builds $VARIANTS_JSON_FILE, $DEMO_DIR,
+# etc. — it has to, since it must never block on stdin. So it resolves a
+# minimal, self-contained copy of what build_import_body needs here, using
+# the exact same functions the main path calls (build_import_body, run_import,
+# patch_agent_envs, provision_intake_routine, emit_facade_config,
+# start_gate_proxy_for) — moved earlier in this file for exactly this reason.
+#
+# Exit codes:
+#   2 — bad input: missing --variant (required on this path), unknown
+#       --variant/--demo, or a client name the prefix helper rejects
+#       (fewer than 3 A-Z letters).
+#   3 — issue-prefix collision. This also covers re-running --add-wall with
+#       the same client name a second time: its own company already holds
+#       that prefix, so collision IS "already walled" (repairing/re-wiring
+#       an existing wall's runtime state on restart is Task 4 scope, not
+#       this command's).
+#   4 — no running instance found, or an attach/API failure after the health
+#       check passed (companies fetch non-200 incl. 401/403 auth failures,
+#       import failure, no company id, walls.json registry write failure —
+#       in the later cases the wall may be partially live; re-running
+#       --add-wall repairs it).
+if [ -n "$ADD_WALL" ]; then
+    # 0. Required input, checked before any network call so it's testable
+    #    offline: the wall path must never block on an interactive variant
+    #    prompt, and silently defaulting would let a wall's agents diverge
+    #    from the running firm's adapter lanes without the operator noticing.
+    if [ -z "$VARIANT" ]; then
+        err "--add-wall requires --variant <name> — the walled company's agents get this variant's adapter lanes; use the same variant as your running firm (see --list-variants)"
+        exit 2
+    fi
+
+    API_BASE="http://127.0.0.1:$PORT"
+    WALLS_PY="$REPO_ROOT/bin/_possiblaw_walls.py"
+    WALLS_REGISTRY="$DATA_DIR/walls.json"
+    AUTH_ARGS=()
+    [ -n "$API_KEY" ] && AUTH_ARGS=(--header "Authorization: Bearer $API_KEY")
+
+    # 1. Running-instance check (net-new; nothing like it exists today).
+    HEALTH_CODE="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 3 "$API_BASE/api/health" || true)"
+    if [ "$HEALTH_CODE" != "200" ]; then
+        err "--add-wall needs a running instance at $API_BASE (health returned '$HEALTH_CODE')"
+        err "start the firm first: ./bin/possiblaw --port $PORT --data-dir $DATA_DIR ..."
+        exit 4
+    fi
+
+    # 2. Prefix preflight against live companies. The `|| true` guards the
+    #    curl under set -e (a bare failing command would abort the whole
+    #    script uncontrolled); the HTTP status is then checked explicitly so
+    #    an auth failure (401/403 on an authenticated instance) is reported
+    #    as what it is — an attach failure (exit 4) with an --api-key hint —
+    #    instead of the helper choking on an error-object body and the
+    #    failure masquerading as a collision.
+    COMPANIES_FILE="$(mktemp)"
+    COMPANIES_HTTP="$(curl --silent --max-time 10 ${AUTH_ARGS+"${AUTH_ARGS[@]}"} \
+        --output "$COMPANIES_FILE" --write-out '%{http_code}' \
+        "$API_BASE/api/companies" || true)"
+    if [ "$COMPANIES_HTTP" != "200" ]; then
+        err "--add-wall: GET $API_BASE/api/companies returned HTTP '$COMPANIES_HTTP' — cannot run the prefix preflight"
+        if [ "$COMPANIES_HTTP" = "401" ] || [ "$COMPANIES_HTTP" = "403" ]; then
+            err "authenticated instance? pass --api-key <pcp_board_…> (minted via the CLI-auth flow)"
+        fi
+        rm -f "$COMPANIES_FILE"
+        exit 4
+    fi
+    # Propagate the helper's real exit code — never collapse: 2 = bad input
+    # (e.g. a name with <3 letters, or a non-array companies payload),
+    # 3 = prefix collision (incl. "this wall already exists").
+    WALL_PREFIX="$(python3 "$WALLS_PY" --check-collision --name "$ADD_WALL" --companies-json "$COMPANIES_FILE")" || {
+        rc=$?
+        rm -f "$COMPANIES_FILE"
+        exit "$rc"
+    }
+    rm -f "$COMPANIES_FILE"
+    milestone "wall prefix: $WALL_PREFIX"
+
+    # 3. Import the walled company. build_import_body needs the same globals
+    #    the main path establishes before ever reaching it — resolve a
+    #    minimal copy here since --add-wall exits long before the main path
+    #    would set them up itself. ($VARIANT is guaranteed non-empty by the
+    #    step-0 check; here we validate it against variants.yaml.)
+    VARIANTS_JSON_FILE="$(mktemp -t possiblaw-variants.XXXXXX.json)"
+    yaml_to_json "$VARIANTS_FILE" > "$VARIANTS_JSON_FILE"
+    if ! list_variant_slugs | grep -qx "$VARIANT"; then
+        err "Unknown variant: $VARIANT"
+        err "Available: $(list_variant_slugs | tr '\n' ' ')"
+        exit 2
+    fi
+    DEMO_DIR=""
+    if [ -n "$DEMO_PROFILE" ]; then
+        DEMO_DIR="$REPO_ROOT/companies/demos/$DEMO_PROFILE"
+        if [ ! -d "$DEMO_DIR" ]; then
+            err "Unknown demo profile: $DEMO_PROFILE"
+            exit 2
+        fi
+    fi
+
+    ORG_NAME="$ADD_WALL"
+    IMPORT_RESPONSE_FILE="$DATA_DIR/possiblaw-wall-$WALL_PREFIX-import.response"
+    IMPORT_STATUS_FILE="$DATA_DIR/possiblaw-wall-$WALL_PREFIX-import.status"
+    IMPORT_ERR_FILE="$DATA_DIR/possiblaw-wall-$WALL_PREFIX-import.err"
+
+    if ! build_import_body "$ORG_NAME"; then
+        exit 4
+    fi
+    if ! run_import "$API_BASE/api/companies/import" "$BODY_FILE" "$IMPORT_RESPONSE_FILE" "$IMPORT_STATUS_FILE" "$IMPORT_ERR_FILE"; then
+        exit 4
+    fi
+    WALL_COMPANY_ID="$(json_get_str company.id < "$IMPORT_RESPONSE_FILE")"
+    [ -n "$WALL_COMPANY_ID" ] || { err "wall import returned no company id"; exit 4; }
+    WALL_WARNING_COUNT="$(python3 -c "import json; d=json.load(open('$IMPORT_RESPONSE_FILE')); print(len(d.get('warnings') or []))")"
+    log "wall company id: $WALL_COMPANY_ID"
+    log "warnings: $WALL_WARNING_COUNT"
+    if [ "$WALL_WARNING_COUNT" -gt 0 ]; then
+        python3 -c "
+import json
+d=json.load(open('$IMPORT_RESPONSE_FILE'))
+for w in (d.get('warnings') or []): print('  warn:', w)
+"
+    fi
+
+    # 4. Per-wall gate proxy (never the firm's — this call always spawns a
+    #    NEW proxy scoped to the wall's own company id).
+    WALL_GATE_PORT="$(python3 "$WALLS_PY" --alloc-gate-port --registry "$WALLS_REGISTRY" --base "$GATE_PORT_BASE")"
+    WALL_RECEIPTS="$HOME/.possiblaw/gate-receipts/$(basename "$DATA_DIR")-$WALL_PREFIX/receipts.jsonl"
+    start_gate_proxy_for "$WALL_COMPANY_ID" "$WALL_GATE_PORT" "$WALL_RECEIPTS" \
+        "$DATA_DIR/gate-proxy-$WALL_PREFIX.pid" "$DATA_DIR/gate-proxy-$WALL_PREFIX.log" "wall:$WALL_PREFIX"
+    WALL_GATE_PROXY_URL="http://127.0.0.1:$WALL_GATE_PORT"
+
+    # 5. Agent env patch: GATE_PROXY_URL only — the wall gets no secret_env
+    #    (that binds an API-key variant's own secret_ref, orthogonal to
+    #    --api-key, which authenticates THIS command to the running instance).
+    WALL_SECRET_IDS_FILE="$(mktemp -t possiblaw-wall-secret-ids.XXXXXX.json)"
+    printf '{}' > "$WALL_SECRET_IDS_FILE"
+    WALL_PLAIN_ENV_FILE="$(mktemp -t possiblaw-wall-plain-env.XXXXXX.json)"
+    printf '{"GATE_PROXY_URL": "%s"}' "$WALL_GATE_PROXY_URL" > "$WALL_PLAIN_ENV_FILE"
+    patch_agent_envs "$WALL_COMPANY_ID" "$IMPORT_RESPONSE_FILE" "$OVERRIDES_FILE" "$WALL_SECRET_IDS_FILE" "$WALL_PLAIN_ENV_FILE"
+    rm -f "$WALL_SECRET_IDS_FILE" "$WALL_PLAIN_ENV_FILE"
+
+    # 6. Routines — honors --no-routines.
+    if [ "$PROVISION_ROUTINES" = "true" ]; then
+        provision_intake_routine "$WALL_COMPANY_ID" "$IMPORT_RESPONSE_FILE" || true
+    fi
+
+    # 7. Facade config (only with --firm-facade).
+    WALL_FACADE_CONFIG_PATH=""
+    if [ "$FIRM_FACADE" = "true" ]; then
+        WALL_FACADE_MCP_FILE="$DATA_DIR/firm-facade-mcp-$WALL_PREFIX.json"
+        emit_facade_config "$WALL_COMPANY_ID" "$IMPORT_RESPONSE_FILE" "$WALL_GATE_PROXY_URL" "$WALL_FACADE_MCP_FILE" "$WALL_PREFIX"
+        WALL_FACADE_CONFIG_PATH="$WALL_FACADE_MCP_FILE"
+    fi
+
+    # 8. Record the wall.
+    WALL_RECORD_JSON="$(printf '{"name":%s,"companyId":%s,"prefix":%s,"gatePort":%s,"receiptsPath":%s,"facadeConfig":%s,"status":"active","createdAt":%s}' \
+        "$(json_escape_str "$ADD_WALL")" \
+        "$(json_escape_str "$WALL_COMPANY_ID")" \
+        "$(json_escape_str "$WALL_PREFIX")" \
+        "$WALL_GATE_PORT" \
+        "$(json_escape_str "$WALL_RECEIPTS")" \
+        "$( [ -n "$WALL_FACADE_CONFIG_PATH" ] && json_escape_str "$WALL_FACADE_CONFIG_PATH" || printf 'null' )" \
+        "$(json_escape_str "$(date -u +%Y-%m-%dT%H:%M:%SZ)")")"
+    WALL_ADD_ERR_FILE="$(mktemp)"
+    if ! printf '%s' "$WALL_RECORD_JSON" | python3 "$WALLS_PY" --registry "$WALLS_REGISTRY" --add >/dev/null 2>"$WALL_ADD_ERR_FILE"; then
+        # Any non-zero here is fatal to this command — silently dropping the
+        # registry write after a real import + gate proxy would leave a live,
+        # unrecorded wall. exit 2 for bad-input-shaped failures (a corrupted
+        # existing walls.json) is indistinguishable from a filesystem error
+        # here, so both surface as exit 4: the wall is live, re-running
+        # --add-wall repairs the registry entry (it upserts by prefix).
+        err "wall record could not be written to $WALLS_REGISTRY"
+        err "$(cat "$WALL_ADD_ERR_FILE")"
+        err "the wall itself is live (company $WALL_COMPANY_ID, gate :$WALL_GATE_PORT) — restore walls.json by hand (see docs/workflows/ethical-walls.md, \"Repairing a half-wired wall\")"
+        rm -f "$WALL_ADD_ERR_FILE"
+        exit 4
+    fi
+    rm -f "$WALL_ADD_ERR_FILE"
+    milestone "wall \"$ADD_WALL\" ($WALL_PREFIX) active — company $WALL_COMPANY_ID, gate :$WALL_GATE_PORT"
+    milestone "screened team setup: invite ONLY this client's lawyers to the new company (dashboard → Company Settings → Members)"
     exit 0
 fi
 
@@ -578,16 +1419,6 @@ fi
 # Load variants doc as JSON once.
 VARIANTS_JSON_FILE="$(mktemp -t possiblaw-variants.XXXXXX.json)"
 yaml_to_json "$VARIANTS_FILE" > "$VARIANTS_JSON_FILE"
-
-list_variant_slugs() {
-    python3 - "$VARIANTS_JSON_FILE" <<'PY'
-import json, sys
-with open(sys.argv[1]) as fh:
-    doc = json.load(fh)
-for slug in (doc.get("variants") or {}).keys():
-    print(slug)
-PY
-}
 
 variant_label() {
     python3 - "$VARIANTS_JSON_FILE" "$1" <<'PY'
@@ -1197,6 +2028,10 @@ GATE_RECEIPTS_PATH="$HOME/.possiblaw/gate-receipts/$(basename "$DATA_DIR")/recei
 
 PAPERCLIP_PID=""
 GATE_PROXY_PID=""
+# Declared before the trap installs so kill_gate_proxy_tree can iterate them
+# safely under `set -u` even if a signal lands before any proxy starts.
+GATE_PID_FILES=()
+GATE_PID_PORTS=()
 
 kill_subshell_tree() {
     # Kill the subshell wrapper, all its descendants, and any process holding the given port.
@@ -1241,10 +2076,23 @@ kill_subshell_tree() {
 kill_paperclip_tree() { kill_subshell_tree "$1" "$PORT"; }
 
 kill_gate_proxy_tree() {
-    # No-op until the gate proxy has started; mirrors possiblaw.pid handling.
-    [ -n "$GATE_PROXY_PID" ] || return 0
-    kill_subshell_tree "$GATE_PROXY_PID" "$GATE_PORT"
-    [ -f "$GATE_PID_FILE" ] && rm -f "$GATE_PID_FILE"
+    # Sweeps every gate proxy started via start_gate_proxy_for (today: just the
+    # single firm proxy; later tasks add one per walled-client company).
+    # GATE_PID_FILES/GATE_PID_PORTS are paired by index so the port-sweep
+    # fallback in kill_subshell_tree still applies per proxy.
+    local i pf pid port
+    # The bang/index form is REQUIRED here: on macOS bash 3.2 with set -u,
+    # expanding a declared-but-empty array as "${GATE_PID_FILES[@]}" aborts
+    # with "unbound variable", and the ":-" workaround injects one spurious
+    # empty-string iteration; "${!arr[@]}" iterates zero times, correctly.
+    for i in "${!GATE_PID_FILES[@]}"; do
+        pf="${GATE_PID_FILES[$i]}"
+        port="${GATE_PID_PORTS[$i]:-}"
+        [ -f "$pf" ] || continue
+        pid="$(cat "$pf" 2>/dev/null || true)"
+        [ -n "$pid" ] && kill_subshell_tree "$pid" "$port"
+        rm -f "$pf"
+    done
     GATE_PROXY_PID=""
 }
 
@@ -1370,6 +2218,24 @@ EGRESS_SCRUB_ARGS=()
 for cred_var in $EGRESS_CRED_VARS; do
     EGRESS_SCRUB_ARGS+=(-u "$cred_var")
 done
+# --auth-mode authenticated: boot the server in paperclip's authenticated
+# deployment mode. PAPERCLIP_DEPLOYMENT_MODE is read by the server config
+# (paperclip/server/src/config.ts); an authenticated boot hard-requires
+# BETTER_AUTH_SECRET (paperclip/server/src/auth/better-auth.ts). The secret
+# is generated once (0600 via umask 177), persisted in the data dir, and
+# reused on every restart so user sessions survive relaunches.
+if [ "$AUTH_MODE" = "authenticated" ]; then
+    AUTH_SECRET_FILE="$DATA_DIR/better-auth.secret"
+    if [ ! -f "$AUTH_SECRET_FILE" ]; then
+        umask_prev="$(umask)"; umask 177
+        head -c 32 /dev/urandom | base64 > "$AUTH_SECRET_FILE"
+        umask "$umask_prev"
+        milestone "generated better-auth secret at $AUTH_SECRET_FILE (0600, reused on restart)"
+    fi
+    SERVER_AUTH_ENV=(PAPERCLIP_DEPLOYMENT_MODE=authenticated BETTER_AUTH_SECRET="$(cat "$AUTH_SECRET_FILE")")
+else
+    SERVER_AUTH_ENV=()
+fi
 (
     cd "$PAPERCLIP_DIR"
     # onboard reads its port from $PORT (cli/src/commands/onboard.ts); without
@@ -1377,7 +2243,9 @@ done
     # $API_BASE never succeeds when a custom port was chosen.
     # shellcheck disable=SC2086 — ONBOARD_EXTRA_ENV holds zero or more
     # space-free KEY=VALUE assignments (e.g. the static-UI mode flag).
-    exec env "${EGRESS_SCRUB_ARGS[@]}" PORT="$PORT" $ONBOARD_EXTRA_ENV pnpm paperclipai onboard --data-dir "$DATA_DIR" --bind loopback --yes
+    # SERVER_AUTH_ENV uses the ${arr+...} guard: bash 3.2 + set -u aborts on
+    # expanding an empty array as "${arr[@]}" (same pattern as AUTH_ARGS).
+    exec env "${EGRESS_SCRUB_ARGS[@]}" ${SERVER_AUTH_ENV+"${SERVER_AUTH_ENV[@]}"} PORT="$PORT" $ONBOARD_EXTRA_ENV pnpm paperclipai onboard --data-dir "$DATA_DIR" --bind loopback --yes
 ) >>"$LAUNCHER_LOG" 2>&1 </dev/null &
 PAPERCLIP_PID=$!
 echo "$PAPERCLIP_PID" > "$LAUNCHER_PID_FILE"
@@ -1409,6 +2277,30 @@ if [ "$HEALTHY" != "true" ]; then
     exit 1
 fi
 milestone "paperclip healthy at $HEALTH_URL"
+
+# --auth-mode authenticated: surface the one-time board-claim URL. On the
+# first authenticated boot of a formerly local_trusted data dir the server
+# prints it to its console (paperclip/server/src/index.ts, via
+# getBoardClaimWarningUrl) — which lands in $LAUNCHER_LOG. The URL is wrapped
+# in ANSI color codes there, so strip those before matching. A genuinely
+# fresh authenticated data dir prints no claim URL (its first admin comes
+# from `paperclipai auth bootstrap-ceo` — see docs/workflows/ethical-walls.md).
+if [ "$AUTH_MODE" = "authenticated" ]; then
+    CLAIM_LINE="$(sed $'s/\x1b\\[[0-9;]*m//g' "$LAUNCHER_LOG" 2>/dev/null \
+        | grep -o 'http[s]*://[^ ]*/board-claim/[^ ]*' | head -n 1 || true)"
+    if [ -n "$CLAIM_LINE" ]; then
+        milestone "AUTHENTICATED MODE — claim board ownership (first admin): $CLAIM_LINE"
+    else
+        milestone "authenticated mode active; manage lawyer accounts via company invites (see docs/workflows/ethical-walls.md)"
+    fi
+    # Secret-exposure disclosure: paperclip's authenticated boot reads
+    # BETTER_AUTH_SECRET from the server process env ONLY (no file-based
+    # alternative in the pinned submodule — server/src/auth/better-auth.ts),
+    # and adapter-spawned agents inherit the server's env wholesale, so it
+    # cannot be scrubbed the way egress creds are. Warn every boot.
+    warn "authenticated mode places BETTER_AUTH_SECRET in the server process env, which adapter-spawned agents inherit"
+    warn "a hostile or prompt-injected agent could read it and forge sessions; treat agent code/skills as trusted in authenticated mode until upstream supports env allowlisting (see docs/known-limitations.md)"
+fi
 
 # Replace the subshell PID in $LAUNCHER_PID_FILE with the actual server PID
 # (the process listening on $PORT) so `kill $(cat ...pid)` does the right thing.
@@ -1449,90 +2341,11 @@ fi
 # Build the import POST body
 # ---------------------------------------------------------------------------
 
-milestone "building import body (variant=$VARIANT, $(find "$PACKAGE" -type f | wc -l | tr -d ' ') files)"
-
-DEMO_ARGS=()
-if [ -n "$DEMO_DIR" ]; then
-    DEMO_ARGS=(--extra-root "$DEMO_DIR")
-    DEMO_PROJECT_COUNT="$(find "$DEMO_DIR" -name PROJECT.md | wc -l | tr -d ' ')"
-    DEMO_TASK_COUNT="$(find "$DEMO_DIR" -name TASK.md | wc -l | tr -d ' ')"
-    log "demo profile: $DEMO_PROFILE (+$DEMO_PROJECT_COUNT projects, +$DEMO_TASK_COUNT tasks; see $DEMO_DIR/README.md for the demo script)"
-fi
-
-TEAMS_ARGS=()
-if [ -n "$TEAMS" ]; then
-    TEAMS_ARGS=(--include-teams "$TEAMS")
-fi
-
-FIRM_MEMORY_ARGS=()
-if [ -n "$FIRM_MEMORY_FILE" ]; then
-    FIRM_MEMORY_ARGS=(--firm-memory-file "$FIRM_MEMORY_FILE")
-fi
-
-OVERLAY_ARGS=()
-if [ -n "$BUSINESS_DIR" ]; then
-    OVERLAY_ARGS=(--business-overlay-root "$BUSINESS_DIR")
-fi
-
-# Bundle BEFORE override generation: with --teams the bundle carries a
-# filtered .paperclip.yaml, and adapter overrides must be generated from that
-# filtered sidecar so no override references an agent outside the subset.
-INLINE_FILE="$(mktemp -t possiblaw-inline.XXXXXX.json)"
-if ! python3 "$INLINE_PY" --package-root "$PACKAGE" \
-        ${DEMO_ARGS+"${DEMO_ARGS[@]}"} ${TEAMS_ARGS+"${TEAMS_ARGS[@]}"} \
-        ${FIRM_MEMORY_ARGS+"${FIRM_MEMORY_ARGS[@]}"} ${OVERLAY_ARGS+"${OVERLAY_ARGS[@]}"} \
-        > "$INLINE_FILE"; then
-    err "inline source bundling failed"
+if ! build_import_body "$ORG_NAME"; then
     kill_paperclip_tree "$PAPERCLIP_PID"
     rm -f "$LAUNCHER_PID_FILE"
     exit 1
 fi
-
-PAPERCLIP_JSON_FILE="$(mktemp -t possiblaw-paperclip.XXXXXX.json)"
-if [ -n "$TEAMS" ]; then
-    SUBSET_SIDECAR_FILE="$(mktemp -t possiblaw-subset-sidecar.XXXXXX.yaml)"
-    if ! python3 -c 'import json,sys; sys.stdout.write(json.load(open(sys.argv[1]))["source"]["files"][".paperclip.yaml"])' \
-            "$INLINE_FILE" > "$SUBSET_SIDECAR_FILE"; then
-        err "could not extract the filtered sidecar from the bundle"
-        kill_paperclip_tree "$PAPERCLIP_PID"
-        rm -f "$LAUNCHER_PID_FILE"
-        exit 1
-    fi
-    yaml_to_json "$SUBSET_SIDECAR_FILE" > "$PAPERCLIP_JSON_FILE"
-else
-    yaml_to_json "$PAPERCLIP_YAML" > "$PAPERCLIP_JSON_FILE"
-fi
-
-OVERRIDES_FILE="$(mktemp -t possiblaw-overrides.XXXXXX.json)"
-if ! python3 "$VARIANTS_PY" \
-        --variants-json "$VARIANTS_JSON_FILE" \
-        --paperclip-json "$PAPERCLIP_JSON_FILE" \
-        --variant "$VARIANT" \
-        > "$OVERRIDES_FILE"; then
-    err "adapter override generation failed"
-    kill_paperclip_tree "$PAPERCLIP_PID"
-    rm -f "$LAUNCHER_PID_FILE"
-    exit 1
-fi
-
-BODY_FILE="$(mktemp -t possiblaw-import-body.XXXXXX.json)"
-python3 - "$INLINE_FILE" "$OVERRIDES_FILE" "$ORG_NAME" > "$BODY_FILE" <<'PY'
-import json, sys
-inline = json.load(open(sys.argv[1]))
-overrides = json.load(open(sys.argv[2]))
-org_name = sys.argv[3]
-body = {
-    "source": inline["source"],
-    "target": {"mode": "new_company", "newCompanyName": org_name},
-    "include": {"company": True, "agents": True, "projects": True, "issues": True, "skills": True},
-    "collisionStrategy": "rename",
-    "adapterOverrides": overrides,
-}
-json.dump(body, sys.stdout)
-PY
-
-BODY_SIZE="$(wc -c < "$BODY_FILE" | tr -d ' ')"
-log "import body: $BODY_SIZE bytes ($(python3 -c "import json; d=json.load(open('$BODY_FILE')); print(len(d['adapterOverrides']))") agents)"
 
 # ---------------------------------------------------------------------------
 # POST /api/companies/import  (or /import/preview when --dry-run)
@@ -1546,66 +2359,15 @@ else
     milestone "POST $IMPORT_URL"
 fi
 
-# Heartbeat: print elapsed seconds every 10s while the POST runs.
 IMPORT_RESPONSE_FILE="$DATA_DIR/possiblaw-import.response"
 IMPORT_ERR_FILE="$DATA_DIR/possiblaw-import.err"
 IMPORT_STATUS_FILE="$DATA_DIR/possiblaw-import.status"
-: > "$IMPORT_RESPONSE_FILE"; : > "$IMPORT_ERR_FILE"; : > "$IMPORT_STATUS_FILE"
 
-(
-    curl --silent --show-error \
-         --max-time "$IMPORT_MAX_TIME_SECS" \
-         --header "Content-Type: application/json" \
-         --header "Connection: keep-alive" \
-         --request POST \
-         --data-binary "@$BODY_FILE" \
-         --output "$IMPORT_RESPONSE_FILE" \
-         --write-out '%{http_code}' \
-         "$IMPORT_URL" \
-         > "$IMPORT_STATUS_FILE" 2> "$IMPORT_ERR_FILE"
-    echo $? > "$DATA_DIR/possiblaw-import.curl_exit"
-) &
-CURL_PID=$!
-
-POST_START_EPOCH="$(date +%s)"
-PARTIAL_CHECKED="false"
-while kill -0 "$CURL_PID" 2>/dev/null; do
-    sleep "$IMPORT_HEARTBEAT_SECS"
-    ELAPSED_POST=$(( $(date +%s) - POST_START_EPOCH ))
-    log "  ... import in progress (${ELAPSED_POST}s elapsed)"
-    if [ "$PARTIAL_CHECKED" = "false" ] && [ "$ELAPSED_POST" -ge "$IMPORT_PARTIAL_CHECK_AFTER_SECS" ]; then
-        PARTIAL_CHECKED="true"
-        CUR_COUNT="$(
-            curl --silent --max-time 5 "$API_BASE/api/companies" 2>/dev/null \
-                | python3 -c "
-import json, sys
-try: d=json.load(sys.stdin)
-except: print(0); sys.exit(0)
-items = d if isinstance(d, list) else (d.get('companies') or d.get('data') or d.get('items') or [])
-print(len(items) if isinstance(items, list) else 0)
-" 2>/dev/null || echo 0
-        )"
-        log "  ... ${IMPORT_PARTIAL_CHECK_AFTER_SECS}s elapsed; $CUR_COUNT company(ies) currently in DB"
-    fi
-done
-wait "$CURL_PID" || true
-
-HTTP_CODE="$(cat "$IMPORT_STATUS_FILE" 2>/dev/null || echo 000)"
-CURL_EXIT="$(cat "$DATA_DIR/possiblaw-import.curl_exit" 2>/dev/null || echo 99)"
-
-if [ "$CURL_EXIT" != "0" ] || [ "$HTTP_CODE" != "200" ]; then
-    err "import POST failed (curl exit $CURL_EXIT, HTTP $HTTP_CODE)"
-    if [ -s "$IMPORT_ERR_FILE" ]; then
-        err "stderr:"; sed 's/^/  /' "$IMPORT_ERR_FILE" >&2
-    fi
-    if [ -s "$IMPORT_RESPONSE_FILE" ]; then
-        err "response (first 1KB):"; head -c 1024 "$IMPORT_RESPONSE_FILE" >&2; echo >&2
-    fi
+if ! run_import "$IMPORT_URL" "$BODY_FILE" "$IMPORT_RESPONSE_FILE" "$IMPORT_STATUS_FILE" "$IMPORT_ERR_FILE"; then
     kill_paperclip_tree "$PAPERCLIP_PID"
     rm -f "$LAUNCHER_PID_FILE"
     exit 1
 fi
-milestone "import POST returned HTTP 200"
 
 # ---------------------------------------------------------------------------
 # Parse import response
@@ -1702,106 +2464,8 @@ if [ -n "$COMPANY_ID" ] && [ -n "$MISSION" ]; then
     fi
 fi
 
-# ---------------------------------------------------------------------------
-# Provision the matter-intake-sweep routine (auto-delegation intake)
-# ---------------------------------------------------------------------------
-# A paperclip routine is a recurring issue: on schedule it creates an issue
-# assigned to chief-of-staff, which runs the matter-intake-sweep skill (claim
-# unassigned To Do matters so the delegator picks them up). The package
-# .paperclip.yaml only declares the schedule INTENT; the importer does not
-# create the routine, so we create it here via the REST API (board-authed
-# loopback, same as the mission PATCH). Idempotent (skipped if already there),
-# best-effort (never aborts the launch). --no-routines opts out; dry-run skips.
-provision_intake_routine() {
-    local cos_id existing routines_json body resp http rid tbody thttp
-    cos_id="$( { python3 - "$IMPORT_RESPONSE_FILE" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-agents = d.get("agents") or []
-for a in agents:
-    if isinstance(a, dict) and a.get("slug") == "chief-of-staff":
-        print(a.get("id") or ""); sys.exit(0)
-for a in agents:
-    if isinstance(a, dict) and a.get("id"):
-        print(a.get("id")); sys.exit(0)
-PY
-} || true )"
-    if [ -z "$cos_id" ]; then
-        warn "routines: no chief-of-staff agent id in import response; skipping matter-intake-sweep"
-        return 0
-    fi
-
-    # Idempotency: skip if a routine titled "Matter intake sweep" already exists.
-    routines_json="$(curl --silent --max-time 5 "$API_BASE/api/companies/$COMPANY_ID/routines" || true)"
-    existing="$(printf '%s' "$routines_json" | python3 -c '
-import json, sys
-try: d = json.load(sys.stdin)
-except Exception: sys.exit(0)
-items = d if isinstance(d, list) else (d.get("routines") or d.get("data") or d.get("items") or [])
-for it in (items or []):
-    if isinstance(it, dict) and it.get("title") == "Matter intake sweep":
-        print(it.get("id") or "present"); break
-' 2>/dev/null || true)"
-    if [ -n "$existing" ]; then
-        log "routines: matter-intake-sweep already present (skipping)"
-        return 0
-    fi
-
-    milestone "provisioning matter-intake-sweep routine (auto-delegation intake)"
-    body="$(python3 -c '
-import json, sys
-print(json.dumps({
-  "title": "Matter intake sweep",
-  "description": "Automated intake sweep. Run the matter-intake-sweep skill: find unassigned, top-level, human-untouched To Do matters and assign each to yourself (Chief of Staff) so they enter normal triage. Claim-only.",
-  "assigneeAgentId": sys.argv[1],
-  "status": "active",
-}))' "$cos_id")"
-    resp="$DATA_DIR/possiblaw-routine.response"
-    http="$(curl --silent --max-time 10 \
-        --request POST \
-        --header "Content-Type: application/json" \
-        --data "$body" \
-        --output "$resp" \
-        --write-out '%{http_code}' \
-        "$API_BASE/api/companies/$COMPANY_ID/routines" || echo 000)"
-    if [ "$http" != "201" ] && [ "$http" != "200" ]; then
-        warn "routines: create returned HTTP $http; matter-intake-sweep not provisioned"
-        warn "  Create it in the Paperclip routines UI (title 'Matter intake sweep',"
-        warn "  assignee chief-of-staff, schedule '*/15 8-18 * * 1-5' America/Chicago)."
-        rm -f "$resp"
-        return 0
-    fi
-    rid="$( { python3 - "$resp" <<'PY'
-import json, sys
-try: d = json.load(open(sys.argv[1]))
-except Exception: d = {}
-print(d.get("id") or "")
-PY
-} || true )"
-    rm -f "$resp"
-    if [ -z "$rid" ]; then
-        warn "routines: routine created but no id returned; cannot add schedule trigger"
-        return 0
-    fi
-    tbody='{"kind":"schedule","cronExpression":"*/15 8-18 * * 1-5","timezone":"America/Chicago","enabled":true}'
-    thttp="$(curl --silent --max-time 10 \
-        --request POST \
-        --header "Content-Type: application/json" \
-        --data "$tbody" \
-        --output /dev/null \
-        --write-out '%{http_code}' \
-        "$API_BASE/api/routines/$rid/triggers" || echo 000)"
-    if [ "$thttp" = "201" ] || [ "$thttp" = "200" ]; then
-        log "  matter-intake-sweep active (every 15 min, Mon-Fri 8-18 Central; --no-routines to skip)"
-    else
-        warn "routines: trigger create returned HTTP $thttp; routine exists but is UNSCHEDULED"
-        warn "  Add a schedule trigger in the UI: '*/15 8-18 * * 1-5' (America/Chicago)."
-    fi
-    return 0
-}
-
 if [ "$PROVISION_ROUTINES" = "true" ] && [ "$DRY_RUN" != "true" ] && [ -n "$COMPANY_ID" ]; then
-    provision_intake_routine || true
+    provision_intake_routine "$COMPANY_ID" "$IMPORT_RESPONSE_FILE" || true
 fi
 
 # ---------------------------------------------------------------------------
@@ -1823,65 +2487,58 @@ if [ "$NO_GATE_PROXY" = "true" ]; then
     warn "gate proxy disabled (--no-gate-proxy, demo-only): egress runs ungated and unreceipted"
 elif [ -z "$COMPANY_ID" ]; then
     warn "no company id parsed from the import response; skipping the gate proxy"
-elif [ -n "$(lsof -nP -iTCP:"$GATE_PORT" -sTCP:LISTEN -t 2>/dev/null || true)" ]; then
-    warn "port $GATE_PORT is already in use; skipping gate-proxy start"
-    warn "(stop the other process or re-run with --gate-port <n>)"
 else
-    GATE_START_OK="true"
-    : > "$GATE_LOG"
-    if [ ! -d "$REPO_ROOT/gate-proxy/node_modules" ]; then
-        milestone "installing gate-proxy dependencies (first run)"
-        if ! pnpm -C "$REPO_ROOT/gate-proxy" install >>"$GATE_LOG" 2>&1; then
-            warn "gate-proxy dependency install failed (log: $GATE_LOG); continuing without the gate proxy"
-            GATE_START_OK="false"
-        fi
+    start_gate_proxy_for "$COMPANY_ID" "$GATE_PORT" "$GATE_RECEIPTS_PATH" "$GATE_PID_FILE" "$GATE_LOG" "firm"
+    # Only trust the pid file if this call actually spawned a proxy; on skip
+    # paths (port in use, install failed) a stale pid file from a previous
+    # session must not surface gate-proxy lines in the Ready banner.
+    if [ "$GATE_START_ATTEMPTED" = "true" ]; then
+        GATE_PROXY_PID="$(cat "$GATE_PID_FILE" 2>/dev/null || true)"
     fi
-    if [ "$GATE_START_OK" = "true" ]; then
-        milestone "starting gate proxy on $GATE_PROXY_URL (log: $GATE_LOG)"
-        mkdir -p "$(dirname "$GATE_RECEIPTS_PATH")" "$HOME/.possiblaw/action-packages"
-        # Operator-exported egress creds (EGRESS_CRED_VARS) plus
-        # LOCAL_MODEL_URL / EXTERNAL_MODEL_URL pass through by inheritance —
-        # this is the ONLY child process the launcher starts without the scrub.
-        (
-            exec env \
-                GATE_PROXY_PORT="$GATE_PORT" \
-                GATE_POLICY_PATH="$REPO_ROOT/companies/legal-operations/gate-policy.yaml" \
-                GATE_RECEIPTS_PATH="$GATE_RECEIPTS_PATH" \
-                PAPERCLIP_BASE_URL="$API_BASE" \
-                PAPERCLIP_COMPANY_ID="$COMPANY_ID" \
-                GATE_ACTION_PACKAGE_DIR="$HOME/.possiblaw/action-packages" \
-                pnpm -C "$REPO_ROOT/gate-proxy" start
-        ) >>"$GATE_LOG" 2>&1 </dev/null &
-        GATE_PROXY_PID=$!
-        echo "$GATE_PROXY_PID" > "$GATE_PID_FILE"
+fi
 
-        GATE_WAITED=0
-        GATE_HEALTHY="false"
-        while [ "$GATE_WAITED" -lt "$GATE_HEALTH_TIMEOUT_SECS" ]; do
-            if ! kill -0 "$GATE_PROXY_PID" 2>/dev/null; then break; fi
-            GATE_HTTP_CODE="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 "$GATE_PROXY_URL/health" || true)"
-            if [ "$GATE_HTTP_CODE" = "200" ]; then GATE_HEALTHY="true"; break; fi
-            sleep 1
-            GATE_WAITED=$(( GATE_WAITED + 1 ))
-        done
-        if [ "$GATE_HEALTHY" = "true" ]; then
-            # Replace the subshell PID with the actual listener PID so
-            # `kill $(cat gate-proxy.pid)` does the right thing.
-            GATE_LISTEN_PID="$(lsof -nP -iTCP:"$GATE_PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
-            if [ -n "$GATE_LISTEN_PID" ]; then
-                echo "$GATE_LISTEN_PID" > "$GATE_PID_FILE"
-            fi
-            milestone "gate proxy healthy at $GATE_PROXY_URL (receipts: $GATE_RECEIPTS_PATH)"
-        elif kill -0 "$GATE_PROXY_PID" 2>/dev/null; then
-            warn "gate proxy not healthy after ${GATE_HEALTH_TIMEOUT_SECS}s — continuing; gate-dependent"
-            warn "skills will fail visibly until it comes up (log: $GATE_LOG)"
-        else
-            warn "gate proxy exited during startup — continuing; gate-dependent skills will fail visibly"
-            tail -n 20 "$GATE_LOG" >&2 || true
-            rm -f "$GATE_PID_FILE"
-            GATE_PROXY_PID=""
+# ---------------------------------------------------------------------------
+# Restore per-wall gate proxies recorded by --add-wall (restart re-wiring)
+# ---------------------------------------------------------------------------
+#
+# Every wall registered in $DATA_DIR/walls.json carries its own gate proxy
+# (one company binding per proxy). A relaunch must bring each active wall's
+# proxy back, or walled-client egress silently runs ungated/unreceipted.
+# Warn-only throughout: start_gate_proxy_for never aborts the launch, and a
+# malformed registry row is skipped with a warning (re-run --add-wall to
+# repair it — it upserts by prefix). This block intentionally does NOT touch
+# GATE_PROXY_PID / GATE_START_ATTEMPTED (those belong to the firm proxy just
+# above); per-wall pids land in GATE_PID_FILES/GATE_PID_PORTS via
+# start_gate_proxy_for, so the signal-trap sweep still covers them.
+if [ "$NO_GATE_PROXY" != "true" ] && [ -f "$DATA_DIR/walls.json" ]; then
+    while IFS=$'\t' read -r w_prefix w_company w_port w_receipts; do
+        if [ "$w_prefix" = "__MALFORMED__" ]; then
+            warn "walls.json: skipping a malformed wall entry (missing prefix/companyId/gatePort/receiptsPath); fix the entry by hand (see docs/workflows/ethical-walls.md, \"Repairing a half-wired wall\")"
+            continue
         fi
-    fi
+        [ -n "$w_company" ] || continue
+        case "$w_prefix" in
+            *[!A-Z0-9]*|"") warn "walls.json: skipping wall with unsafe prefix '$w_prefix' (expected letters/digits only)"; continue ;;
+        esac
+        # </dev/null: keep the call's children off the loop's stdin — any
+        # stdin-reading child inside start_gate_proxy_for would otherwise
+        # swallow the next wall row from the process substitution.
+        start_gate_proxy_for "$w_company" "$w_port" "$w_receipts" \
+            "$DATA_DIR/gate-proxy-$w_prefix.pid" "$DATA_DIR/gate-proxy-$w_prefix.log" "wall:$w_prefix" </dev/null
+    done < <(python3 "$REPO_ROOT/bin/_possiblaw_walls.py" --registry "$DATA_DIR/walls.json" --list \
+        | python3 -c 'import json, sys
+try:
+    walls = json.load(sys.stdin)
+except Exception:
+    walls = []
+for w in walls if isinstance(walls, list) else []:
+    if not isinstance(w, dict) or w.get("status") != "active":
+        continue
+    if not all(w.get(k) for k in ("prefix", "companyId", "gatePort", "receiptsPath")):
+        print("__MALFORMED__")
+        continue
+    print("\t".join([str(w["prefix"]), str(w["companyId"]), str(w["gatePort"]), str(w["receiptsPath"])]))' \
+        || true)
 fi
 
 # ---------------------------------------------------------------------------
@@ -1968,235 +2625,15 @@ PY
 fi
 
 if [ -n "$COMPANY_ID" ] && { [ -n "$SECRET_ENV_TSV" ] || [ "$NO_GATE_PROXY" != "true" ] || [ -n "$BUSINESS_DIR" ]; }; then
-    milestone "binding adapter env to agents (API-key secret_refs + GATE_PROXY_URL)"
-    PATCHES_FILE="$(mktemp -t possiblaw-env-patches.XXXXXX.json)"
-    if ! python3 "$VARIANTS_PY" --build-env-patches \
-            --overrides-json "$OVERRIDES_FILE" \
-            --secret-ids-json "$SECRET_IDS_FILE" \
-            --plain-env-json "$PLAIN_ENV_FILE" > "$PATCHES_FILE"; then
-        warn "env patch generation failed; agents keep their import-time adapter config"
-        SECRET_BIND_FAILED="true"
-    else
-        PATCHED=0; PATCH_FAILED=0
-        while IFS=$'\t' read -r agent_slug agent_id; do
-            { [ -n "$agent_slug" ] && [ -n "$agent_id" ]; } || continue
-            AGENT_PATCH_BODY="$(python3 - "$PATCHES_FILE" "$agent_slug" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-entry = d.get(sys.argv[2])
-print(json.dumps(entry) if entry else "")
-PY
-)"
-            [ -n "$AGENT_PATCH_BODY" ] || continue
-            PATCH_HTTP_CODE="$(printf '%s' "$AGENT_PATCH_BODY" | curl --silent --output /dev/null --write-out '%{http_code}' --max-time 15 \
-                --request PATCH \
-                --header "Content-Type: application/json" \
-                --data-binary @- \
-                "$API_BASE/api/agents/$agent_id" || echo 000)"
-            if [ "$PATCH_HTTP_CODE" = "200" ]; then
-                PATCHED=$((PATCHED + 1))
-            else
-                PATCH_FAILED=$((PATCH_FAILED + 1))
-                warn "  PATCH /api/agents/$agent_id ($agent_slug) returned HTTP $PATCH_HTTP_CODE"
-            fi
-        done < <(python3 - "$IMPORT_RESPONSE_FILE" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-for a in (d.get("agents") or []):
-    slug = a.get("slug") or ""
-    aid = a.get("id") or ""
-    if slug and aid:
-        print(f"{slug}\t{aid}")
-PY
-)
-        log "  adapter env bound on $PATCHED agent(s)"
-        if [ "$PATCH_FAILED" -gt 0 ]; then
-            warn "  $PATCH_FAILED agent(s) could not be patched; set the env in the"
-            warn "  Paperclip UI instead (agent settings → adapter config → env)."
-            SECRET_BIND_FAILED="true"
-        fi
-    fi
-    rm -f "$PATCHES_FILE"
+    patch_agent_envs "$COMPANY_ID" "$IMPORT_RESPONSE_FILE" "$OVERRIDES_FILE" "$SECRET_IDS_FILE" "$PLAIN_ENV_FILE"
     if [ "$SECRET_BIND_FAILED" = "true" ]; then
         warn "env binding incomplete — affected agents keep their import-time adapter config."
     fi
 fi
 rm -f "$SECRET_IDS_FILE" "$PLAIN_ENV_FILE"
 
-# ---------------------------------------------------------------------------
-# Firm facade: provision company-scoped key + emit MCP-client config
-# ---------------------------------------------------------------------------
-#
-# --firm-facade provisions a company-scoped agent key (attached to the
-# chief-of-staff agent; POST /api/agents/:id/keys, board-only loopback) and
-# writes a ready-to-paste MCP-client config JSON to
-# <data-dir>/firm-facade-mcp.json (mode 600; contains the raw key).
-#
-# The facade is spawned on-demand by the OUTSIDE assistant's MCP client over
-# stdio — the launcher does NOT start a server here.
-#
-# Key-mint contract (Step A, confirmed read-only):
-#   paperclip/server/src/routes/agents.ts:2850 — POST /api/agents/:id/keys
-#   body: { "name": "<string>" }   (schema: paperclip/packages/shared/…/agent.ts:112)
-#   response 201: { id, name, token, createdAt }
-#   token = raw key (returned ONCE on create; hashed in DB; never re-listable)
-#   assertBoard enforced → board-authed loopback (local_trusted) can mint
-
 if [ "$FIRM_FACADE" = "true" ] && [ -n "$COMPANY_ID" ]; then
-    milestone "firm facade: provisioning company-scoped key + emitting MCP-client config"
-
-    # Resolve chief-of-staff agent id from import response (fallback: first agent).
-    # Guarded with `|| true` so a Python failure cannot trip `set -e` and kill
-    # the launcher AFTER a successful import (before the final banner).
-    FACADE_AGENT_ID="$( { python3 - "$IMPORT_RESPONSE_FILE" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-agents = d.get("agents") or []
-for a in agents:
-    if isinstance(a, dict) and a.get("slug") == "chief-of-staff":
-        print(a.get("id") or ""); sys.exit(0)
-for a in agents:
-    if isinstance(a, dict) and a.get("id"):
-        print(a.get("id")); sys.exit(0)
-PY
-} || true )"
-
-    FACADE_KEY_TOKEN=""
-    FACADE_KEY_ERR="false"
-    if [ -z "$FACADE_AGENT_ID" ]; then
-        warn "firm facade: no agent id found in import response; cannot auto-mint company-scoped key"
-        FACADE_KEY_ERR="true"
-    else
-        # Capture the HTTP status separately; the response BODY goes to a 0600
-        # temp file (mktemp default perms) and is NEVER echoed — it contains the
-        # raw token on success. Parse the token from the file, then shred it.
-        FACADE_KEY_RESP_FILE="$(mktemp -t possiblaw-facade-key.XXXXXX.json)"
-        FACADE_KEY_HTTP="$(curl --silent --max-time 10 \
-            --request POST \
-            --header "Content-Type: application/json" \
-            --data '{"name":"firm-facade"}' \
-            --output "$FACADE_KEY_RESP_FILE" \
-            --write-out '%{http_code}' \
-            "$API_BASE/api/agents/$FACADE_AGENT_ID/keys" || echo 000)"
-        FACADE_KEY_TOKEN="$(python3 -c '
-import json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-except Exception:
-    d = {}
-print(d.get("token") or "")' "$FACADE_KEY_RESP_FILE" 2>/dev/null || true)"
-        rm -f "$FACADE_KEY_RESP_FILE"
-        if [ -z "$FACADE_KEY_TOKEN" ]; then
-            warn "firm facade: key mint returned no token (HTTP $FACADE_KEY_HTTP)"
-            warn "  To mint a company-scoped key manually:"
-            warn "    POST $API_BASE/api/agents/$FACADE_AGENT_ID/keys"
-            warn "    body: {\"name\":\"firm-facade\"}"
-            warn "    The response.token is the raw key — add it as PAPERCLIP_API_KEY"
-            warn "    in $DATA_DIR/firm-facade-mcp.json after this run."
-            FACADE_KEY_ERR="true"
-        else
-            log "  company-scoped agent key minted (agent $FACADE_AGENT_ID; token redacted from log)"
-        fi
-    fi
-
-    FACADE_SERVER_TS="$REPO_ROOT/mcp-servers/firm-facade/src/server.ts"
-    FACADE_MCP_FILE="$DATA_DIR/firm-facade-mcp.json"
-    FACADE_POLICY_PATH="$REPO_ROOT/companies/legal-operations/gate-policy.yaml"
-
-    # Build JSON with all values via env (avoids quoting/escaping of key token).
-    # PAPERCLIP_PUBLIC_URL = $API_BASE (local loopback for local installs;
-    #   for hosted deployments the operator should update the emitted config
-    #   with the public base URL so approval deep links resolve correctly).
-    # PAPERCLIP_COMPANY_PREFIX = COMPANY_SHORT_CODE (issue-prefix / slug).
-    # Guard the heredoc with `{ ...; } || warn` so a non-zero Python exit
-    # (perm error, KeyError, disk full) cannot trip `set -e`; control always
-    # reaches the -f check below.
-    { PCSF_BASE_URL="$API_BASE" \
-      PCSF_COMPANY_ID="$COMPANY_ID" \
-      PCSF_GATE_PROXY_URL="$GATE_PROXY_URL" \
-      PCSF_API_KEY="$FACADE_KEY_TOKEN" \
-      PCSF_PUBLIC_URL="$API_BASE" \
-      PCSF_COMPANY_PREFIX="${COMPANY_SHORT_CODE:-}" \
-      PCSF_POLICY_PATH="$FACADE_POLICY_PATH" \
-      PCSF_SERVER_TS="$FACADE_SERVER_TS" \
-      PCSF_OUT_FILE="$FACADE_MCP_FILE" \
-      python3 - <<'PY'
-import json, os
-
-server_ts   = os.environ["PCSF_SERVER_TS"]
-# tsx binary from the facade's own node_modules; fallback to node --import tsx
-tsx_bin = os.path.join(os.path.dirname(os.path.dirname(server_ts)),
-                       "node_modules", ".bin", "tsx")
-if os.path.isfile(tsx_bin) and os.access(tsx_bin, os.X_OK):
-    command, args = tsx_bin, [server_ts]
-else:
-    command, args = "node", ["--import", "tsx", server_ts]
-
-# Required env vars for the facade (server.ts buildDepsFromEnv)
-env = {
-    "PAPERCLIP_BASE_URL":  os.environ["PCSF_BASE_URL"],
-    "PAPERCLIP_COMPANY_ID": os.environ["PCSF_COMPANY_ID"],
-    "GATE_PROXY_URL":      os.environ["PCSF_GATE_PROXY_URL"],
-}
-# Optional — include only when non-empty
-for facade_key, env_key in (
-    ("PAPERCLIP_API_KEY",        "PCSF_API_KEY"),
-    ("PAPERCLIP_PUBLIC_URL",     "PCSF_PUBLIC_URL"),
-    ("PAPERCLIP_COMPANY_PREFIX", "PCSF_COMPANY_PREFIX"),
-    ("GATE_POLICY_PATH",         "PCSF_POLICY_PATH"),
-):
-    v = os.environ.get(env_key, "")
-    if v:
-        env[facade_key] = v
-
-config = {
-    "mcpServers": {
-        "possiblaw-firm-facade": {
-            "command": command,
-            "args": args,
-            "env": env,
-        }
-    }
-}
-out = os.environ["PCSF_OUT_FILE"]
-# Create restricted (0600) from the start — no world-readable TOCTOU window.
-fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-with os.fdopen(fd, "w") as fh:
-    json.dump(config, fh, indent=2)
-    fh.write("\n")
-PY
-    } || warn "firm facade: config write failed (Python exited non-zero)"
-
-    if [ -f "$FACADE_MCP_FILE" ]; then
-        # Belt-and-suspenders: re-assert 0600 in case the file pre-existed.
-        chmod 600 "$FACADE_MCP_FILE"
-        log "  MCP-client config written: $FACADE_MCP_FILE (mode 600)"
-    else
-        warn "firm facade: config write failed (no file at $FACADE_MCP_FILE)"
-    fi
-
-    printf '\n'
-    printf '=== Firm Facade MCP Config =============================================\n'
-    printf '  Config file: %s\n' "$FACADE_MCP_FILE"
-    if [ "$FACADE_KEY_ERR" = "true" ]; then
-        printf '\n'
-        printf '  WARNING (Unit-G known limitation): company-scoped key auto-mint\n'
-        printf '  failed. PAPERCLIP_API_KEY is absent from the config. On a\n'
-        printf '  local_trusted instance the facade may still function via\n'
-        printf '  unauthenticated board loopback, but the human-gate structural\n'
-        printf '  guarantee depends on a company-scoped key (cannot assertBoard).\n'
-        printf '  Mint manually and add response.token as PAPERCLIP_API_KEY in\n'
-        printf '  the mcpServers env block of the config file.\n'
-    else
-        printf '  Key:   company-scoped agent key (stored in config file only)\n'
-    fi
-    printf '\n'
-    printf '  Add the "possiblaw-firm-facade" block to your outside assistant'\''s\n'
-    printf '  MCP config, then restart the assistant:\n'
-    printf '    Claude Desktop: ~/.config/claude/claude_desktop_config.json\n'
-    printf '    Codex:          ~/.codex/config.toml  [mcp_servers] block\n'
-    printf '    Other MCP host: paste the mcpServers entry per your host'\''s docs.\n'
-    printf '=======================================================================\n'
+    emit_facade_config "$COMPANY_ID" "$IMPORT_RESPONSE_FILE" "$GATE_PROXY_URL" "$DATA_DIR/firm-facade-mcp.json" "$COMPANY_SHORT_CODE"
 fi
 
 # ---------------------------------------------------------------------------

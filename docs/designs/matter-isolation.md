@@ -172,5 +172,6 @@ package + `authenticated`-mode support with per-lawyer client lists
 (membership-scoped visibility, `routes/companies.ts:91-101`) and
 approve-from-overview as the authenticated lawyer. Approved spec:
 `docs/superpowers/specs/2026-07-02-matter-isolation-a1-firm-overview-design.md`.
-`docs/known-limitations.md` read-scope language is updated only when the
-capability ships (stays honest until then).
+The `docs/known-limitations.md` read-scope rewrite shipped with the build
+(CHANGELOG 0.38.0): cross-client agent reads are now preventable via opt-in
+walls; within-company reads remain unrestricted.

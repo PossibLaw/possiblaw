@@ -7,6 +7,84 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.38.0] — 2026-07-03 — Matter isolation A1 + Firm Overview: opt-in ethical walls, authenticated mode, one global board
+
+The matter-isolation workstream from the atomic-work review (S1 finding G-1:
+cross-client agent reads were unpreventable and undetectable). Architecture
+A — opt-in walls, one paperclip company per screened client — plus
+authenticated multi-lawyer mode and a firm-wide overview, built together per
+operator decision rather than phased.
+
+- **`--add-wall "<Client>"` (launcher) + `bin/_possiblaw_walls.py`.** Attaches
+  an ethically-walled client to a **running** firm: derives a 3-letter issue
+  prefix from the client name and preflights it against `GET
+  /api/companies` (collision → exit `3`, names the conflicting company,
+  creates nothing); imports the full 179-agent package as a new company;
+  starts that company a **dedicated** gate proxy (port allocated upward from
+  `--gate-port-base`, own hash-chained receipts chain at
+  `~/.possiblaw/gate-receipts/<data-dir>-<PREFIX>/`, preserving the
+  single-writer invariant per proxy); binds agents' `GATE_PROXY_URL` to it;
+  provisions the intake routine (honors `--no-routines`); emits a per-wall
+  facade config `firm-facade-mcp-<PREFIX>.json` (mode 600, only with
+  `--firm-facade`) — fixing the fixed-filename overwrite collision a second
+  wall would have hit; and records the wall in `<data-dir>/walls.json` (a
+  cache — `GET /api/companies` stays the source of truth). Requires
+  `--variant` (exit `2` without it — a wall's agents must get an explicit
+  adapter lane, never a silent default); `--api-key <pcp_board_…>` attaches
+  against an authenticated instance. Re-running for an existing wall is
+  refused at the prefix preflight (exit `3`, nothing created or duplicated);
+  a half-wired wall is repaired by restart re-wiring or a manual
+  `walls.json` restore (see the runbook). Exit codes:
+  `2` bad input, `3` prefix collision, `4` no running instance / attach or API
+  failure.
+- **Restart re-wiring (launcher).** A normal relaunch against the same
+  `--data-dir` reads `walls.json` and brings every registered wall's own gate
+  proxy back up — not just the firm's — before agents wake.
+- **`--auth-mode authenticated` (launcher).** Turns on paperclip's real login
+  (`PAPERCLIP_DEPLOYMENT_MODE=authenticated`) instead of the default
+  `local_trusted` implicit-board mode. Persists a `better-auth` secret at
+  `<data-dir>/better-auth.secret` (mode 600, generated once, reused on every
+  later launch of that dir). Surfaces paperclip's one-time board-claim URL
+  as a milestone when migrating an existing `local_trusted` data dir; a
+  genuinely fresh authenticated data dir bootstraps its first admin via
+  `pnpm -C paperclip paperclipai auth bootstrap-ceo`. This is the mode that
+  makes a screened lawyer's login — not just an agent's key — invisible to a
+  walled company: main company invites everyone, a walled company invites
+  only its screened team, via paperclip's own Company Access / Company
+  Invites pages.
+- **`firm-overview/` (new standalone package, 34 tests).** A loopback-only
+  (`127.0.0.1` bind, never network-reachable) dashboard merging issues in
+  flight, pending approvals (`pending` + `revision_requested`), and recent
+  deliverables across every paperclip company the connected lawyer can see,
+  with deep links into paperclip's own UI. Zero authorization filtering of
+  its own: every fetch and every approve/reject call carries the connected
+  lawyer's own bearer token, obtained via paperclip's existing CLI-auth
+  challenge flow (30-day `pcp_board_…` token, held in memory only, never
+  written to disk; revoke early with `POST /api/cli-auth/revoke-current`).
+  Per-client fan-out degrades independently — one company's fetch failing
+  renders as a single error chip without taking down the rest of the board.
+  Deliverables are a bounded fan-out: work products from the 10
+  most-recently-updated in-flight issues per client, with a truncation
+  indicator past that. CSRF-guarded (`X-Firm-Overview` header, non-CORS-safelisted)
+  against forged browser requests — not against a malicious local process,
+  the same `local_trusted` floor documented for the gate proxy. A solo
+  operator on `local_trusted` needs no connect step at all: the implicit
+  board sees every company, walls included.
+- **Docs.** New `docs/workflows/ethical-walls.md` runbook (when to wall,
+  `--add-wall` walkthrough, authenticated-mode setup, Firm Overview connect
+  flow, shared firm memory across walls). `docs/known-limitations.md`'s
+  company-wide read-scope section rewritten: cross-client agent reads are
+  now preventable (opt-in, hard 403), still unrestricted *within* a company,
+  `local_trusted` floor unchanged; new "Firm Overview (v1)" section documents
+  the loopback-trust floor and the bounded deliverables fan-out.
+
+Battery: firm-overview 34/34 (new), gate-proxy 439/439 (unchanged — core not
+touched), learning-loop 57/57, orchestration-eval 61/61, eval-harness 32/32,
+firm-facade 137/137, deadline-engine 35/35; launcher + 5 python self-tests
+(adds `bin/_possiblaw_walls.py --self-test`) OK; dry-run
+`agents=179 skills=178 projects=3 warnings=0 errors=0` (unchanged — walls
+reuse the existing import path, no package changes).
+
 ## [0.37.0] — 2026-07-02 — Sprint ε: license-gated vendoring + external skills + correspondence-clerk
 
 The adoption workstream from the atomic-work plan: bring in the best of the
