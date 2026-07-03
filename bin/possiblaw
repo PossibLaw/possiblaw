@@ -1197,6 +1197,10 @@ GATE_RECEIPTS_PATH="$HOME/.possiblaw/gate-receipts/$(basename "$DATA_DIR")/recei
 
 PAPERCLIP_PID=""
 GATE_PROXY_PID=""
+# Declared before the trap installs so kill_gate_proxy_tree can iterate them
+# safely under `set -u` even if a signal lands before any proxy starts.
+GATE_PID_FILES=()
+GATE_PID_PORTS=()
 
 kill_subshell_tree() {
     # Kill the subshell wrapper, all its descendants, and any process holding the given port.
@@ -1246,6 +1250,10 @@ kill_gate_proxy_tree() {
     # GATE_PID_FILES/GATE_PID_PORTS are paired by index so the port-sweep
     # fallback in kill_subshell_tree still applies per proxy.
     local i pf pid port
+    # The bang/index form is REQUIRED here: on macOS bash 3.2 with set -u,
+    # expanding a declared-but-empty array as "${GATE_PID_FILES[@]}" aborts
+    # with "unbound variable", and the ":-" workaround injects one spurious
+    # empty-string iteration; "${!arr[@]}" iterates zero times, correctly.
     for i in "${!GATE_PID_FILES[@]}"; do
         pf="${GATE_PID_FILES[$i]}"
         port="${GATE_PID_PORTS[$i]:-}"
@@ -1816,11 +1824,13 @@ fi
 # Start one gate proxy bound to a single company. Args:
 #   $1 company_id  $2 gate_port  $3 receipts_path  $4 pid_file  $5 log_file  $6 label
 # Mirrors the original single-company block; warn-only on failure so a wall
-# never aborts the firm launch.
-GATE_PID_FILES=()
-GATE_PID_PORTS=()
+# never aborts the firm launch. Sets GATE_START_ATTEMPTED=true only when a
+# proxy was actually spawned this call (i.e. the pid file was written by us),
+# so callers can tell a fresh start from a skip that left a stale pid file.
+GATE_START_ATTEMPTED="false"
 start_gate_proxy_for() {
     local company_id="$1" gate_port="$2" receipts_path="$3" pid_file="$4" log_file="$5" label="$6"
+    GATE_START_ATTEMPTED="false"
     if [ -n "$(lsof -nP -iTCP:"$gate_port" -sTCP:LISTEN -t 2>/dev/null || true)" ]; then
         warn "[$label] port $gate_port is already in use; skipping gate-proxy start"
         warn "(stop the other process or re-run with --gate-port <n>)"
@@ -1850,6 +1860,7 @@ start_gate_proxy_for() {
             pnpm -C "$REPO_ROOT/gate-proxy" start
     ) >>"$log_file" 2>&1 </dev/null &
     local gate_proxy_pid="$!"
+    GATE_START_ATTEMPTED="true"
     echo "$gate_proxy_pid" > "$pid_file"
     GATE_PID_FILES+=("$pid_file")
     GATE_PID_PORTS+=("$gate_port")
@@ -1903,7 +1914,12 @@ elif [ -z "$COMPANY_ID" ]; then
     warn "no company id parsed from the import response; skipping the gate proxy"
 else
     start_gate_proxy_for "$COMPANY_ID" "$GATE_PORT" "$GATE_RECEIPTS_PATH" "$GATE_PID_FILE" "$GATE_LOG" "firm"
-    GATE_PROXY_PID="$(cat "$GATE_PID_FILE" 2>/dev/null || true)"
+    # Only trust the pid file if this call actually spawned a proxy; on skip
+    # paths (port in use, install failed) a stale pid file from a previous
+    # session must not surface gate-proxy lines in the Ready banner.
+    if [ "$GATE_START_ATTEMPTED" = "true" ]; then
+        GATE_PROXY_PID="$(cat "$GATE_PID_FILE" 2>/dev/null || true)"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
