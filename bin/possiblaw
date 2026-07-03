@@ -850,7 +850,10 @@ start_gate_proxy_for() {
     : > "$log_file"
     if [ ! -d "$REPO_ROOT/gate-proxy/node_modules" ]; then
         milestone "[$label] installing gate-proxy dependencies (first run)"
-        if ! pnpm -C "$REPO_ROOT/gate-proxy" install >>"$log_file" 2>&1; then
+        # </dev/null: this function runs inside while-read loops (wall restore);
+        # a stdin-reading child (e.g. a corepack prompt) would otherwise swallow
+        # the loop's next row from the process substitution.
+        if ! pnpm -C "$REPO_ROOT/gate-proxy" install >>"$log_file" 2>&1 </dev/null; then
             warn "[$label] gate-proxy dependency install failed (log: $log_file); continuing without the gate proxy"
             return 0
         fi
@@ -2290,6 +2293,13 @@ if [ "$AUTH_MODE" = "authenticated" ]; then
     else
         milestone "authenticated mode active; manage lawyer accounts via company invites (see docs/workflows/ethical-walls.md)"
     fi
+    # Secret-exposure disclosure: paperclip's authenticated boot reads
+    # BETTER_AUTH_SECRET from the server process env ONLY (no file-based
+    # alternative in the pinned submodule — server/src/auth/better-auth.ts),
+    # and adapter-spawned agents inherit the server's env wholesale, so it
+    # cannot be scrubbed the way egress creds are. Warn every boot.
+    warn "authenticated mode places BETTER_AUTH_SECRET in the server process env, which adapter-spawned agents inherit"
+    warn "a hostile or prompt-injected agent could read it and forge sessions; treat agent code/skills as trusted in authenticated mode until upstream supports env allowlisting (see docs/known-limitations.md)"
 fi
 
 # Replace the subshell PID in $LAUNCHER_PID_FILE with the actual server PID
@@ -2510,8 +2520,11 @@ if [ "$NO_GATE_PROXY" != "true" ] && [ -f "$DATA_DIR/walls.json" ]; then
         case "$w_prefix" in
             *[!A-Z0-9]*|"") warn "walls.json: skipping wall with unsafe prefix '$w_prefix' (expected letters/digits only)"; continue ;;
         esac
+        # </dev/null: keep the call's children off the loop's stdin — any
+        # stdin-reading child inside start_gate_proxy_for would otherwise
+        # swallow the next wall row from the process substitution.
         start_gate_proxy_for "$w_company" "$w_port" "$w_receipts" \
-            "$DATA_DIR/gate-proxy-$w_prefix.pid" "$DATA_DIR/gate-proxy-$w_prefix.log" "wall:$w_prefix"
+            "$DATA_DIR/gate-proxy-$w_prefix.pid" "$DATA_DIR/gate-proxy-$w_prefix.log" "wall:$w_prefix" </dev/null
     done < <(python3 "$REPO_ROOT/bin/_possiblaw_walls.py" --registry "$DATA_DIR/walls.json" --list \
         | python3 -c 'import json, sys
 try:
