@@ -391,6 +391,35 @@ still apply exactly as before:
 Per-matter isolation inside one company is still not implemented — see
 `docs/workflows/ethical-walls.md` → "What a wall does not do."
 
+### Authenticated mode: `BETTER_AUTH_SECRET` is visible to agent processes
+
+Paperclip's authenticated boot reads its signing secret from the server
+process environment and nowhere else —
+`paperclip/server/src/auth/better-auth.ts` reads
+`process.env.BETTER_AUTH_SECRET` (falling back to
+`PAPERCLIP_AGENT_JWT_SECRET`) with no file-based alternative at the pinned
+commit. So when `--auth-mode authenticated` is on, the launcher has no
+choice but to place the secret in the server's env — and adapter-spawned
+agent processes inherit that env wholesale. Unlike egress credentials, it
+cannot be scrubbed the way the launcher's `EGRESS_CRED_VARS` scrub works:
+the server itself needs it live.
+
+The consequence: a hostile or prompt-injected agent that reads its own
+process environment could exfiltrate `BETTER_AUTH_SECRET` and forge user
+sessions on the instance. No layer-side fix exists at the pinned commit —
+env allowlisting for agent spawns (handing agents a curated env instead of
+the server's) would be an upstream paperclip change, as would a file-based
+secret. The launcher warns at authenticated boot. Until upstream supports
+one of those, **treat agent code and skills as trusted in authenticated
+mode** — the same trust you already extend by running them on your machine,
+but worth stating because authenticated mode otherwise reads as a strict
+trust upgrade.
+
+One related side effect: `--dry-run` combined with `--auth-mode
+authenticated` still writes the persistent `<data-dir>/better-auth.secret`
+file — the secret is generated before the server boots, upstream of the
+dry-run exit.
+
 ## Hybrid variant
 
 Not shipped. Paperclip's `assigneeAdapterOverrides` only merges config

@@ -74,9 +74,10 @@ precise error naming the conflicting company, and creates nothing:
 prefix collision: CON already used by company "Conflicted Client, LLC"
 ```
 
-Re-running `--add-wall` for a wall that already exists is how you **repair**
-it (see below) — it is not an error to worry about; it is the intended path
-when a wall's gate proxy died or its facade config is missing.
+A collision on the **same** client name means "already walled" — the command
+deliberately creates nothing and does not re-wire the existing wall. A dead
+wall gate proxy comes back on the next successful relaunch (see "Restart
+re-wiring" below), not by re-running `--add-wall`.
 
 ### What gets created
 
@@ -123,15 +124,30 @@ authenticated mode (below).
 |---|---|
 | `2` | Bad input: missing `--variant`, an unknown `--variant`/`--demo`, or a client name with fewer than three A–Z letters. |
 | `3` | Issue-prefix collision — including re-running `--add-wall` for a wall that already exists. |
-| `4` | No running instance found at `--port` (health check failed); or an attach/API failure after the health check passed — a non-200 from `GET /api/companies` (401/403 on an authenticated instance hints at `--api-key`), the import itself failing, no company id in the import response, or the `walls.json` registry write failing. In the later cases the wall may be **partially live** — re-run `--add-wall` with the same name to repair it. |
+| `4` | No running instance found at `--port` (health check failed); or an attach/API failure after the health check passed — a non-200 from `GET /api/companies` (401/403 on an authenticated instance hints at `--api-key`), the import itself failing, no company id in the import response, or the `walls.json` registry write failing. In the later cases the wall may be **partially live** — see "Repairing a half-wired wall" below. |
 
-### Re-running `--add-wall` is how you repair a wall
+### Repairing a half-wired wall
 
-`--add-wall` is idempotent by design: running it again for an existing wall
-name detects the company (via the prefix collision) and is meant to repair
-missing wiring — a dead gate proxy, an absent facade config, unprovisioned
-routines — rather than duplicate anything. If a partial failure (exit `4`)
-leaves a wall half-wired, re-running the same command is the fix.
+The launcher treats the steps after the import as best-effort, so an exit
+`4` (or a warning) can leave a wall's company live but its wiring
+incomplete. What actually repairs each piece:
+
+- **Gate proxy failed to start** (warn-only at creation): the wall is still
+  recorded in `walls.json`, so the next **successful relaunch** of the
+  launcher brings the proxy up (see "Restart re-wiring" below).
+- **`walls.json` write failed** (exit `4` after a live import): the wall's
+  company and gate proxy are live but unrecorded, so a relaunch will not
+  restore its proxy. The launcher's error output suggests re-running
+  `--add-wall` — but a same-name re-run stops at the prefix collision (exit
+  `3`, the company already exists), so in practice restore the registry
+  entry by hand: the record fields (`name`, `companyId`, `prefix`,
+  `gatePort`, `receiptsPath`, `facadeConfig`, `status: "active"`,
+  `createdAt`) are all printed in the command's output and derivable from
+  `GET /api/companies`.
+- **Facade config absent or routines unprovisioned**: no automated repair
+  path yet — re-create the facade key/config or the routine via the
+  Paperclip UI/API (see `--firm-facade` in `docs/operator-walkthrough.md`
+  and the routines section of `docs/workflows/matter-intake.md`).
 
 ### Against an authenticated instance: `--api-key`
 
@@ -159,23 +175,51 @@ Firm Overview (see "Firm Overview" below) or via
 - **No remote/hosted overview.** Firm Overview is loopback-only regardless of
   auth mode — see below.
 
-## Restart re-wiring <!-- verify-after-T4 -->
-
-> This section documents launcher behavior from a concurrently in-flight
-> task. Re-verify against the shipped `bin/possiblaw` before relying on it.
+## Restart re-wiring
 
 Relaunching `./bin/possiblaw` against the **same `--data-dir`** reads
 `walls.json` and brings every registered wall's gate proxy back up — one
-process per active wall — before agents wake, in addition to the firm's own
-gate proxy. You do not need to re-run `--add-wall` after a restart; it exists
-to *create* a wall, not to keep it alive across restarts. Passing
-`--no-gate-proxy` skips this the same way it skips the firm's own proxy. A
-wall whose `walls.json` entry has `status` other than `active` is left alone.
+process per active wall, right after the firm's own gate proxy. You do not
+re-run `--add-wall` after a restart; it exists to *create* a wall, not to
+keep it alive across restarts. Passing `--no-gate-proxy` skips this the same
+way it skips the firm's own proxy. A wall whose `walls.json` entry has
+`status` other than `active` is left alone, and a malformed entry is skipped
+with a warning — a bad registry row never aborts the launch.
 
-## Authenticated mode: `--auth-mode authenticated` <!-- verify-after-T4 -->
+**The guarantee is conditional: walls are restored only when the relaunch's
+import succeeds.** The launcher's main path always re-imports the package,
+and the wall-restore step runs downstream of that import — on import failure
+the launcher stops the server it just booted and exits before ever reaching
+it. The two most obvious relaunch patterns fail exactly there:
 
-> This section documents launcher behavior from a concurrently in-flight
-> task. Re-verify against the shipped `bin/possiblaw` before relying on it.
+- **Same data dir + the same (or default) `--org-name`** → import fails
+  HTTP 500: the server derives the same issue prefix from the same org name
+  and hits its unique-prefix constraint (the "Repeated `--target new`
+  imports collide on the issue prefix" limitation in
+  `docs/known-limitations.md`). **Workaround: relaunch with a distinct
+  `--org-name`** — any unused name works. The import is additive, so each
+  successful relaunch under a new name adds another company to the
+  instance; the walls come back regardless of which name the relaunch used.
+
+  ```bash
+  ./bin/possiblaw --variant codex --data-dir <same-data-dir> \
+    --org-name "Acme Legal (restarted)"
+  ```
+
+- **`--auth-mode authenticated` relaunch** → import fails HTTP 403 (`Board
+  access required`): the main launch path's import POST is unauthenticated,
+  and at this writing `--api-key` is honored only by `--add-wall`, not by
+  the main launch path — so an authenticated relaunch cannot get past the
+  import (and therefore cannot restore walls) even after you have claimed
+  the board and hold a `pcp_board_…` key. See "Authenticated mode" below
+  for the interim manual server boot.
+
+A **reattach-without-reimport** launcher mode — relaunching against an
+existing data dir without re-importing at all, which would make wall
+restoration unconditional and unblock authenticated relaunches — is a named
+follow-up, not shipped yet.
+
+## Authenticated mode: `--auth-mode authenticated`
 
 By default the launcher runs Paperclip in `local_trusted` mode
 (`--auth-mode local_trusted`, the default) — any local process can act as an
@@ -188,43 +232,89 @@ invisible** to a walled client rather than merely "not looking":
 ./bin/possiblaw --variant codex --auth-mode authenticated
 ```
 
+Any value other than `local_trusted` or `authenticated` is rejected before
+any pre-flight or filesystem work (exit `2`: `--auth-mode must be
+'local_trusted' or 'authenticated' (got: '<value>')`).
+
 The launcher generates and persists a `better-auth` secret at
 `<data-dir>/better-auth.secret` (mode 600) the first time authenticated mode
 runs against a data dir, and reuses it on every later launch of that same
 dir — don't hand-edit or regenerate it, or existing sessions/tokens break.
+Two caveats on that secret: it necessarily sits in the paperclip server's
+process env, which agent processes inherit — the launcher warns about this
+at every authenticated boot (see `docs/known-limitations.md` →
+"Authenticated mode: `BETTER_AUTH_SECRET` is visible to agent processes") —
+and even a `--dry-run` combined with `--auth-mode authenticated` writes the
+persistent secret file (the secret is generated before the server boots,
+upstream of the dry-run exit).
+
+### The launch stops at import — interim manual boot
+
+An authenticated boot gets you three things — the persisted secret, a
+healthy server in authenticated mode, and (on a migration boot) the
+board-claim milestone — and then the launcher's own import step fails HTTP
+403 (`Board access required`) and the launcher exits, stopping the server it
+booted: the main path's import POST is unauthenticated, and `--api-key` is
+honored only by `--add-wall` at this writing. Until the
+reattach-without-reimport follow-up lands, run the server manually for an
+authenticated working session, reusing the persisted secret (this mirrors
+the launcher's own server invocation):
+
+```bash
+env PAPERCLIP_DEPLOYMENT_MODE=authenticated \
+    BETTER_AUTH_SECRET="$(cat <data-dir>/better-auth.secret)" \
+    PORT=<port> \
+    pnpm -C paperclip paperclipai onboard --data-dir <data-dir> --bind loopback --yes
+```
+
+Note the manual boot starts only the paperclip server — no gate proxies. For
+membership and visibility work (claims, invites, the overview) that is
+enough; do not run agent egress against a manually-booted instance without
+also starting the gate proxies.
+
+The practical order of operations is therefore: **launch and import on
+`local_trusted` first** (create walls there too — `--add-wall` needs no key
+on `local_trusted`), then relaunch `--auth-mode authenticated` to mint the
+secret and surface the claim URL, then boot manually, claim, and invite.
 
 ### Fresh authenticated data dir: bootstrap the first admin
 
 A data dir that has **never** run as `local_trusted` has no implicit board
-user to promote. Bootstrap the first admin from the paperclip CLI before or
-after the first authenticated launch:
+user to promote. Bootstrap the first admin from the paperclip CLI:
 
 ```bash
 pnpm -C paperclip paperclipai auth bootstrap-ceo
 ```
 
 This mints a one-time `bootstrap_ceo` invite; the person who accepts it
-becomes the instance's first admin.
+becomes the instance's first admin. (The same import limitation above
+applies to fresh authenticated dirs — the launcher cannot import into them —
+so the `local_trusted`-first sequence is the practical path for a firm that
+wants the package imported.)
 
 ### Migrating an existing `local_trusted` data dir
 
 If you're moving a firm that started `local_trusted` into authenticated
 mode, Paperclip detects that the instance still only has the implicit local
 board as admin and prints a one-time **board claim** URL to the server
-console on that launch:
+console (wrapped in ANSI color codes). The launcher strips the ANSI codes
+and surfaces the clean URL from its log as a milestone:
 
 ```
-BOARD CLAIM REQUIRED
-This instance was previously local_trusted and still has local-board as
-the only admin.
-Sign in with a real user and open this one-time URL to claim ownership:
-http://127.0.0.1:<port>/board-claim/<token>
+AUTHENTICATED MODE — claim board ownership (first admin): http://127.0.0.1:<port>/board-claim/<token>?code=<code>
 ```
 
-The launcher surfaces this as a milestone line if it sees the URL in the
-server log. Open it, sign in as the real first admin, and claiming promotes
+When no claim URL is present (already claimed, or a genuinely fresh dir),
+the launcher prints a fallback milestone pointing back at this runbook:
+`authenticated mode active; manage lawyer accounts via company invites (see
+docs/workflows/ethical-walls.md)`.
+
+Open the claim URL, sign in as the real first admin, and claiming promotes
 that user to instance admin with owner membership on every existing
-company — including any walls already created.
+company — including any walls already created. Paperclip mints a fresh
+claim URL on each boot while the local board is still the only admin, so a
+URL that expired with a stopped server is not lost — the next boot (manual
+or launcher) prints a new one.
 
 ### Inviting the team, per company
 

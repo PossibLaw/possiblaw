@@ -147,12 +147,18 @@ rm -rf orchestration-eval/results/          # optional — keep for analysis
 Verify port 3100 is untouched: `lsof -i :3100` should return nothing (or your pre-existing instance).
 
 ## H. Walls + Firm Overview (authenticated multi-lawyer)
-<!-- verify-after-T4: the --auth-mode and restart re-wiring steps below were written against Task 4's spec -->
 
 Manual, multi-human test this build defers to the operator — it needs two
 real lawyer logins and a browser, which nothing in this repo's automated
 battery drives. Full command reference: `docs/workflows/ethical-walls.md`.
 Use a **disposable** instance (never port 3100 or your real data dir).
+
+> Order matters: launch and wall on `local_trusted` FIRST. The launcher's
+> import is unauthenticated (`--api-key` is honored only by `--add-wall`),
+> so an `--auth-mode authenticated` launch stops at import (HTTP 403) after
+> persisting the secret and surfacing the claim URL — see the runbook's
+> "The launch stops at import" section. A relaunch on the same data dir also
+> needs a distinct `--org-name` (same name → import 500 prefix collision).
 
 ### Prerequisites
 
@@ -160,23 +166,48 @@ Use a **disposable** instance (never port 3100 or your real data dir).
 export DATA_DIR="$(mktemp -d)"
 ```
 
-### Step 1 — Launch authenticated, then wall a client
+### Step 1 — Launch local_trusted, wall a client, then migrate to authenticated
 
 ```bash
+# 1a. First launch (local_trusted) — import succeeds here:
+./bin/possiblaw --variant codex --port 3199 --gate-port 3899 \
+  --data-dir "$DATA_DIR" \
+  --non-interactive --yes --mission "walls smoke test"
+
+# 1b. Wall the client (no --api-key needed on local_trusted):
+./bin/possiblaw --add-wall "Conflicted Client Inc" --variant codex \
+  --port 3199 --data-dir "$DATA_DIR" --gate-port-base 3899
+
+# 1c. Stop the server and both gate proxies:
+kill "$(cat "$DATA_DIR/possiblaw.pid")"        2>/dev/null || true
+kill "$(cat "$DATA_DIR/gate-proxy.pid")"       2>/dev/null || true
+kill "$(cat "$DATA_DIR/gate-proxy-CON.pid")"   2>/dev/null || true
+
+# 1d. Authenticated relaunch — EXPECT it to persist better-auth.secret,
+#     surface the BOARD CLAIM milestone, then exit 1 at import (HTTP 403,
+#     known limitation). The server it booted stops with it.
 ./bin/possiblaw --variant codex --port 3199 --gate-port 3899 \
   --data-dir "$DATA_DIR" --auth-mode authenticated \
   --non-interactive --yes --mission "walls smoke test"
 
-# fresh authenticated data dir → bootstrap the first admin:
-pnpm -C paperclip paperclipai auth bootstrap-ceo
-
-./bin/possiblaw --add-wall "Conflicted Client Inc" --variant codex \
-  --port 3199 --data-dir "$DATA_DIR"
+# 1e. Boot the server manually for the test session (mirrors the launcher's
+#     own server invocation; prints a fresh board-claim URL on its console
+#     while the local board is still the only admin):
+env PAPERCLIP_DEPLOYMENT_MODE=authenticated \
+    BETTER_AUTH_SECRET="$(cat "$DATA_DIR/better-auth.secret")" \
+    PORT=3199 \
+    pnpm -C paperclip paperclipai onboard --data-dir "$DATA_DIR" --bind loopback --yes
 ```
+
+The manual boot starts only the paperclip server — no gate proxies. That is
+enough for every assertion below (membership, visibility, approvals); do not
+drive agent egress in this session.
 
 ### Step 2 — Claim the board, invite two lawyers
 
-- Accept the bootstrap-ceo invite as **Lawyer A** (becomes instance admin).
+- Open the board-claim URL (from the 1d milestone or the 1e console), sign
+  up/sign in as **Lawyer A**, and claim — Lawyer A becomes instance admin
+  with owner membership on both companies (main + walled `CON`).
 - In paperclip's dashboard, open **Company Invites**
   (`/:companyPrefix/company/settings/invites`) for the **main** company and
   invite **Lawyer B**. Do **not** invite Lawyer B to the walled `CON` company.
@@ -211,11 +242,16 @@ PAPERCLIP_BASE_URL=http://127.0.0.1:3199 pnpm -C firm-overview start
 
 ### Step 5 — Teardown
 
+Stop the manually-booted server from Step 1e with Ctrl-C (it runs in the
+foreground), then:
+
 ```bash
+# belt-and-braces: kill anything a pid file still points at
 kill "$(cat "$DATA_DIR/possiblaw.pid")"        2>/dev/null || true
 kill "$(cat "$DATA_DIR/gate-proxy.pid")"       2>/dev/null || true
 kill "$(cat "$DATA_DIR/gate-proxy-CON.pid")"   2>/dev/null || true
 rm -rf "$DATA_DIR"
+rm -rf ~/.possiblaw/gate-receipts/"$(basename "$DATA_DIR")"*   # per-run receipts chains
 ```
 
 Verify port 3100 is untouched: `lsof -i :3100` should return nothing (or your pre-existing instance).
