@@ -179,6 +179,18 @@ OPTIONS:
                         instance (pcp_board_… from the CLI-auth flow).
   --gate-port-base <n>  Wall gate ports are allocated upward from this base
                         (default: $DEFAULT_GATE_PORT).
+  --auth-mode <mode>    Server deployment mode: local_trusted (default; no
+                        sign-in, single-operator localhost) or authenticated
+                        (multi-user login for ethical walls). Authenticated
+                        mode boots paperclip with
+                        PAPERCLIP_DEPLOYMENT_MODE=authenticated and a
+                        BETTER_AUTH_SECRET persisted at
+                        <data-dir>/better-auth.secret (generated 0600 on
+                        first use, reused on restart). On the first
+                        authenticated boot of a formerly local_trusted data
+                        dir the launcher surfaces the server's one-time
+                        board-claim URL; see docs/workflows/ethical-walls.md
+                        for the fresh-install bootstrap (bootstrap-ceo).
   -h, --help            Show this help and exit.
 
 EXAMPLES:
@@ -335,6 +347,7 @@ FIRM_FACADE="false"
 ADD_WALL=""
 API_KEY=""
 GATE_PORT_BASE="$DEFAULT_GATE_PORT"
+AUTH_MODE="local_trusted"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -364,11 +377,18 @@ while [ "$#" -gt 0 ]; do
         --add-wall) [ "$#" -ge 2 ] || { err "--add-wall requires a client name"; exit 2; }; ADD_WALL="$2"; shift 2 ;;
         --api-key) [ "$#" -ge 2 ] || { err "--api-key requires a value"; exit 2; }; API_KEY="$2"; shift 2 ;;
         --gate-port-base) [ "$#" -ge 2 ] || { err "--gate-port-base requires a value"; exit 2; }; GATE_PORT_BASE="$2"; shift 2 ;;
+        --auth-mode) [ "$#" -ge 2 ] || { err "--auth-mode requires a value"; exit 2; }; AUTH_MODE="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
         *) err "Unknown argument: $1"; usage >&2; exit 2 ;;
     esac
 done
+
+# --auth-mode validation: fail fast, before any pre-flight or filesystem work.
+case "$AUTH_MODE" in
+    local_trusted|authenticated) : ;;
+    *) err "--auth-mode must be 'local_trusted' or 'authenticated' (got: '$AUTH_MODE')"; exit 2 ;;
+esac
 
 # Normalize relative paths against CWD (so the script can be invoked from anywhere).
 for var in DATA_DIR PACKAGE VARIANTS_FILE; do
@@ -2195,6 +2215,24 @@ EGRESS_SCRUB_ARGS=()
 for cred_var in $EGRESS_CRED_VARS; do
     EGRESS_SCRUB_ARGS+=(-u "$cred_var")
 done
+# --auth-mode authenticated: boot the server in paperclip's authenticated
+# deployment mode. PAPERCLIP_DEPLOYMENT_MODE is read by the server config
+# (paperclip/server/src/config.ts); an authenticated boot hard-requires
+# BETTER_AUTH_SECRET (paperclip/server/src/auth/better-auth.ts). The secret
+# is generated once (0600 via umask 177), persisted in the data dir, and
+# reused on every restart so user sessions survive relaunches.
+if [ "$AUTH_MODE" = "authenticated" ]; then
+    AUTH_SECRET_FILE="$DATA_DIR/better-auth.secret"
+    if [ ! -f "$AUTH_SECRET_FILE" ]; then
+        umask_prev="$(umask)"; umask 177
+        head -c 32 /dev/urandom | base64 > "$AUTH_SECRET_FILE"
+        umask "$umask_prev"
+        milestone "generated better-auth secret at $AUTH_SECRET_FILE (0600, reused on restart)"
+    fi
+    SERVER_AUTH_ENV=(PAPERCLIP_DEPLOYMENT_MODE=authenticated BETTER_AUTH_SECRET="$(cat "$AUTH_SECRET_FILE")")
+else
+    SERVER_AUTH_ENV=()
+fi
 (
     cd "$PAPERCLIP_DIR"
     # onboard reads its port from $PORT (cli/src/commands/onboard.ts); without
@@ -2202,7 +2240,9 @@ done
     # $API_BASE never succeeds when a custom port was chosen.
     # shellcheck disable=SC2086 — ONBOARD_EXTRA_ENV holds zero or more
     # space-free KEY=VALUE assignments (e.g. the static-UI mode flag).
-    exec env "${EGRESS_SCRUB_ARGS[@]}" PORT="$PORT" $ONBOARD_EXTRA_ENV pnpm paperclipai onboard --data-dir "$DATA_DIR" --bind loopback --yes
+    # SERVER_AUTH_ENV uses the ${arr+...} guard: bash 3.2 + set -u aborts on
+    # expanding an empty array as "${arr[@]}" (same pattern as AUTH_ARGS).
+    exec env "${EGRESS_SCRUB_ARGS[@]}" ${SERVER_AUTH_ENV+"${SERVER_AUTH_ENV[@]}"} PORT="$PORT" $ONBOARD_EXTRA_ENV pnpm paperclipai onboard --data-dir "$DATA_DIR" --bind loopback --yes
 ) >>"$LAUNCHER_LOG" 2>&1 </dev/null &
 PAPERCLIP_PID=$!
 echo "$PAPERCLIP_PID" > "$LAUNCHER_PID_FILE"
@@ -2234,6 +2274,23 @@ if [ "$HEALTHY" != "true" ]; then
     exit 1
 fi
 milestone "paperclip healthy at $HEALTH_URL"
+
+# --auth-mode authenticated: surface the one-time board-claim URL. On the
+# first authenticated boot of a formerly local_trusted data dir the server
+# prints it to its console (paperclip/server/src/index.ts, via
+# getBoardClaimWarningUrl) — which lands in $LAUNCHER_LOG. The URL is wrapped
+# in ANSI color codes there, so strip those before matching. A genuinely
+# fresh authenticated data dir prints no claim URL (its first admin comes
+# from `paperclipai auth bootstrap-ceo` — see docs/workflows/ethical-walls.md).
+if [ "$AUTH_MODE" = "authenticated" ]; then
+    CLAIM_LINE="$(sed $'s/\x1b\\[[0-9;]*m//g' "$LAUNCHER_LOG" 2>/dev/null \
+        | grep -o 'http[s]*://[^ ]*/board-claim/[^ ]*' | head -n 1 || true)"
+    if [ -n "$CLAIM_LINE" ]; then
+        milestone "AUTHENTICATED MODE — claim board ownership (first admin): $CLAIM_LINE"
+    else
+        milestone "authenticated mode active; manage lawyer accounts via company invites (see docs/workflows/ethical-walls.md)"
+    fi
+fi
 
 # Replace the subshell PID in $LAUNCHER_PID_FILE with the actual server PID
 # (the process listening on $PORT) so `kill $(cat ...pid)` does the right thing.
@@ -2428,6 +2485,47 @@ else
     if [ "$GATE_START_ATTEMPTED" = "true" ]; then
         GATE_PROXY_PID="$(cat "$GATE_PID_FILE" 2>/dev/null || true)"
     fi
+fi
+
+# ---------------------------------------------------------------------------
+# Restore per-wall gate proxies recorded by --add-wall (restart re-wiring)
+# ---------------------------------------------------------------------------
+#
+# Every wall registered in $DATA_DIR/walls.json carries its own gate proxy
+# (one company binding per proxy). A relaunch must bring each active wall's
+# proxy back, or walled-client egress silently runs ungated/unreceipted.
+# Warn-only throughout: start_gate_proxy_for never aborts the launch, and a
+# malformed registry row is skipped with a warning (re-run --add-wall to
+# repair it — it upserts by prefix). This block intentionally does NOT touch
+# GATE_PROXY_PID / GATE_START_ATTEMPTED (those belong to the firm proxy just
+# above); per-wall pids land in GATE_PID_FILES/GATE_PID_PORTS via
+# start_gate_proxy_for, so the signal-trap sweep still covers them.
+if [ "$NO_GATE_PROXY" != "true" ] && [ -f "$DATA_DIR/walls.json" ]; then
+    while IFS=$'\t' read -r w_prefix w_company w_port w_receipts; do
+        if [ "$w_prefix" = "__MALFORMED__" ]; then
+            warn "walls.json: skipping a malformed wall entry (missing prefix/companyId/gatePort/receiptsPath); re-run --add-wall to repair it"
+            continue
+        fi
+        [ -n "$w_company" ] || continue
+        case "$w_prefix" in
+            *[!A-Z0-9]*|"") warn "walls.json: skipping wall with unsafe prefix '$w_prefix' (expected letters/digits only)"; continue ;;
+        esac
+        start_gate_proxy_for "$w_company" "$w_port" "$w_receipts" \
+            "$DATA_DIR/gate-proxy-$w_prefix.pid" "$DATA_DIR/gate-proxy-$w_prefix.log" "wall:$w_prefix"
+    done < <(python3 "$REPO_ROOT/bin/_possiblaw_walls.py" --registry "$DATA_DIR/walls.json" --list \
+        | python3 -c 'import json, sys
+try:
+    walls = json.load(sys.stdin)
+except Exception:
+    walls = []
+for w in walls if isinstance(walls, list) else []:
+    if not isinstance(w, dict) or w.get("status") != "active":
+        continue
+    if not all(w.get(k) for k in ("prefix", "companyId", "gatePort", "receiptsPath")):
+        print("__MALFORMED__")
+        continue
+    print("\t".join([str(w["prefix"]), str(w["companyId"]), str(w["gatePort"]), str(w["receiptsPath"])]))' \
+        || true)
 fi
 
 # ---------------------------------------------------------------------------
