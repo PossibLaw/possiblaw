@@ -349,20 +349,47 @@ same-company: `assertCompanyAccess` in
 "agent" && req.actor.companyId !== companyId` — there is no per-matter,
 per-issue, or ethical-wall check below the company level. Any agent in the
 company can read any issue, comment, or work product belonging to any other
-matter in the same company.
+matter in the same company. This has not changed and is not a target for
+change — **within one company, read scope stays company-wide.**
 
-The practical read-scope reality is **one company = one shared information
-pool** for every agent in it. This is the same underlying gap the Firm-Facing
-MCP Facade documents at its own layer (see "No ethical wall or cross-matter
-information barriers (deferred)" under "Firm-facing MCP facade (v1)" below) —
-paperclip has no per-matter read-isolation primitive, and PossibLaw does not
-add one internally either.
+**As of 0.38.0, cross-client agent reads are preventable, not just
+documented as a gap.** `./bin/possiblaw --add-wall "<Client>"` creates the
+walled client as a genuinely separate paperclip company: its agents hold a
+company-scoped key for *that* company only, so a walled company's agent
+reading a main-company issue (or vice versa) hits the same `assertCompanyAccess`
+check above and gets a hard 403 — enforced by paperclip itself, not by an
+assertion PossibLaw adds. In `--auth-mode authenticated`, the same company
+boundary also binds **humans**: a lawyer who is not invited to the walled
+company's membership does not see it in paperclip's dashboard (`GET
+/api/companies` is membership-filtered for non-admin users,
+`paperclip/server/src/routes/companies.ts:91-101`) or in the Firm Overview,
+which adds no ACL of its own — see `docs/workflows/ethical-walls.md`.
 
-Interim pattern for a firm or in-house team that needs an ethical wall between
-walled clients or matters: run **separate paperclip companies**, one per
-walled client/matter cluster (a fresh `--data-dir` or a second import), rather
-than relying on scoping within a single company. Per-matter isolation inside
-one company is not implemented.
+Walls are **opt-in**: nothing changes for a firm or in-house team that never
+runs `--add-wall`, and running it does not retroactively add any per-matter
+check to the main company or to a wall's own company. Two residual floors
+still apply exactly as before:
+
+- **Still unrestricted *within* a company.** Any agent in the main company
+  (or in one wall's company) can still read any issue, comment, or work
+  product belonging to any other matter in that same company — walls give
+  you a hard boundary *between* companies, not a per-matter boundary *inside*
+  one. This is the same gap the Firm-Facing MCP Facade documents at its own
+  layer (see "No ethical wall or cross-matter information barriers
+  (deferred)" under "Firm-facing MCP facade (v1)" below) — paperclip has no
+  per-matter read-isolation primitive, and neither walls nor the facade add
+  one.
+- **`local_trusted` keeps its existing floor.** On the default `local_trusted`
+  deployment mode, any local process — not just paperclip agents — is treated
+  as an implicit, unauthenticated board user with access to every company,
+  walled or not (see "Gate proxy → local_trusted accepts unauthenticated
+  local board calls" above). Walls change what an *agent's own API key* can
+  reach; they do not change what an arbitrary local process can reach on
+  `local_trusted`. `--auth-mode authenticated` is the mode that closes that
+  floor for humans.
+
+Per-matter isolation inside one company is still not implemented — see
+`docs/workflows/ethical-walls.md` → "What a wall does not do."
 
 ## Hybrid variant
 
@@ -715,6 +742,45 @@ cross-company read is stopped and receipted at the facade, not just by paperclip
 Residual: when `PAPERCLIP_API_KEY` is absent on a `local_trusted` instance AND
 `PAPERCLIP_COMPANY_ID` is not set, the scope check is skipped (backward-compatible
 with unconfigured deployments). The launcher always sets both variables.
+
+## Firm Overview (v1)
+
+### Trusts loopback — same floor as the gate proxy / `local_trusted`
+
+`firm-overview/` binds `127.0.0.1` only and does no authorization filtering
+of its own — every board fetch and every approve/reject is made with the
+connected lawyer's own paperclip token, and paperclip's own membership rules
+decide what comes back. That design means the overview's trust floor is
+exactly the gate proxy's `local_trusted` floor (see "Gate proxy →
+`local_trusted` accepts unauthenticated local board calls" above): **a
+malicious process running on the same machine can read the board or hold a
+live session** the same way it could call paperclip directly.
+
+The server does apply a CSRF guard on every state-changing call (`POST
+/api/connect`, `/api/disconnect`, `/api/approvals/:id/decide`): each requires
+a custom `X-Firm-Overview: 1` header, and — because that header is not
+CORS-safelisted — any cross-origin request from an actual browser page
+forces a preflight the server never answers. **This guards against a
+malicious web page in your browser; it does not guard against a malicious
+local process**, which can set arbitrary headers and hit the API directly.
+That is the same non-goal documented for the facade and the gate proxy: local
+processes are outside this repo's threat model until a hosted, authenticated
+deployment (`--auth-mode authenticated`) is in place.
+
+### Deliverables panel is a bounded fan-out (latest 10 issues per client)
+
+The overview does not scan a client's full issue history for deliverables.
+Per client it fetches work products only for the **10 most-recently-updated
+in-flight issues** (already sorted server-side, `sortField=updated&sortDir=desc`).
+A client with more than 10 in-flight issues shows a truncation indicator
+rather than silently omitting older deliverables — but deliverables attached
+to an 11th-or-older in-flight issue are not shown at all until that issue
+moves into the top 10 by recency. This is a v1 scope choice for keeping the
+per-poll fan-out small (4 calls plus up to 10 work-product calls per client,
+every ~15–30s), not a completeness guarantee.
+
+See `docs/workflows/ethical-walls.md` for the full runbook (walls, auth mode,
+connect flow) and what a screened lawyer sees in the overview (nothing).
 
 ## Orchestration eval (Harvey LAB A/B)
 

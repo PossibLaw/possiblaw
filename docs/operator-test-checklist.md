@@ -145,3 +145,76 @@ rm -rf orchestration-eval/results/          # optional — keep for analysis
 ```
 
 Verify port 3100 is untouched: `lsof -i :3100` should return nothing (or your pre-existing instance).
+
+## H. Walls + Firm Overview (authenticated multi-lawyer)
+
+Manual, multi-human test this build defers to the operator — it needs two
+real lawyer logins and a browser, which nothing in this repo's automated
+battery drives. Full command reference: `docs/workflows/ethical-walls.md`.
+Use a **disposable** instance (never port 3100 or your real data dir).
+
+### Prerequisites
+
+```bash
+export DATA_DIR="$(mktemp -d)"
+```
+
+### Step 1 — Launch authenticated, then wall a client
+
+```bash
+./bin/possiblaw --variant codex --port 3199 --gate-port 3899 \
+  --data-dir "$DATA_DIR" --auth-mode authenticated \
+  --non-interactive --yes --mission "walls smoke test"
+
+# fresh authenticated data dir → bootstrap the first admin:
+pnpm -C paperclip paperclipai auth bootstrap-ceo
+
+./bin/possiblaw --add-wall "Conflicted Client Inc" --variant codex \
+  --port 3199 --data-dir "$DATA_DIR"
+```
+
+### Step 2 — Claim the board, invite two lawyers
+
+- Accept the bootstrap-ceo invite as **Lawyer A** (becomes instance admin).
+- In paperclip's dashboard, open **Company Invites**
+  (`/:companyPrefix/company/settings/invites`) for the **main** company and
+  invite **Lawyer B**. Do **not** invite Lawyer B to the walled `CON` company.
+- Verify **Company Access** (`/:companyPrefix/company/settings/access`) on
+  the walled company lists only the intended screened team.
+
+### Step 3 — Verify Lawyer B cannot see the walled client
+
+- Signed in as Lawyer B in paperclip's own dashboard: the walled company must
+  not appear in the company switcher (`GET /api/companies` is
+  membership-filtered).
+- Launch the overview and connect as Lawyer B:
+
+```bash
+PAPERCLIP_BASE_URL=http://127.0.0.1:3199 pnpm -C firm-overview start
+```
+
+  Open `http://127.0.0.1:3860`, click **Connect**, approve as Lawyer B. The
+  merged board must show the main company only — no row, no error chip, no
+  name referencing the walled client anywhere in the page.
+
+### Step 4 — Approve-from-overview as each lawyer
+
+- As Lawyer A (invited to both companies, or connect a second overview
+  instance / browser profile pointed at the same `PAPERCLIP_BASE_URL`):
+  create a pending approval in the walled company, then approve it from the
+  overview. Confirm the decision lands in paperclip (`GET
+  /api/companies/:id/approvals`) exactly as a native-dashboard approval
+  would.
+- As Lawyer B: confirm no walled-company approval is ever visible or
+  actionable, in either paperclip's dashboard or the overview.
+
+### Step 5 — Teardown
+
+```bash
+kill "$(cat "$DATA_DIR/possiblaw.pid")"        2>/dev/null || true
+kill "$(cat "$DATA_DIR/gate-proxy.pid")"       2>/dev/null || true
+kill "$(cat "$DATA_DIR/gate-proxy-CON.pid")"   2>/dev/null || true
+rm -rf "$DATA_DIR"
+```
+
+Verify port 3100 is untouched: `lsof -i :3100` should return nothing (or your pre-existing instance).
