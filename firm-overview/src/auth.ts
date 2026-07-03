@@ -47,10 +47,20 @@ export class CredentialStore {
   }
 
   async pollConnect(): Promise<ConnectState> {
-    if (!this.pending) return this.state();
-    const { status } = await this.client.getCliAuthChallenge(this.pending.challengeId, this.pending.challengeToken);
+    // Snapshot the pending record before the await: if `pending` is replaced
+    // (startConnect) or cleared (disconnect) while the poll is in flight, the
+    // resolved result belongs to a stale challenge and must be ignored —
+    // otherwise an "approved" for the OLD challenge would promote the NEW
+    // challenge's still-unapproved token.
+    const snapshot = this.pending;
+    if (!snapshot) return this.state();
+    const { status } = await this.client.getCliAuthChallenge(
+      snapshot.challengeId,
+      snapshot.challengeToken,
+    );
+    if (this.pending !== snapshot) return this.state(); // stale poll: ignore entirely
     if (status === "approved") {
-      this.liveToken = this.pending.pendingBoardToken;
+      this.liveToken = snapshot.pendingBoardToken;
       this.pending = undefined;
     } else if (status === "expired" || status === "cancelled") {
       this.pending = undefined;

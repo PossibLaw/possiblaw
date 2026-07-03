@@ -105,6 +105,95 @@ test("pollConnect() before any startConnect() is a no-op that stays disconnected
   assert.equal(calls.poll.length, 0);
 });
 
+test("stale poll: startConnect B mid-flight makes A's 'approved' result a no-op", async () => {
+  const challenges: Challenge[] = [
+    { id: "chA", token: "tA", boardApiToken: "pcp_board_A", approvalUrl: "http://x/approve/A" },
+    { id: "chB", token: "tB", boardApiToken: "pcp_board_B", approvalUrl: "http://x/approve/B" },
+  ];
+  let resolvePoll!: (v: { status: string }) => void;
+  const stub = {
+    async createCliAuthChallenge() {
+      return challenges.shift()!;
+    },
+    getCliAuthChallenge() {
+      return new Promise<{ status: string }>((r) => {
+        resolvePoll = r;
+      });
+    },
+  };
+  const store = new CredentialStore(stub as unknown as PaperclipClient);
+
+  await store.startConnect(); // A
+  const inFlight = store.pollConnect(); // A's poll, unresolved
+  await store.startConnect(); // B replaces pending mid-flight
+  resolvePoll({ status: "approved" }); // A's challenge approves — but it is stale
+  const s = await inFlight;
+
+  // B's unapproved token must NOT have been promoted.
+  assert.deepEqual(s, { status: "awaiting_approval", approvalUrl: "http://x/approve/B" });
+  assert.deepEqual(store.state(), { status: "awaiting_approval", approvalUrl: "http://x/approve/B" });
+  assert.equal(store.token(), undefined);
+});
+
+test("stale poll: 'expired' resolving after startConnect B must not clear B's pending challenge", async () => {
+  const challenges: Challenge[] = [
+    { id: "chA", token: "tA", boardApiToken: "pcp_board_A", approvalUrl: "http://x/approve/A" },
+    { id: "chB", token: "tB", boardApiToken: "pcp_board_B", approvalUrl: "http://x/approve/B" },
+  ];
+  let resolvePoll!: (v: { status: string }) => void;
+  const stub = {
+    async createCliAuthChallenge() {
+      return challenges.shift()!;
+    },
+    getCliAuthChallenge() {
+      return new Promise<{ status: string }>((r) => {
+        resolvePoll = r;
+      });
+    },
+  };
+  const store = new CredentialStore(stub as unknown as PaperclipClient);
+
+  await store.startConnect(); // A
+  const inFlight = store.pollConnect(); // A's poll, unresolved
+  await store.startConnect(); // B replaces pending mid-flight
+  resolvePoll({ status: "expired" }); // A expired — stale, must not touch B
+  const s = await inFlight;
+
+  assert.deepEqual(s, { status: "awaiting_approval", approvalUrl: "http://x/approve/B" });
+  assert.deepEqual(store.state(), { status: "awaiting_approval", approvalUrl: "http://x/approve/B" });
+  assert.equal(store.token(), undefined);
+});
+
+test("disconnect() during an in-flight poll: 'approved' resolving after is ignored without throwing", async () => {
+  let resolvePoll!: (v: { status: string }) => void;
+  const stub = {
+    async createCliAuthChallenge() {
+      return {
+        id: "ch1",
+        token: "t1",
+        boardApiToken: "pcp_board_x",
+        approvalUrl: "http://x/approve/1",
+      };
+    },
+    getCliAuthChallenge() {
+      return new Promise<{ status: string }>((r) => {
+        resolvePoll = r;
+      });
+    },
+  };
+  const store = new CredentialStore(stub as unknown as PaperclipClient);
+
+  await store.startConnect();
+  const inFlight = store.pollConnect(); // unresolved
+  store.disconnect(); // clears pending mid-flight
+  resolvePoll({ status: "approved" });
+
+  const s = await inFlight; // must not throw
+  assert.deepEqual(s, { status: "disconnected" });
+  assert.deepEqual(store.state(), { status: "disconnected" });
+  assert.equal(store.token(), undefined);
+});
+
 test("startConnect() called twice replaces the pending challenge with the latest one", async () => {
   const first: Challenge = {
     id: "ch1",
