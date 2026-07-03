@@ -278,6 +278,7 @@ test("(g) board with a held token that now 401s -> {connected:false, reauth:true
 
   // Now the board fetch 401s against the held token.
   const boardRes = await fetch(`${overview.baseUrl}/api/board`, { headers: H });
+  assert.equal(boardRes.status, 200);
   const boardBody = await boardRes.json();
   assert.deepEqual(boardBody, { connected: false, reauth: true });
 

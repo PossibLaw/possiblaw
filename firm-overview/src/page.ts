@@ -87,6 +87,8 @@ export function renderPage(): string {
   .approval-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 0.35rem 0; border-bottom: 1px dashed var(--border); }
   .approval-row:last-child { border-bottom: none; }
   .approval-row input[type="text"] { flex: 1 1 12rem; min-width: 8rem; padding: 0.25rem 0.5rem; border: 1px solid var(--border); border-radius: 4px; }
+  .decide-error { flex-basis: 100%; color: var(--danger); font-size: 0.85rem; }
+  #refresh-status { color: var(--danger); font-size: 0.8rem; margin-left: auto; margin-right: 0.75rem; }
   button { cursor: pointer; border: 1px solid var(--border); background: var(--card-bg); border-radius: 6px; padding: 0.3rem 0.75rem; font: inherit; }
   button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
   button.approve { border-color: #15803d; color: #15803d; }
@@ -99,6 +101,7 @@ export function renderPage(): string {
 <body>
 <header>
   <h1>Firm Overview</h1>
+  <span id="refresh-status"></span>
   <div id="connect-bar"></div>
 </header>
 <div id="generated-at"></div>
@@ -108,6 +111,12 @@ export function renderPage(): string {
   "use strict";
 
   var FIRM_OVERVIEW_HEADERS = { "X-Firm-Overview": "1" };
+
+  // Per-approval decide failures, keyed by approval id. An entry persists
+  // across board re-renders/polls (renderApprovals reads this map every
+  // render) and is cleared ONLY when the user retries that same approval —
+  // a rejected approve/reject must never turn into a silent refresh.
+  var decideErrors = {};
 
   function el(tag, opts) {
     var node = document.createElement(tag);
@@ -249,6 +258,9 @@ export function renderPage(): string {
       row.appendChild(note);
       row.appendChild(approveBtn);
       row.appendChild(rejectBtn);
+      if (decideErrors[approval.id]) {
+        row.appendChild(el("span", { className: "decide-error", text: decideErrors[approval.id] }));
+      }
       wrap.appendChild(row);
     });
     return wrap;
@@ -312,19 +324,38 @@ export function renderPage(): string {
   function decide(approvalId, action, note) {
     var verb = action === "approve" ? "approve" : "reject";
     if (!window.confirm("Are you sure you want to " + verb + " this approval?")) return;
+    // A retry is the ONLY thing that clears a previous failure for this approval.
+    delete decideErrors[approvalId];
     fetch("/api/approvals/" + encodeURIComponent(approvalId) + "/decide", {
       method: "POST",
       headers: Object.assign({ "content-type": "application/json" }, FIRM_OVERVIEW_HEADERS),
       body: JSON.stringify({ action: action, decisionNote: note || undefined }),
     })
-      .then(function () { fetchBoard(); })
-      .catch(function () {});
+      .then(function (res) {
+        if (res.ok) {
+          fetchBoard();
+          return;
+        }
+        // The server mirrors paperclip's rejection verbatim — surface it to
+        // the lawyer instead of silently refreshing past it. Body read is
+        // best-effort; the HTTP status alone is enough to show.
+        return res.json().catch(function () { return null; }).then(function (body) {
+          var detail = body && typeof body.error === "string" ? ": " + body.error : "";
+          decideErrors[approvalId] = verb + " failed (HTTP " + res.status + ")" + detail;
+          fetchBoard();
+        });
+      })
+      .catch(function () {
+        decideErrors[approvalId] = verb + " failed (network error)";
+        fetchBoard();
+      });
   }
 
   function fetchBoard() {
     fetch("/api/board", { headers: FIRM_OVERVIEW_HEADERS })
       .then(function (res) { return res.json(); })
       .then(function (data) {
+        document.getElementById("refresh-status").textContent = "";
         if (data && data.reauth) {
           renderConnect({ status: "disconnected" });
           var main = document.getElementById("board");
@@ -335,7 +366,11 @@ export function renderPage(): string {
         renderConnect(data.connect);
         renderBoard(data.board);
       })
-      .catch(function () {});
+      .catch(function () {
+        // Shared minimal affordance: a board poll failed — say so in the
+        // header instead of failing silently. Cleared on the next success.
+        document.getElementById("refresh-status").textContent = "refresh failed";
+      });
   }
 
   fetchBoard();
