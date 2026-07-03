@@ -26,6 +26,11 @@ import { humanGate } from "./gates/human.ts";
 import type { EgressMeta, EgressRequest } from "./types.ts";
 import type { CitationRegistry } from "./quality/citation-registry.ts";
 import type { AuthorityRegistry } from "./quality/authority-registry.ts";
+import {
+  MatterClassificationRegistry,
+  resolveEffectiveConfidentiality,
+  isConfidentiality,
+} from "./matter-classification.ts";
 import { assembleSignoffBundle, renderSignoffMarkdown } from "./quality/signoff.ts";
 import { documentSha256, extractCitations } from "./citations.ts";
 import { extractDocumentText } from "./document-text.ts";
@@ -44,6 +49,12 @@ export interface GateServerDeps {
   localModelAvailable: boolean;
   citationRegistry: CitationRegistry;
   authorityRegistry: AuthorityRegistry;
+  /**
+   * Task H: receipt-derived per-matter confidentiality floors. Optional —
+   * createGateServer constructs one from `receipts` when omitted, so every
+   * server has a working registry (safe built-in default).
+   */
+  matterClassifications?: MatterClassificationRegistry;
   log?: (line: string) => void; // NEVER log payload text
   /**
    * Task 4.1: decoded-size cap (bytes) for contentBase64 binary uploads.
@@ -61,6 +72,13 @@ export interface GateServerDeps {
 const MAX_BODY_BYTES = 1_000_000;
 
 /** I1 (a): safe ID pattern — only alphanumeric + hyphen, 1–64 chars. */
+/** Receipts carry enums only: clamp the caller-supplied confidentiality
+ * string so arbitrary (attacker-steered) text never enters the hash chain. */
+function sanitizeClaimedConfidentiality(v: unknown): string {
+  if (v === undefined || v === null) return "unspecified";
+  return isConfidentiality(v) ? (v as string) : "invalid";
+}
+
 const SAFE_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
 
 /** I2 (c): entity list / per-entity caps — mirrored from anonymize.ts for server-level 400 guard. */
@@ -71,6 +89,18 @@ const MAX_ENTITY_LENGTH = 256;
 // always reflect the FULL document; only the per-segment array is capped, and a
 // segmentsTruncated flag is set so truncation is never silent.
 const MAX_PROVENANCE_SEGMENTS = 500;
+
+/**
+ * Task H (problem 2): tools whose performers genuinely honor
+ * PerformOptions.useLocal (see connectors.ts — only makeQueryExternalModel
+ * routes to LOCAL_MODEL_URL). Only these may proceed under a tier-floor
+ * useLocal decision; every other performer IGNORES useLocal and would ship the
+ * UNMASKED payload to its real vendor while the receipt claimed
+ * routedLocal:true. For those tools a useLocal decision falls through to the
+ * anonymize path (mask then perform, else block) so the receipt records what
+ * ACTUALLY happened.
+ */
+const LOCAL_ROUTABLE_TOOLS: ReadonlySet<string> = new Set(["query_external_model"]);
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -187,7 +217,7 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
   } = opts;
 
   // I5: claimedConfidentiality in every egress receipt meta
-  const claimedConfidentiality = meta.confidentiality ?? "unspecified";
+  const claimedConfidentiality = sanitizeClaimedConfidentiality(meta.confidentiality);
 
   const performer = performers[tool];
   try {
@@ -246,7 +276,7 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
     sendJson(res, 200, { decision: responseDecisionLabel, result: finalResult });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const errorReceiptMeta: Record<string, unknown> = { error: msg, claimedConfidentiality };
+    const errorReceiptMeta: Record<string, unknown> = { error: msg, claimedConfidentiality, ...(extraReceiptMeta ?? {}) };
     receipts.append({
       kind: "egress",
       tool,
@@ -270,6 +300,10 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
 export function createGateServer(deps: GateServerDeps): http.Server {
   const { policy, receipts, client, performers, localModelAvailable } = deps;
   const log = deps.log ?? noop;
+  // Task H: matter-classification floors. Auto-constructed from the same
+  // receipt chain when not supplied so the safe default always exists.
+  const matterClassifications =
+    deps.matterClassifications ?? new MatterClassificationRegistry(receipts);
   // Task 4.1: decoded-size cap for binary uploads. Fail closed to the default
   // on any invalid override (NaN, non-finite, <= 0) rather than disabling the cap.
   const maxUploadBytes =
@@ -939,6 +973,91 @@ export function createGateServer(deps: GateServerDeps): http.Server {
     }
 
     // ------------------------------------------------------------------
+    // POST /matters/classification — body {issueId, tier}
+    //
+    // Task H (fix 1a): the operator/launcher/chief-of-staff intake registers a
+    // matter's confidentiality floor here. The registry appends a hash-chained
+    // quality receipt (tool=matter_classification; ids/enums/hashes only) and
+    // applies a RAISE-ONLY merge: a later lower registration never lowers an
+    // existing floor (the attempt is still receipted). At egress the effective
+    // confidentiality = max(registered floor, request tier).
+    // ------------------------------------------------------------------
+    if (method === "POST" && url === "/matters/classification") {
+      try {
+        const { body: rawBody, limitExceeded } = await readBody(req);
+        if (limitExceeded) {
+          sendJson(res, 413, { error: "request_too_large" });
+          return;
+        }
+        const errorReceipt = (): void => {
+          deps.receipts.append({
+            kind: "quality",
+            tool: "matter_classification",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+          });
+        };
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(rawBody);
+        } catch {
+          errorReceipt();
+          sendJson(res, 400, { error: "invalid_json" });
+          return;
+        }
+        const b = parsed as Record<string, unknown>;
+        const issueId = b["issueId"];
+        const tier = b["tier"];
+        if (typeof issueId !== "string" || !SAFE_ID_RE.test(issueId) || !isConfidentiality(tier)) {
+          errorReceipt();
+          sendJson(res, 400, {
+            error: "invalid_classification: requires issueId matching [A-Za-z0-9-]{1,64} and tier one of standard|confidential|privileged",
+          });
+          return;
+        }
+        let result;
+        try {
+          result = matterClassifications.register({ issueId, tier });
+        } catch (err) {
+          errorReceipt();
+          sendJson(res, 400, {
+            error: `classification_rejected: ${err instanceof Error ? err.message : "invalid input"}`,
+          });
+          return;
+        }
+        sendJson(res, 200, {
+          registered: true,
+          issueId: result.issueId,
+          requestedTier: result.requestedTier,
+          effectiveTier: result.effectiveTier,
+        });
+      } catch {
+        if (!res.headersSent) sendJson(res, 500, { error: "internal_error" });
+      }
+      return;
+    }
+
+    // ------------------------------------------------------------------
+    // GET /matters/classification?issueId= — read-back (no receipt; read-only)
+    // ------------------------------------------------------------------
+    if (method === "GET" && url.startsWith("/matters/classification")) {
+      try {
+        const parsedUrl = new URL(url, "http://localhost");
+        const issueId = parsedUrl.searchParams.get("issueId");
+        if (issueId === null || !SAFE_ID_RE.test(issueId)) {
+          sendJson(res, 400, { error: "invalid_issueId: required query param issueId must match [A-Za-z0-9-]{1,64}" });
+          return;
+        }
+        sendJson(res, 200, { issueId, tier: matterClassifications.get(issueId) ?? null });
+      } catch {
+        if (!res.headersSent) sendJson(res, 500, { error: "internal_error" });
+      }
+      return;
+    }
+
+    // ------------------------------------------------------------------
     // POST /egress/{tool}
     // ------------------------------------------------------------------
     const egressMatch = url.match(/^\/egress\/([^/?#]+)(?:\?.*)?$/);
@@ -946,7 +1065,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
       const tool = decodeURIComponent(egressMatch[1]);
       // C2 (a): entire egress handler wrapped in try/catch
       try {
-        await handleEgress(tool, req, res, { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, authorityRegistry: deps.authorityRegistry, log, maxUploadBytes });
+        await handleEgress(tool, req, res, { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, authorityRegistry: deps.authorityRegistry, matterClassifications, log, maxUploadBytes });
       } catch (outerErr) {
         // Best-effort: try to append an error receipt; if the chain itself is
         // corrupt, log a no-payload line and continue — process stays alive.
@@ -990,7 +1109,7 @@ async function handleEgress(
   res: http.ServerResponse,
   deps: Required<GateServerDeps>,
 ): Promise<void> {
-  const { policy, receipts, client, performers, localModelAvailable, citationRegistry, authorityRegistry, log } = deps;
+  const { policy, receipts, client, performers, localModelAvailable, citationRegistry, authorityRegistry, matterClassifications, log } = deps;
 
   // 1. Read raw body (with size cap). Task 4.1: upload_document may carry a
   // base64-encoded file, so its body cap scales to hold maxUploadBytes of
@@ -1178,7 +1297,7 @@ async function handleEgress(
         payloadSha256: sha256hex(rawBody),
         agentId: meta.agentId,
         issueId: meta.issueId,
-        meta: { error: errorCode, claimedConfidentiality: meta.confidentiality ?? "unspecified" },
+        meta: { error: errorCode, claimedConfidentiality: sanitizeClaimedConfidentiality(meta.confidentiality) },
       });
       sendJson(res, status, { error: message });
     };
@@ -1244,7 +1363,48 @@ async function handleEgress(
   // sha (audit invariant).
   const humanGateSha256 = binaryApprovalSha256 ?? payloadSha256;
 
-  const egressReq: EgressRequest = { tool, payload, meta };
+  // 3b. Task H — EFFECTIVE confidentiality. meta.confidentiality is typed by
+  // the CALLING AGENT and cannot be trusted alone: the gate's own registered
+  // per-matter floor (receipt-derived) takes precedence via a raise-only
+  // merge — the request may RAISE the tier, never LOWER it. When neither a
+  // floor nor a usable claim exists, query_external_model (the secondary-model
+  // channel) fails closed to the policy's unspecified-confidentiality default.
+  // The effective value drives boundary classification + tier-floor +
+  // anonymizer below; receipts stay honest by recording claimed vs effective
+  // separately (enums/booleans only).
+  const registeredFloor =
+    meta.issueId !== undefined ? matterClassifications.get(meta.issueId) : undefined;
+  const confResolution = resolveEffectiveConfidentiality({
+    claimed: meta.confidentiality,
+    registeredFloor,
+    // Fail-closed unless the firm explicitly set "standard" (any other value —
+    // including a malformed policy object at runtime — keeps the default).
+    unspecifiedDefault:
+      tool === "query_external_model" && policy.unspecifiedConfidentialityDefault !== "standard"
+        ? "confidential"
+        : null,
+  });
+  const effectiveConfidentiality = confResolution.effective;
+
+  // I5: claimedConfidentiality in every egress receipt meta (what the caller
+  // SENT); effectiveConfidentiality + confidentialityFloorApplied record what
+  // the gate actually enforced, only when they differ from the claim.
+  const claimedConfidentiality = sanitizeClaimedConfidentiality(meta.confidentiality);
+  const confidentialityAudit: Record<string, unknown> = {};
+  if (effectiveConfidentiality !== undefined && effectiveConfidentiality !== meta.confidentiality) {
+    confidentialityAudit["effectiveConfidentiality"] = effectiveConfidentiality;
+  }
+  if (confResolution.floorApplied) confidentialityAudit["confidentialityFloorApplied"] = true;
+
+  // Downstream consumers (classify, tier-floor, anonymizer, performers, human
+  // gate) see the EFFECTIVE meta. The ORIGINAL `meta` object keeps the claimed
+  // value for honest receipts.
+  const effectiveMeta: EgressMeta =
+    effectiveConfidentiality !== undefined
+      ? { ...meta, confidentiality: effectiveConfidentiality }
+      : meta;
+
+  const egressReq: EgressRequest = { tool, payload, meta: effectiveMeta };
 
   // 4. Classify — UnknownToolError → 403 blocked (fail-closed)
   let boundary: ReturnType<typeof classify>;
@@ -1264,7 +1424,7 @@ async function handleEgress(
         payloadSha256,
         agentId: meta.agentId,
         issueId: meta.issueId,
-        meta: { claimedConfidentiality: meta.confidentiality ?? "unspecified" },
+        meta: { claimedConfidentiality, ...confidentialityAudit },
       });
       sendJson(res, 403, { error: `unknown_tool: ${tool}` });
       return;
@@ -1274,9 +1434,6 @@ async function handleEgress(
 
   // 5. Decide
   const decision = decide(boundary, policy);
-
-  // I5: claimedConfidentiality in every egress receipt meta
-  const claimedConfidentiality = meta.confidentiality ?? "unspecified";
 
   // Authority-provenance signal computed in the citation gate (5b) and threaded
   // onto whatever egress receipt the dispatch (step 6) ultimately writes, so the
@@ -1297,7 +1454,7 @@ async function handleEgress(
       receipts.append({
         kind: "egress", tool, boundary, decision, outcome: "blocked",
         payloadSha256, agentId: meta.agentId, issueId: meta.issueId, approvalId: meta.approvalId,
-        meta: { reason: "citation_gate_no_document", claimedConfidentiality },
+        meta: { reason: "citation_gate_no_document", claimedConfidentiality, ...confidentialityAudit },
       });
       sendJson(res, 403, { decision: "block", reason: "citation_gate: no reviewable document text on a citation-gated boundary" });
       return;
@@ -1307,7 +1464,7 @@ async function handleEgress(
       receipts.append({
         kind: "egress", tool, boundary, decision, outcome: "blocked",
         payloadSha256, agentId: meta.agentId, issueId: meta.issueId, approvalId: meta.approvalId,
-        meta: { reason: "citation_gate_unverified", documentSha256: docSha, claimedConfidentiality },
+        meta: { reason: "citation_gate_unverified", documentSha256: docSha, claimedConfidentiality, ...confidentialityAudit },
       });
       sendJson(res, 403, { decision: "block", reason: "citation_gate: no registered citation verification for this document" });
       return;
@@ -1334,7 +1491,7 @@ async function handleEgress(
         receipts.append({
           kind: "egress", tool, boundary, decision, outcome: "blocked",
           payloadSha256, agentId: meta.agentId, issueId: meta.issueId, approvalId: meta.approvalId,
-          meta: { reason: "authority_provenance_unbacked", ...authorityReceiptMeta, claimedConfidentiality },
+          meta: { reason: "authority_provenance_unbacked", ...authorityReceiptMeta, claimedConfidentiality, ...confidentialityAudit },
         });
         sendJson(res, 403, {
           decision: "block",
@@ -1368,8 +1525,9 @@ async function handleEgress(
   }
 
   // Extra non-payload audit meta that rides on the dispatched receipt:
-  // binary upload facts (Task 4.1) + authority/provenance signals (5b–5d).
-  const extraReceiptMeta: Record<string, unknown> = { ...binaryReceiptMeta, ...authorityReceiptMeta };
+  // binary upload facts (Task 4.1) + authority/provenance signals (5b–5d) +
+  // confidentiality enforcement audit (Task H: effective tier + floor marker).
+  const extraReceiptMeta: Record<string, unknown> = { ...binaryReceiptMeta, ...authorityReceiptMeta, ...confidentialityAudit };
 
   // 6. Dispatch by decision
   switch (decision) {
@@ -1385,7 +1543,7 @@ async function handleEgress(
         agentId: meta.agentId,
         issueId: meta.issueId,
         approvalId: meta.approvalId,
-        meta: { claimedConfidentiality },
+        meta: { claimedConfidentiality, ...confidentialityAudit },
       });
       sendJson(res, 403, { decision: "block", reason: `blocked by policy: ${String(boundary)}` });
       return;
@@ -1407,8 +1565,11 @@ async function handleEgress(
       // FIX 4 (honesty): dataTerms is NOT yet threaded here (staged — not wired
       // into the live egress path). The ZDR branches in tier-floor.ts are
       // unreachable at runtime until dataTerms is added as a parameter.
+      // Task H: the tier-floor reasons over the EFFECTIVE confidentiality
+      // (registered floor ∨ raised claim ∨ fail-closed default) — never the
+      // raw self-reported label.
       const tierResult = evaluateTierFloor({
-        confidentiality: meta.confidentiality,
+        confidentiality: effectiveMeta.confidentiality,
         targetTier: "cloud",
         localAvailable: localModelAvailable,
       });
@@ -1427,6 +1588,7 @@ async function handleEgress(
           meta: {
             reason: tierResult.reason,
             claimedConfidentiality,
+            ...confidentialityAudit,
             ...(tierResult.dataTermsTier !== undefined ? { dataTermsTier: tierResult.dataTermsTier } : {}),
           },
         });
@@ -1434,8 +1596,16 @@ async function handleEgress(
         return;
       }
 
-      if (tierResult.action === "allow") {
-        // Route local (useLocal:true) with UNMASKED payload
+      // Task H (problem 2): a useLocal "allow" is only honored for tools whose
+      // performers genuinely route locally (LOCAL_ROUTABLE_TOOLS). For any
+      // other tool the performer would IGNORE useLocal and ship the UNMASKED
+      // payload to its real vendor while the receipt claimed routedLocal:true
+      // — a lying receipt. Those tools fall through to the anonymize path
+      // below (mask then perform when entities allow, else block) so the
+      // receipt records what ACTUALLY happened.
+      if (tierResult.action === "allow" && (!tierResult.useLocal || LOCAL_ROUTABLE_TOOLS.has(tool))) {
+        // Route local (useLocal:true) with UNMASKED payload — or plain cloud
+        // allow (useLocal:false) for a standard-tier payload.
         await performAndReceipt({
           performers, receipts, tool, boundary, decision, payloadSha256,
           meta, useLocal: tierResult.useLocal, dataTermsTier: tierResult.dataTermsTier,
@@ -1446,7 +1616,9 @@ async function handleEgress(
         return;
       }
 
-      // tierResult.action === "anonymize"
+      // tierResult.action === "anonymize", OR a useLocal allow for a tool
+      // whose performer cannot route locally (fail-closed: mask or block —
+      // never an unmasked vendor send under a routedLocal label).
       // v1: only string field 'prompt' is the anonymizable surface
       const promptVal = payload["prompt"];
       if (typeof promptVal !== "string") {
@@ -1460,7 +1632,7 @@ async function handleEgress(
           agentId: meta.agentId,
           issueId: meta.issueId,
           approvalId: meta.approvalId,
-          meta: { reason: "anonymize_unsupported_payload", claimedConfidentiality },
+          meta: { reason: "anonymize_unsupported_payload", claimedConfidentiality, ...confidentialityAudit },
         });
         sendJson(res, 403, { decision: "block", reason: "anonymize_unsupported_payload: payload must have a string 'prompt' field" });
         return;
@@ -1480,7 +1652,7 @@ async function handleEgress(
           agentId: meta.agentId,
           issueId: meta.issueId,
           approvalId: meta.approvalId,
-          meta: { reason: "anonymizer_cannot_vouch: confidence=0", claimedConfidentiality },
+          meta: { reason: "anonymizer_cannot_vouch: confidence=0", claimedConfidentiality, ...confidentialityAudit },
         });
         sendJson(res, 403, { decision: "block", reason: "anonymizer_cannot_vouch: anonymizer returned confidence=0; cannot proceed safely" });
         return;
@@ -1488,7 +1660,7 @@ async function handleEgress(
 
       // confidence === 1 → perform with masked payload; deanonymize result locally
       const maskedPayload = { ...payload, prompt: anonResult.masked };
-      const maskedReq: EgressRequest = { tool, payload: maskedPayload, meta };
+      const maskedReq: EgressRequest = { tool, payload: maskedPayload, meta: effectiveMeta };
 
       await performAndReceipt({
         performers, receipts, tool, boundary, decision, payloadSha256,
@@ -1513,7 +1685,7 @@ async function handleEgress(
           agentId: meta.agentId,
           issueId: meta.issueId,
           approvalId: meta.approvalId,
-          meta: { reason: "human_gate_unavailable: paperclip client not configured", claimedConfidentiality },
+          meta: { reason: "human_gate_unavailable: paperclip client not configured", claimedConfidentiality, ...confidentialityAudit },
         });
         sendJson(res, 503, { error: "human_gate_unavailable" });
         return;
@@ -1537,7 +1709,7 @@ async function handleEgress(
           agentId: meta.agentId,
           issueId: meta.issueId,
           approvalId: meta.approvalId,
-          meta: { error: msg, claimedConfidentiality },
+          meta: { error: msg, claimedConfidentiality, ...confidentialityAudit },
         });
         sendJson(res, 502, { error: msg });
         return;
@@ -1587,7 +1759,7 @@ async function handleEgress(
             agentId: meta.agentId,
             issueId: meta.issueId,
             approvalId: gateResult.approvalId,
-            meta: { reason: gateResult.reason, claimedConfidentiality },
+            meta: { reason: gateResult.reason, claimedConfidentiality, ...confidentialityAudit },
           });
           sendJson(res, 403, { status: "blocked", reason: gateResult.reason });
           return;
@@ -1609,7 +1781,7 @@ async function handleEgress(
         agentId: meta.agentId,
         issueId: meta.issueId,
         approvalId: meta.approvalId,
-        meta: { error: `unhandled_decision: ${String(_exhaustive)}`, claimedConfidentiality },
+        meta: { error: `unhandled_decision: ${String(_exhaustive)}`, claimedConfidentiality, ...confidentialityAudit },
       });
       sendJson(res, 500, { error: "internal_error: unhandled decision" });
     }

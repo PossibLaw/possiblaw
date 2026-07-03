@@ -89,6 +89,33 @@ firmFacade:
   allowWorkProductText: false
 
 # ---------------------------------------------------------------------------
+# Documented unreceipted-egress exceptions (v1) — a decision, not an accident
+# ---------------------------------------------------------------------------
+#
+# Some egress paths do NOT traverse the gate proxy in v1. They are listed here
+# so the boundary is an explicit, reviewed decision. These are documentation
+# notes only — there is no schema key below and nothing is enforced by the
+# proxy. The full write-up is docs/known-limitations.md > "Unreceipted egress
+# channels".
+#
+# 1. Operator notifications (notify-slack / notify-teams). The webhook POST
+#    goes straight from the agent runner to Slack/Teams — no receipt, no
+#    human-approval gate, no tier-floor. Mitigation is a HARD CONTENT RULE in
+#    the two skills: the message body is a fixed template (matter slug, issue
+#    URL, gate/blocked status line, agent slug) and NEVER carries client names,
+#    matter facts, document text, work-product quotes, or UNTRUSTED-CONTENT.
+#    A gate-proxy notify tool that would receipt/gate these is later work.
+#
+# 2. Synced deliverables folder. Pointing POSSIBLAW_DELIVERABLES_DIR at a
+#    cloud-synced folder (iCloud/Dropbox/OneDrive/Google Drive) exports every
+#    written draft with no receipt or tier gate — the sync client, not the
+#    proxy, moves the bytes. The gated courier path (upload_document) is the
+#    supported cloud delivery. See output-storage-config for the operator-owned
+#    risk and the syncBypassAcknowledged convention.
+#
+# 3. Research queries (Westlaw, Lexis, CourtListener) — see the next block.
+#
+# ---------------------------------------------------------------------------
 # Out-of-scope in v1
 # ---------------------------------------------------------------------------
 #

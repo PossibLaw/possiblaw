@@ -1,6 +1,10 @@
 // Shared types for the learning loop. Pure data — no I/O.
 export type LessonStatus = "pending" | "accepted" | "rejected" | "archived";
 
+// Which source supplied the entity (matter-party) list used to screen a lesson.
+// Recorded in the ledger for audit — see cli.ts collectEntities().
+export type EntitySource = "flag" | "file" | "flag+file" | "none";
+
 export interface SourceRef {
   matterId: string; // paperclip issue id
   feedback: string; // verbatim originating feedback (trace)
@@ -13,6 +17,13 @@ export interface Lesson {
   topic: string;       // normalized topic / skill slug (recurrence + indexing)
   status: LessonStatus;
   sources: SourceRef[];
+  entities?: string[];         // matter-party names screened against at propose time
+  entitySource?: EntitySource; // where those entities came from (audit trail)
+  // Set when a re-sanitize at accept blocked the transition (Fix 1). The lesson
+  // stays pending; these fields are the auditable reason (redacted reason codes,
+  // never client content).
+  sanitizeBlockedAt?: string;
+  sanitizeBlockReasons?: string[];
 }
 
 export interface DeliveryRecord {
@@ -40,4 +51,6 @@ export interface SkillEditProposal {
   generalizedEdit: string;    // the rule to fold into the skill
   proposedOverlayBody: string;// full proposed SKILL.md overlay body (sanitized)
   status: ProposalStatus;
+  entities?: string[];         // matter-party names screened against at propose time
+  entitySource?: EntitySource; // where those entities came from (audit trail)
 }

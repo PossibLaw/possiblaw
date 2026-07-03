@@ -49,6 +49,8 @@ Chief of Staff is intake + routing only — it does not draft or give substantiv
 
 When it needs a fact from you, it raises a `missing-info-gate` BLOCKED comment (and a Slack/Teams notification if a webhook is configured).
 
+One intake step worth knowing about: when the matter's confidentiality level is captured (see `legal-matter-intake` item 10), it is registered with the gate proxy as the matter's **raise-only floor** (`POST /matters/classification`). From then on the gate applies `max(registered floor, per-request claim)` — a later mislabeled or injected request cannot downgrade the matter below what intake declared.
+
 ## Auto-intake (drop-in-To-Do, no manual assignment)
 
 If you would rather just **drop an unassigned issue into To Do and have the delegator pick it up**, that is the `matter-intake-sweep` routine: a scheduled sweep that finds unassigned, top-level, human-untouched To Do matters and assigns each to Chief of Staff (the assignment-wake then runs normal per-issue triage).

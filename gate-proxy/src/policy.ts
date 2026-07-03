@@ -31,6 +31,17 @@ export interface Policy {
      */
     requireAuthorityProvenance: boolean;
   };
+  /**
+   * Task H (fix 1b): fail-closed default confidentiality applied ONLY to
+   * query_external_model (the secondary-model channel) when the request
+   * supplies no usable confidentiality AND no registered matter floor exists.
+   * Default "confidential" → the boundary classifies CONFIDENTIAL_TO_CLOUD →
+   * the anonymize path (which blocks when no entities are supplied). A firm
+   * can set "standard" in gate-policy.yaml to restore the pre-Task-H behavior
+   * (unspecified → allow). send_email/upload_document are unaffected (they are
+   * THIRD_PARTY_EGRESS regardless of confidentiality).
+   */
+  unspecifiedConfidentialityDefault: "confidential" | "standard";
 }
 
 // ---------------------------------------------------------------------------
@@ -65,6 +76,7 @@ const VALID_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set([
   "version",
   "boundaries",
   "citationGate",
+  "unspecifiedConfidentialityDefault",
   "firmFacade", // read by firm-facade MCP; gate proxy ignores it
 ]);
 
@@ -86,6 +98,9 @@ export const DEFAULT_POLICY: Policy = Object.freeze({
     boundaries: Object.freeze(["COURT_FILING", "THIRD_PARTY_EGRESS"] as BoundaryType[]) as BoundaryType[],
     requireAuthorityProvenance: false,
   }),
+  // Fail-closed by default: an unlabeled query_external_model is treated as
+  // confidential (see the Policy interface doc). No yaml change is required.
+  unspecifiedConfidentialityDefault: "confidential" as const,
 });
 
 function freshDefaults(): Policy {
@@ -96,6 +111,7 @@ function freshDefaults(): Policy {
       boundaries: [...DEFAULT_POLICY.citationGate.boundaries],
       requireAuthorityProvenance: DEFAULT_POLICY.citationGate.requireAuthorityProvenance,
     },
+    unspecifiedConfidentialityDefault: DEFAULT_POLICY.unspecifiedConfidentialityDefault,
   };
 }
 
@@ -214,7 +230,7 @@ export function loadPolicy(filePath?: string): Policy {
   for (const key of Object.keys(doc)) {
     if (!VALID_TOP_LEVEL_KEYS.has(key)) {
       throw new PolicyError(
-        `Unknown top-level key "${key}" in policy file. Only "version", "boundaries", "citationGate", and "firmFacade" are allowed.`,
+        `Unknown top-level key "${key}" in policy file. Only "version", "boundaries", "citationGate", "unspecifiedConfidentialityDefault", and "firmFacade" are allowed.`,
       );
     }
   }
@@ -240,6 +256,22 @@ export function loadPolicy(filePath?: string): Policy {
   // Merge citationGate over defaults
   if ("citationGate" in doc && doc["citationGate"] !== undefined) {
     merged.citationGate = validateCitationGate(doc["citationGate"]);
+  }
+
+  // Merge unspecifiedConfidentialityDefault over the fail-closed default.
+  // Only the two supported values are accepted — anything else throws so a
+  // typo can never silently weaken (or over-tighten) the secondary-model gate.
+  if (
+    "unspecifiedConfidentialityDefault" in doc &&
+    doc["unspecifiedConfidentialityDefault"] !== undefined
+  ) {
+    const v = doc["unspecifiedConfidentialityDefault"];
+    if (v !== "confidential" && v !== "standard") {
+      throw new PolicyError(
+        `unspecifiedConfidentialityDefault must be "confidential" or "standard", got: ${String(v)}`,
+      );
+    }
+    merged.unspecifiedConfidentialityDefault = v;
   }
 
   return merged;

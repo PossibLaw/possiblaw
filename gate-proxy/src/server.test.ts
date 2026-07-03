@@ -548,6 +548,7 @@ describe("gate server", () => {
       version: 1,
       boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "block" },
       citationGate: { boundaries: [...DEFAULT_POLICY.citationGate.boundaries], requireAuthorityProvenance: false },
+      unspecifiedConfidentialityDefault: DEFAULT_POLICY.unspecifiedConfidentialityDefault,
     };
 
     const { baseUrl, close } = await startServer({
@@ -834,6 +835,7 @@ describe("gate server", () => {
       version: 1,
       boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "bogus_decision" as unknown as "allow" },
       citationGate: { boundaries: [], requireAuthorityProvenance: false },
+      unspecifiedConfidentialityDefault: DEFAULT_POLICY.unspecifiedConfidentialityDefault,
     };
 
     const { baseUrl, close } = await startServer({
@@ -1897,6 +1899,7 @@ describe("gate server", () => {
       version: 1,
       boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "block" },
       citationGate: { boundaries: [], requireAuthorityProvenance: false },
+      unspecifiedConfidentialityDefault: DEFAULT_POLICY.unspecifiedConfidentialityDefault,
     };
 
     const { baseUrl, close } = await startServer({

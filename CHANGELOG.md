@@ -7,6 +7,58 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.36.0] — 2026-07-02 — Sprint δ: gates hardening (trusted confidentiality, ethical wall, ingress envelopes)
+
+The gates workstream from the atomic-work plan — closing the three S1s the
+security review found in "what is seen and where." Same discipline as
+0.35.0: per-task adversarial review + fix rounds before commit.
+
+- **Trusted, non-downgradable confidentiality (`gate-proxy/`).** The
+  confidential-to-cloud gate previously keyed off a label the calling agent
+  typed into its own request. New receipt-derived
+  `MatterClassificationRegistry` + `POST/GET /matters/classification`: a
+  registered matter's tier is a raise-only floor; at egress
+  `effective = max(floor, claim)` drives classification, tier-floor,
+  anonymizer, and the human gate, with claimed-vs-effective receipted.
+  Unlabeled `query_external_model` traffic now defaults to `confidential`
+  (fail-closed → anonymize → block without entities;
+  `unspecifiedConfidentialityDefault: standard` restores legacy). Also
+  fixed the `useLocal` receipt dishonesty: `routedLocal: true` now appears
+  only when local routing genuinely happened. Honest residual: an agent
+  claiming `standard` on an *unregistered* matter still passes — the floor
+  binds registered matters; route auth + a strict registered-only mode are
+  the follow-up hardening pass. Tests 399→439.
+- **Continuous ethical wall (`learning-loop/` + launcher).** The
+  cross-client wall ran once, at propose time, on self-reported entities.
+  Now: accept re-screens against the ledger-wide entity union (fail-closed
+  to pending, redacted reasons); render re-screens every accepted lesson
+  and excludes failures with a visible marker; new `learn check-memory`
+  CLI (line numbers only, zero content echo) guards the launcher's
+  firm-memory overlay — a failing memory file is not overlaid, and a
+  missing learning-loop install now also fails CLOSED (skip, never inject
+  unscreened memory); `--entities-file` records entity provenance; fuzzy
+  possessive/plural matching. Tests 45→57.
+- **Untrusted-content envelopes on ingress (skills 175→176).** New shared
+  `untrusted-content-envelope` skill: externally-sourced content is wrapped
+  in nonce-bound markers (per-instance nonce echoed in both tags — a forged
+  end-marker is content, not a terminator), data-never-instructions rule,
+  markers survive into what the human gate reviews. Wired into the 4
+  ingress connectors + matter intake; chief-of-staff BLOCKS matters whose
+  bodies carry embedded imperatives for operator review instead of routing
+  them.
+- **Unreceipted egress channels are now decisions, not accidents.**
+  notify-slack/teams restricted to a fixed template (slug + status +
+  link — never free-text or redacted summaries) with the exception
+  registered in `gate-policy.yaml` comments; the synced-deliverables-folder
+  bypass documented with a refusal convention for confidential/privileged
+  matters; new known-limitations section lists all three channels honestly.
+  All instruction-level mitigations are labeled as such.
+
+Battery at branch head: gate-proxy 439/439, learning-loop 57/57,
+orchestration-eval 61/61, eval-harness 32/32, firm-facade 137/137,
+deadline-engine 35/35; `bash -n` + self-tests + coverage `--check` OK;
+dry-run `agents=178 skills=176 projects=3 warnings=0 errors=0`.
+
 ## [0.35.0] — 2026-07-02 — Atomic-work review Sprints α–γ: measurable thesis, lawyer-grade delivery, reconstitution contract
 
 A full-repo review against the atomic-work thesis (plan-of-record:

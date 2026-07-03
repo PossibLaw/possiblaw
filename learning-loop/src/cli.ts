@@ -1,12 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { loadStore, saveStore } from "./store.ts";
-import { sanitizeLesson } from "./sanitizer.ts";
-import { nextLessonId, setStatus } from "./ledger.ts";
+import { sanitizeLesson, redactViolations } from "./sanitizer.ts";
+import { nextLessonId, setStatus, ledgerEntities } from "./ledger.ts";
 import { appendLesson } from "./memory.ts";
 import { topicsAtThreshold } from "./recurrence.ts";
 import { loadManifest, saveManifest, upsertDelivery, markProcessed } from "./manifest.ts";
 import { hashText } from "./diff.ts";
-import type { Lesson, DeliveryRecord } from "./types.ts";
+import type { Lesson, DeliveryRecord, EntitySource } from "./types.ts";
 import {
   loadProposals, saveProposals, addProposal, setProposalStatus,
   nextProposalId, writeOverlay,
@@ -26,11 +26,63 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
+// One entity per non-blank line — the matter party list exported by the scribe.
+async function readEntitiesFile(path: string): Promise<string[]> {
+  const raw = await readFile(path, "utf8");
+  return raw.split("\n").map((s) => s.trim()).filter(Boolean);
+}
+
+// Entity source hardening (Fix 4): union repeated --entity flags with an
+// optional --entities-file, and record which source(s) supplied them so the
+// ledger is auditable.
+async function collectEntities(argv: string[]): Promise<{ entities: string[]; source: EntitySource }> {
+  const flag = args(argv, "entity");
+  const filePath = arg(argv, "entities-file");
+  const fromFile = filePath ? await readEntitiesFile(filePath) : [];
+  const entities = Array.from(new Set([...flag, ...fromFile]));
+  const source: EntitySource =
+    flag.length && fromFile.length ? "flag+file"
+    : fromFile.length ? "file"
+    : flag.length ? "flag"
+    : "none";
+  return { entities, source };
+}
+
 export async function run(argv: string[]): Promise<{ code: number; stdout: string }> {
   try {
     const cmd = argv[0];
+
+    // check-memory <file> [--entity ...] [--entities-file <path>] [--business <dir>]
+    // Overlay-time ethical wall (Fix 3). Screens a raw memory file line-by-line
+    // against PII patterns plus caller-supplied and (optionally) ledger-known
+    // entities. Exit 0 clean; exit 1 with failing line numbers + redacted reason
+    // codes. NEVER echoes file content — reason codes only. Does NOT require
+    // --business so the launcher can screen firm-memory.md standalone.
+    if (cmd === "check-memory") {
+      const file = argv[1] && !argv[1].startsWith("--") ? argv[1] : arg(argv, "file");
+      if (!file) return { code: 1, stdout: "check-memory requires a <file> path" };
+      const { entities: supplied } = await collectEntities(argv);
+      const biz = arg(argv, "business");
+      const known = biz ? ledgerEntities(await loadStore(biz)) : [];
+      const entities = Array.from(new Set([...supplied, ...known]));
+      let raw: string;
+      try {
+        raw = await readFile(file, "utf8");
+      } catch {
+        return { code: 1, stdout: `check-memory: cannot read ${file}` };
+      }
+      const lines = raw.split("\n");
+      const failing: { line: number; reasons: string[] }[] = [];
+      for (let i = 0; i < lines.length; i++) {
+        const r = sanitizeLesson(lines[i], entities);
+        if (!r.ok) failing.push({ line: i + 1, reasons: redactViolations(r.violations) });
+      }
+      if (failing.length === 0) return { code: 0, stdout: "clean" };
+      return { code: 1, stdout: JSON.stringify({ ok: false, failing }) };
+    }
+
     const dir = arg(argv, "business");
-    if (!cmd || !dir) return { code: 1, stdout: "usage: <propose|accept|reject|recurring|render> --business <dir> ..." };
+    if (!cmd || !dir) return { code: 1, stdout: "usage: <propose|accept|reject|recurring|render|check-memory> --business <dir> ..." };
 
     const lessons = await loadStore(dir);
 
@@ -39,7 +91,7 @@ export async function run(argv: string[]): Promise<{ code: number; stdout: strin
       if (!text || !text.trim()) return { code: 1, stdout: "empty lesson text" };
       const matter = arg(argv, "matter");
       if (!matter || !matter.trim()) return { code: 1, stdout: "missing --matter" };
-      const entities = args(argv, "entity");
+      const { entities, source: entitySource } = await collectEntities(argv);
       const sane = sanitizeLesson(text, entities);
       if (!sane.ok) return { code: 2, stdout: JSON.stringify({ ok: false, violations: sane.violations }) };
       const now = isoNow();
@@ -47,6 +99,7 @@ export async function run(argv: string[]): Promise<{ code: number; stdout: strin
       const lesson: Lesson = {
         id, createdAt: now, text, topic: arg(argv, "topic") ?? "general", status: "pending",
         sources: [{ matterId: matter, feedback: arg(argv, "feedback") ?? "" }],
+        entities, entitySource,
       };
       const { lessons: next, action } = appendLesson(lessons, lesson);
       if (action === "duplicate") return { code: 0, stdout: "duplicate" };
@@ -57,10 +110,32 @@ export async function run(argv: string[]): Promise<{ code: number; stdout: strin
     if (cmd === "accept" || cmd === "reject") {
       const id = arg(argv, "id");
       if (!id) return { code: 1, stdout: "missing --id" };
-      const exists = lessons.some((l) => l.id === id);
-      if (!exists) return { code: 1, stdout: `unknown id: ${id}` };
+      const target = lessons.find((l) => l.id === id);
+      if (!target) return { code: 1, stdout: `unknown id: ${id}` };
+      if (cmd === "accept" && target.status === "pending") {
+        // Re-run the ethical wall at accept (Fix 1): screen the stored lesson
+        // text against the union of its own entities and every entity now known
+        // to the ledger. On failure, fail closed — keep status pending and
+        // record a redacted, auditable reason in the ledger. (Non-pending
+        // lessons fall through to setStatus, which rejects the transition.)
+        const entities = Array.from(new Set([...(target.entities ?? []), ...ledgerEntities(lessons)]));
+        const sane = sanitizeLesson(target.text, entities);
+        if (!sane.ok) {
+          const reasons = redactViolations(sane.violations);
+          const blocked = lessons.map((l) =>
+            l.id === id ? { ...l, sanitizeBlockedAt: isoNow(), sanitizeBlockReasons: reasons } : l);
+          await saveStore(dir, blocked);
+          return { code: 2, stdout: JSON.stringify({ ok: false, violations: reasons }) };
+        }
+      }
       const next = setStatus(lessons, id, cmd === "accept" ? "accepted" : "rejected");
-      await saveStore(dir, next);
+      // Clear any stale block record on a successful transition.
+      const cleaned = next.map((l) => {
+        if (l.id !== id || (l.sanitizeBlockedAt === undefined && l.sanitizeBlockReasons === undefined)) return l;
+        const { sanitizeBlockedAt: _a, sanitizeBlockReasons: _r, ...rest } = l;
+        return rest;
+      });
+      await saveStore(dir, cleaned);
       return { code: 0, stdout: id };
     }
 
@@ -117,7 +192,7 @@ export async function run(argv: string[]): Promise<{ code: number; stdout: strin
         return { code: 1, stdout: "propose-edit requires --skill --matter --file-id --observed --edit --overlay-file" };
       }
       const overlayBody = await readFile(overlayFile, "utf8");
-      const entities = args(argv, "entity");
+      const { entities, source: entitySource } = await collectEntities(argv);
       // Fail-closed: every stored field must pass the ethical wall.
       const checkText = [observed, edit, overlayBody].join("\n");
       const sane = sanitizeLesson(checkText, entities);
@@ -128,7 +203,7 @@ export async function run(argv: string[]): Promise<{ code: number; stdout: strin
       const proposal: SkillEditProposal = {
         id, createdAt: now, skillSlug: skill, sourceMatter: matter, vendorFileId: fileId,
         observedChange: observed, generalizedEdit: edit, proposedOverlayBody: overlayBody,
-        status: "pending",
+        status: "pending", entities, entitySource,
       };
       await saveProposals(dir, addProposal(props, proposal));
       return { code: 0, stdout: id };

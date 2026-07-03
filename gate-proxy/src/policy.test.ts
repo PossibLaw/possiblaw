@@ -267,6 +267,7 @@ describe("shipped gate-policy.yaml", () => {
         boundaries: [...DEFAULT_POLICY.citationGate.boundaries],
         requireAuthorityProvenance: DEFAULT_POLICY.citationGate.requireAuthorityProvenance,
       },
+      unspecifiedConfidentialityDefault: DEFAULT_POLICY.unspecifiedConfidentialityDefault,
     };
     assert.deepEqual(policy, expected);
   });
@@ -394,6 +395,50 @@ describe("citationGate fail-closed validation", () => {
   it("citationGate boundaries entries must be a list, not a bare string", () => {
     assert.throws(
       () => loadPolicy(writeTmpYaml("version: 1\ncitationGate:\n  boundaries: COURT_FILING\n")),
+      PolicyError,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 13: unspecifiedConfidentialityDefault — fail-closed default for the
+// secondary-model channel (Task H, fix 1b)
+// ---------------------------------------------------------------------------
+
+describe("unspecifiedConfidentialityDefault", () => {
+  it('defaults to "confidential" (fail-closed) with no policy file', () => {
+    const p = loadPolicy(undefined);
+    assert.equal(p.unspecifiedConfidentialityDefault, "confidential");
+  });
+
+  it('DEFAULT_POLICY carries "confidential"', () => {
+    assert.equal(DEFAULT_POLICY.unspecifiedConfidentialityDefault, "confidential");
+  });
+
+  it('firm can set it to "standard" in yaml to restore old behavior', () => {
+    const p = loadPolicy(writeTmpYaml('version: 1\nunspecifiedConfidentialityDefault: standard\n'));
+    assert.equal(p.unspecifiedConfidentialityDefault, "standard");
+  });
+
+  it('explicit "confidential" in yaml is accepted', () => {
+    const p = loadPolicy(writeTmpYaml('version: 1\nunspecifiedConfidentialityDefault: confidential\n'));
+    assert.equal(p.unspecifiedConfidentialityDefault, "confidential");
+  });
+
+  it("fail-closed validation: any other value throws PolicyError naming the value", () => {
+    assert.throws(
+      () => loadPolicy(writeTmpYaml("version: 1\nunspecifiedConfidentialityDefault: privileged\n")),
+      (err: unknown) => {
+        assert.ok(err instanceof PolicyError, `expected PolicyError, got ${err}`);
+        assert.ok(
+          (err as PolicyError).message.includes("privileged"),
+          `message should name the bad value; got: ${(err as PolicyError).message}`,
+        );
+        return true;
+      },
+    );
+    assert.throws(
+      () => loadPolicy(writeTmpYaml("version: 1\nunspecifiedConfidentialityDefault: true\n")),
       PolicyError,
     );
   });

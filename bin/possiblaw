@@ -405,7 +405,38 @@ if [ -n "$BUSINESS_SLUG" ]; then
         FIRM_MEMORY_FILE=""
         log "--business: no firm-memory.md found at $BUSINESS_DIR/memory/; skipping overlay"
     else
-        log "--business: will overlay firm memory from $FIRM_MEMORY_FILE"
+        # Continuous ethical wall (Sprint delta, Fix 3): firm-memory.md is
+        # overlaid into EVERY matter's context, so it can smuggle a directly
+        # edited client name/email past the propose-time sanitizer. Screen it
+        # here before it is ever injected. Fail-closed on the memory (skip the
+        # overlay) but fail-open on the launch (never abort the whole run).
+        if [ -d "$REPO_ROOT/learning-loop/node_modules" ]; then
+            # || guard: under set -e a failing command substitution in a plain
+            # assignment would abort the whole launch — the exact failure this
+            # block exists to handle gracefully.
+            MEM_CHECK_RC=0
+            MEM_CHECK_OUT="$( (cd "$REPO_ROOT/learning-loop" && node --import tsx src/cli.ts \
+                check-memory "$FIRM_MEMORY_FILE" --business "$BUSINESS_DIR") 2>/dev/null )" || MEM_CHECK_RC=$?
+            if [ "$MEM_CHECK_RC" -eq 0 ]; then
+                log "--business: firm memory passed the ethical-wall check; will overlay from $FIRM_MEMORY_FILE"
+            else
+                warn "--business: firm-memory.md FAILED the ethical-wall check; SKIPPING the memory overlay"
+                warn "--business: file: $FIRM_MEMORY_FILE"
+                warn "--business: failing lines/reasons (no content shown): $MEM_CHECK_OUT"
+                FIRM_MEMORY_FILE=""
+            fi
+        else
+            # Fail closed: the ethical-wall screen cannot run without
+            # learning-loop deps, so the memory overlay is SKIPPED — never
+            # inject unscreened firm memory into every matter's context.
+            # (A fresh clone loses nothing: businesses/<slug>/ is gitignored,
+            # so local memory only exists where an operator created it — the
+            # exact case that needs the screen.) Review policy: strict
+            # fail-closed ratified 2026-07-02 over overlay-with-warning.
+            warn "--business: learning-loop not installed; the ethical-wall screen cannot run"
+            warn "--business: SKIPPING the firm-memory overlay (fail-closed). Install with 'pnpm -C learning-loop install' and re-launch to restore it"
+            FIRM_MEMORY_FILE=""
+        fi
     fi
 fi
 

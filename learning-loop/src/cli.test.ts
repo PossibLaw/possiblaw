@@ -185,3 +185,116 @@ test("approve-edit --overlay-file with contaminated body returns exit 2 and writ
   const props = await loadProposals(dir);
   assert.equal(props.find((p) => p.id === id)?.status, "pending");
 });
+
+// --- Re-sanitize at accept (Fix 1) ---
+
+test("accept re-runs the wall against ledger-known entities and fails closed to pending", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-cli-"));
+  // Lesson 1 is clean at propose time (Zenith is not yet a known entity).
+  const p1 = await run([
+    "propose", "--business", dir, "--topic", "arb", "--matter", "POS-1",
+    "--text", "Zenith prefers arbitration in New York.",
+  ]);
+  assert.equal(p1.code, 0);
+  const id1 = p1.stdout.trim();
+  // Lesson 2 introduces "Zenith Corp" into the ledger via --entity (its own text is clean).
+  const p2 = await run([
+    "propose", "--business", dir, "--topic", "arb", "--matter", "POS-2",
+    "--text", "Prefer arbitration clauses generally.", "--entity", "Zenith Corp",
+  ]);
+  assert.equal(p2.code, 0);
+  // Accepting lesson 1 must now fail closed: union of ledger entities includes Zenith Corp.
+  const a = await run(["accept", "--business", dir, "--id", id1]);
+  assert.equal(a.code, 2);
+  assert.ok(a.stdout.includes("violations"));
+  // No client name echoed in the failure output.
+  assert.ok(!a.stdout.includes("Zenith"));
+  // Lesson 1 stays pending with a recorded, auditable reason.
+  const { loadStore } = await import("./store.ts");
+  const led = await loadStore(dir);
+  const l1 = led.find((l) => l.id === id1)!;
+  assert.equal(l1.status, "pending");
+  assert.ok(Array.isArray(l1.sanitizeBlockReasons) && l1.sanitizeBlockReasons.length > 0);
+  assert.ok(typeof l1.sanitizeBlockedAt === "string");
+});
+
+test("accept passes a genuinely clean lesson and it renders unchanged", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-cli-"));
+  const p = await run([
+    "propose", "--business", dir, "--topic", "nda", "--matter", "POS-1",
+    "--text", "Cap indemnity at fees paid.",
+  ]);
+  const id = p.stdout.trim();
+  const a = await run(["accept", "--business", dir, "--id", id]);
+  assert.equal(a.code, 0);
+  const hot = await rf(join(dir, "memory", "firm-memory.md"), "utf8");
+  assert.ok(hot.includes("Cap indemnity at fees paid."));
+  assert.ok(!hot.includes("excluded:"));
+});
+
+// --- Entity source hardening (Fix 4) ---
+
+test("propose --entities-file rejects a leaked party and records the source", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-cli-"));
+  const ents = join(dir, "parties.txt");
+  await writeFile(ents, "ACME Inc.\nGlobex Corp\n", "utf8");
+  const bad = await run([
+    "propose", "--business", dir, "--topic", "nda", "--matter", "POS-1",
+    "--text", "ACME wants a 2y term", "--entities-file", ents,
+  ]);
+  assert.equal(bad.code, 2);
+  assert.ok(bad.stdout.includes("violations"));
+
+  const good = await run([
+    "propose", "--business", dir, "--topic", "nda", "--matter", "POS-1",
+    "--text", "Prefer a mutual NDA structure.", "--entities-file", ents,
+  ]);
+  assert.equal(good.code, 0);
+  const { loadStore } = await import("./store.ts");
+  const led = await loadStore(dir);
+  const l = led.find((x) => x.id === good.stdout.trim())!;
+  assert.equal(l.entitySource, "file");
+  assert.ok((l.entities ?? []).includes("ACME Inc."));
+});
+
+// --- check-memory CLI (Fix 3) ---
+
+test("check-memory returns exit 0 on a clean file", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-cli-"));
+  const mem = join(dir, "firm-memory.md");
+  await writeFile(mem, "# Firm Memory\n- Prefer mutual NDAs.\n- Cap indemnity at fees paid.\n", "utf8");
+  const r = await run(["check-memory", mem]);
+  assert.equal(r.code, 0);
+});
+
+test("check-memory flags PII line numbers without echoing content", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-cli-"));
+  const mem = join(dir, "firm-memory.md");
+  await writeFile(mem, "# Firm Memory\n- Prefer mutual NDAs.\n- Send drafts to jane@acme.com first.\n", "utf8");
+  const r = await run(["check-memory", mem]);
+  assert.equal(r.code, 1);
+  assert.match(r.stdout, /"line":\s*3/);
+  assert.match(r.stdout, /pattern:email/);
+  // No content echo: neither the email nor the line text may appear.
+  assert.ok(!r.stdout.includes("jane@acme.com"));
+  assert.ok(!r.stdout.includes("Send drafts"));
+});
+
+test("check-memory --business catches a ledger-known entity edited directly into memory", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ll-cli-"));
+  // Seed the ledger with the entity via a clean proposal.
+  await run([
+    "propose", "--business", dir, "--topic", "nda", "--matter", "POS-1",
+    "--text", "Prefer mutual NDAs.", "--entity", "ACME Inc.",
+  ]);
+  // Operator directly edits firm-memory.md with a client name + email.
+  const mem = join(dir, "memory", "firm-memory.md");
+  await writeFile(mem, "# Firm Memory\n- ACME always wants a 2y term.\n- Contact jane@acme.com.\n", "utf8");
+  const r = await run(["check-memory", mem, "--business", dir]);
+  assert.equal(r.code, 1);
+  assert.match(r.stdout, /"line":\s*2/);
+  assert.match(r.stdout, /"line":\s*3/);
+  // Entity name must be redacted to a reason code, never echoed.
+  assert.ok(!r.stdout.includes("ACME"));
+  assert.ok(!r.stdout.includes("jane@acme.com"));
+});

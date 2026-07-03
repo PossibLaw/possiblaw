@@ -209,6 +209,57 @@ server now defaults to `confidential` (sanitizer active). Pass-through behavior 
 an **explicit** `POSSIBLAW_MATTER_PRIVACY_TIER=standard`. This reverses the prior
 behavior where an unset env silently applied full pass-through.
 
+## Unreceipted egress channels
+
+Not every path that carries data off the machine traverses the gate proxy. Three
+channels are, by design, unreceipted in v1. They are consolidated here so the
+boundary is an explicit decision, not an accident, and mirrored as a commented
+policy note in `companies/legal-operations/gate-policy.yaml`. Each is mitigated
+by discipline, not enforcement — so each remains a residual risk for operators
+handling sensitive matters.
+
+### Research queries → CourtListener (already documented above)
+
+Research queries issued by the `legal-data` MCP server go directly over HTTPS to
+CourtListener; they do not route through the gate proxy, so there is no receipt,
+no human-approval gate, and no tier-floor on the query text. This is the
+read-only-research constraint documented in full under "Legal-data MCP /
+research-query privacy" above; the mitigation is neutral query terms plus the
+best-effort `sanitizeArgs` redaction. Listed here for completeness of the
+unreceipted-channel picture.
+
+### Operator notifications (Slack / Teams webhooks)
+
+The `notify-slack` and `notify-teams` skills POST directly to a Slack/Teams
+incoming webhook — the message leaves the runner without a gate receipt, a
+human-approval gate, or a tier-floor. A gate-proxy notify tool that would receipt
+and gate these notifications is a later build; it does not exist yet. The v1
+mitigation is a documented exception with a HARD CONTENT RULE enforced in both
+skills: the webhook body is a fixed, low-sensitivity template — matter slug,
+issue URL, gate/blocked status line, and agent slug — and NEVER carries client or
+party names, matter facts, document text, work-product quotes, or anything from
+an `UNTRUSTED-CONTENT` envelope. Free-text summaries of matter content are
+forbidden; the operator gets detail by clicking through to gated, access-
+controlled Paperclip. See the "Trust boundary" section of each notify skill.
+
+### Synced deliverables folder
+
+Pointing `POSSIBLAW_DELIVERABLES_DIR` at a cloud-synced folder (iCloud, Dropbox,
+OneDrive, or Google Drive for desktop) exports every draft the output skills
+write there — including privileged and confidential ones — to the vendor's cloud
+with no receipt and no tier gate. The sync client, not the gate proxy, moves the
+bytes, so nothing in this package can see or stop that export. The supported
+cloud delivery path is the gated courier (`upload_document`). The v1 mitigation
+lives in `output-storage-config`: the output skills are instructed to refuse to
+write confidential/privileged deliverables into a synced root (routing them
+through the courier instead; code-level enforcement is a follow-up), detect
+real sync-client artifacts (e.g. `.tmp.drivedownload`, `.icloud` placeholders,
+the `Library/CloudStorage/OneDrive-…` path segment — a bare `.DS_Store` is not
+evidence), and require the operator to accept the risk for standard-tier
+deliverables via the `POSSIBLAW_SYNC_BYPASS_ACKNOWLEDGED: "true"`
+(`syncBypassAcknowledged: true`) convention. The operator owns the residual risk;
+the acknowledgment never opens a privileged export path.
+
 ## Gate proxy
 
 ### local_trusted accepts unauthenticated local board calls
@@ -223,6 +274,26 @@ read-scoped per each connector skill). An arbitrary local process outside the ag
 call the board or a vendor directly. Production deployments with auth
 enabled (export `PAPERCLIP_GATE_API_KEY`, minted via `paperclipai auth
 login`) get the structural gate as well.
+
+### Matter-classification floor (v1)
+
+`POST /matters/classification` registers a matter's confidentiality tier as a
+raise-only floor; at egress the gate applies `max(floor, per-request claim)`.
+Honest limits:
+
+- **The floor binds registered matters only.** A request that claims
+  `standard` on an *unregistered* matter (or omits `issueId`) passes exactly
+  as before. The fail-closed `unspecifiedConfidentialityDefault` covers only
+  unlabeled `query_external_model` traffic. Registering the floor at intake
+  (see `legal-matter-intake`) is what makes the guarantee bind.
+- **The registration route is loopback-only but unauthenticated.** Raise-only
+  merge means a hostile registration can never *lower* a floor — the worst
+  case is an unwanted raise (availability, fail-closed direction) — and every
+  registration attempt is hash-chain receipted. Route auth plus an opt-in
+  strict registered-matters-only mode are the follow-up hardening pass.
+- **Raise-only is irreversible by design.** A mistaken over-registration
+  cannot be lowered; re-import into a fresh data dir if a floor was set in
+  error.
 
 ### Receipt chain assumes a single writer
 
@@ -382,7 +453,11 @@ When a lawyer approves a firm-memory lesson, the `learning-scribe` writes it
 into `businesses/<slug>/memory/firm-memory.md` and re-renders the skill body.
 Running agents do **not** pick up the new content immediately. They receive
 the updated memory on the next `./bin/possiblaw --business <slug>` launch,
-which re-imports the firm-memory skill body from disk.
+which re-imports the firm-memory skill body from disk. As of 0.36.0 the
+overlay is also gated by the ethical-wall screen (`learn check-memory`),
+fail-closed: if `learning-loop` deps are not installed, or the memory file
+fails the screen, the overlay is SKIPPED with a warning and the launch
+proceeds without firm memory.
 
 The reason is a Paperclip API constraint: the `install-update` endpoint 422s
 when `sourceLocator` is null (i.e., for a locally-stored skill), and fires no

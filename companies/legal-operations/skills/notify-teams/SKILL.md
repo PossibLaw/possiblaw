@@ -14,6 +14,44 @@ metadata:
 
 Use this skill whenever the operator needs to be pulled into the loop and the firm runs on Microsoft Teams instead of Slack. Paperclip does not have first-class notifications; this skill is the agent-side bridge that calls a Teams incoming webhook so the operator sees gates fire in real time.
 
+## Trust boundary — UNRECEIPTED egress channel
+
+**A Teams webhook POST bypasses the gate proxy.** It goes straight from this
+runner to Microsoft's servers: no gate receipt is written, no human-approval
+gate fires, and no confidentiality tier-floor applies to the message body. This
+is a documented v1 exception. A gate-proxy notify tool that would receipt and
+gate notifications is a later build — it does not exist yet, so the discipline
+below is the only control on what leaves the boundary through this channel. It
+is listed among the unreceipted egress channels in `docs/known-limitations.md`.
+
+Because the channel is unreceipted, the message body is restricted to a **fixed,
+low-sensitivity template** — not a free-text summary of the matter. Permitted
+content is exactly:
+
+- **matter slug** (the Paperclip issue slug/number, e.g. `POS-142` — not the
+  matter *title*, which may carry client-identifying text),
+- **issue URL** (the deep link back into Paperclip),
+- **gate / blocked status line** (which gate fired, or that the issue is blocked
+  / a deliverable is ready — a fixed phrase, not a description of the facts),
+- **agent slug** (which agent is paging, e.g. `chief-of-staff`).
+
+**NEVER put any of the following in a webhook message:** client or party names,
+matter facts, dollar figures, document text, quotes from a work product, or
+**anything drawn from an `UNTRUSTED-CONTENT` envelope**. Do not write a free-text
+summary of matter content — the operator gets the detail by clicking through to
+Paperclip, which is gated and access-controlled; Teams is not.
+
+Compliant card (fill the four fields, nothing more):
+
+```
+Gate fired · POS-142 · chief-of-staff
+Open in Paperclip → https://…/issues/142
+```
+
+If you cannot say what you need to say within that template, do not stretch the
+template — post the detail as a Paperclip comment (gated, access-controlled) and
+keep the Teams message to the slug + status + link.
+
 ## When to Invoke
 
 Invoke this skill (do not wait for the operator to poll the Paperclip UI) when any of the following happens:
@@ -51,7 +89,7 @@ if [ -z "${POSSIBLAW_TEAMS_WEBHOOK_URL:-}" ]; then
 fi
 
 KIND="${KIND:-Gate fired}"                       # e.g. "Gate fired", "Deliverable ready", "Approval requested", "Blocked"
-MATTER_SUMMARY="${MATTER_SUMMARY:-Matter update}"  # Redacted one-liner. Never include raw confidential client data.
+MATTER_SUMMARY="${MATTER_SUMMARY:-Matter update}"  # Matter SLUG + fixed status only (e.g. "POS-142"). Not a free-text summary of matter content. See "Trust boundary" — never client names, matter facts, document text, or UNTRUSTED-CONTENT.
 ACTION_OR_PATH="${ACTION_OR_PATH:-Open the issue to continue.}"
 ISSUE_PATH="${ISSUE_PATH:-/}"                    # e.g. "/issues/123"
 BASE_URL="${PAPERCLIP_BASE_URL:-http://127.0.0.1:3100}"
@@ -111,8 +149,8 @@ If `POSSIBLAW_TEAMS_WEBHOOK_URL` is unset, or `curl` is missing, or the webhook 
 ## Security Notes
 
 - Webhook URLs are credentials. Never echo `${POSSIBLAW_TEAMS_WEBHOOK_URL}` to logs, never commit it to the repo, and never paste it into a Paperclip comment.
-- Never include raw confidential client data (party names of sealed matters, settlement amounts, privileged communications, PII) in the Teams message body. Use the matter title plus a redacted one-line summary. If the matter title itself contains confidential text, summarise it (for example `Matter 2026-014 (sealed) — NDA review ready`) rather than relaying verbatim.
-- If you are unsure whether a field is safe to relay, default to the redacted summary and link the operator into Paperclip for the full content.
+- Never include raw confidential client data (party names of sealed matters, settlement amounts, privileged communications, PII) in the Teams message body. This channel is unreceipted — keep the body to the fixed template in the "Trust boundary" section above (matter slug, issue URL, gate/blocked status line, agent slug). Do not relay the matter *title* (it may carry client-identifying text) or a free-text summary; the operator gets the detail by clicking through to Paperclip.
+- If you are unsure whether a field is safe to relay, default to the fixed template (matter slug + status line + Paperclip link) — never a free-text or redacted summary.
 
 ## Eval (Given/When/Then)
 
@@ -120,4 +158,4 @@ If `POSSIBLAW_TEAMS_WEBHOOK_URL` is unset, or `curl` is missing, or the webhook 
 
 **Edge case.** *Given* the operator has not configured `POSSIBLAW_TEAMS_WEBHOOK_URL`, *when* the agent invokes this skill, *then* no exception is raised, no HTTP call is attempted, and a Paperclip comment is posted on the issue prefixed with `[NOTIFY:TEAMS_UNCONFIGURED]` so the operator still has a paper trail.
 
-**Failure / security case.** *Given* the operator placed confidential client text (a sealed party name, a settlement amount) in the matter title, *when* the agent invokes this skill, *then* the Teams payload contains only a summarised redaction (for example `Matter 2026-014 (sealed) — NDA review ready`) and the deep link to Paperclip, not the raw confidential text. The webhook URL is never echoed to logs or comments.
+**Failure / security case.** *Given* the operator placed confidential client text (a sealed party name, a settlement amount) in the matter title, *when* the agent invokes this skill, *then* the Teams payload carries only the fixed template — the matter slug, a fixed status line, the agent slug, and the deep link to Paperclip (for example `Gate fired · POS-142 · chief-of-staff`) — never the matter title, a free-text summary, or the raw confidential text. The webhook URL is never echoed to logs or comments.
