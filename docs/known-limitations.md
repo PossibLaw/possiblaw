@@ -777,7 +777,7 @@ rather than silently omitting older deliverables — but deliverables attached
 to an 11th-or-older in-flight issue are not shown at all until that issue
 moves into the top 10 by recency. This is a v1 scope choice for keeping the
 per-poll fan-out small (4 calls plus up to 10 work-product calls per client,
-every ~15–30s), not a completeness guarantee.
+every 20 seconds), not a completeness guarantee.
 
 See `docs/workflows/ethical-walls.md` for the full runbook (walls, auth mode,
 connect flow) and what a screened lawyer sees in the overview (nothing).

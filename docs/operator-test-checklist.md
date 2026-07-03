@@ -147,6 +147,7 @@ rm -rf orchestration-eval/results/          # optional — keep for analysis
 Verify port 3100 is untouched: `lsof -i :3100` should return nothing (or your pre-existing instance).
 
 ## H. Walls + Firm Overview (authenticated multi-lawyer)
+<!-- verify-after-T4: the --auth-mode and restart re-wiring steps below were written against Task 4's spec -->
 
 Manual, multi-human test this build defers to the operator — it needs two
 real lawyer logins and a browser, which nothing in this repo's automated
