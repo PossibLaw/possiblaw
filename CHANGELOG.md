@@ -31,8 +31,10 @@ operator decision rather than phased.
   cache — `GET /api/companies` stays the source of truth). Requires
   `--variant` (exit `2` without it — a wall's agents must get an explicit
   adapter lane, never a silent default); `--api-key <pcp_board_…>` attaches
-  against an authenticated instance. Idempotent: re-running `--add-wall` for
-  an existing wall repairs missing wiring instead of duplicating. Exit codes:
+  against an authenticated instance. Re-running for an existing wall is
+  refused at the prefix preflight (exit `3`, nothing created or duplicated);
+  a half-wired wall is repaired by restart re-wiring or a manual
+  `walls.json` restore (see the runbook). Exit codes:
   `2` bad input, `3` prefix collision, `4` no running instance / attach or API
   failure.
 - **Restart re-wiring (launcher).** A normal relaunch against the same
