@@ -172,6 +172,9 @@ OPTIONS:
                         imports the full package as a new company, starts a
                         dedicated gate proxy, emits a per-wall facade config,
                         and records the wall in <data-dir>/walls.json.
+                        REQUIRES --variant: the walled company's agents get
+                        that variant's adapter lanes — use the same variant
+                        as your running firm (see --list-variants).
   --api-key <key>       Bearer token for --add-wall against an authenticated
                         instance (pcp_board_… from the CLI-auth flow).
   --gate-port-base <n>  Wall gate ports are allocated upward from this base
@@ -1120,15 +1123,30 @@ fi
 # patch_agent_envs, provision_intake_routine, emit_facade_config,
 # start_gate_proxy_for) — moved earlier in this file for exactly this reason.
 #
-# Exit codes: 2 bad input (unknown --variant/--demo, or the walls-registry
-# helper rejecting the record), 3 an issue-prefix collision — this also
-# covers re-running --add-wall with the same client name a second time: its
-# own company already holds that prefix, so collision IS "already walled"
-# (repairing/re-wiring an existing wall's runtime state on restart is Task 4
-# scope, not this command's), 4 no running instance found (or the import/
-# wall-record-write failed after the health check passed — the wall may be
-# partially live; re-running --add-wall repairs it).
+# Exit codes:
+#   2 — bad input: missing --variant (required on this path), unknown
+#       --variant/--demo, or a client name the prefix helper rejects
+#       (fewer than 3 A-Z letters).
+#   3 — issue-prefix collision. This also covers re-running --add-wall with
+#       the same client name a second time: its own company already holds
+#       that prefix, so collision IS "already walled" (repairing/re-wiring
+#       an existing wall's runtime state on restart is Task 4 scope, not
+#       this command's).
+#   4 — no running instance found, or an attach/API failure after the health
+#       check passed (companies fetch non-200 incl. 401/403 auth failures,
+#       import failure, no company id, walls.json registry write failure —
+#       in the later cases the wall may be partially live; re-running
+#       --add-wall repairs it).
 if [ -n "$ADD_WALL" ]; then
+    # 0. Required input, checked before any network call so it's testable
+    #    offline: the wall path must never block on an interactive variant
+    #    prompt, and silently defaulting would let a wall's agents diverge
+    #    from the running firm's adapter lanes without the operator noticing.
+    if [ -z "$VARIANT" ]; then
+        err "--add-wall requires --variant <name> — the walled company's agents get this variant's adapter lanes; use the same variant as your running firm (see --list-variants)"
+        exit 2
+    fi
+
     API_BASE="http://127.0.0.1:$PORT"
     WALLS_PY="$REPO_ROOT/bin/_possiblaw_walls.py"
     WALLS_REGISTRY="$DATA_DIR/walls.json"
@@ -1143,27 +1161,41 @@ if [ -n "$ADD_WALL" ]; then
         exit 4
     fi
 
-    # 2. Prefix preflight against live companies. `|| true` guards the bare
-    #    redirect: under set -e a transient curl failure here (not a
-    #    conditional, so set -e would fire) must not abort the whole command
-    #    uncontrolled — it degrades to an empty companies file instead, which
-    #    --check-collision below turns into a clean, if imprecise, exit 3/2.
+    # 2. Prefix preflight against live companies. The `|| true` guards the
+    #    curl under set -e (a bare failing command would abort the whole
+    #    script uncontrolled); the HTTP status is then checked explicitly so
+    #    an auth failure (401/403 on an authenticated instance) is reported
+    #    as what it is — an attach failure (exit 4) with an --api-key hint —
+    #    instead of the helper choking on an error-object body and the
+    #    failure masquerading as a collision.
     COMPANIES_FILE="$(mktemp)"
-    curl --silent --max-time 10 ${AUTH_ARGS+"${AUTH_ARGS[@]}"} "$API_BASE/api/companies" > "$COMPANIES_FILE" || true
-    if ! WALL_PREFIX="$(python3 "$WALLS_PY" --check-collision --name "$ADD_WALL" --companies-json "$COMPANIES_FILE")"; then
-        rm -f "$COMPANIES_FILE"; exit 3
+    COMPANIES_HTTP="$(curl --silent --max-time 10 ${AUTH_ARGS+"${AUTH_ARGS[@]}"} \
+        --output "$COMPANIES_FILE" --write-out '%{http_code}' \
+        "$API_BASE/api/companies" || true)"
+    if [ "$COMPANIES_HTTP" != "200" ]; then
+        err "--add-wall: GET $API_BASE/api/companies returned HTTP '$COMPANIES_HTTP' — cannot run the prefix preflight"
+        if [ "$COMPANIES_HTTP" = "401" ] || [ "$COMPANIES_HTTP" = "403" ]; then
+            err "authenticated instance? pass --api-key <pcp_board_…> (minted via the CLI-auth flow)"
+        fi
+        rm -f "$COMPANIES_FILE"
+        exit 4
     fi
+    # Propagate the helper's real exit code — never collapse: 2 = bad input
+    # (e.g. a name with <3 letters, or a non-array companies payload),
+    # 3 = prefix collision (incl. "this wall already exists").
+    WALL_PREFIX="$(python3 "$WALLS_PY" --check-collision --name "$ADD_WALL" --companies-json "$COMPANIES_FILE")" || {
+        rc=$?
+        rm -f "$COMPANIES_FILE"
+        exit "$rc"
+    }
     rm -f "$COMPANIES_FILE"
     milestone "wall prefix: $WALL_PREFIX"
 
     # 3. Import the walled company. build_import_body needs the same globals
     #    the main path establishes before ever reaching it — resolve a
     #    minimal copy here since --add-wall exits long before the main path
-    #    would set them up itself.
-    if [ -z "$VARIANT" ]; then
-        VARIANT="codex"
-        log "--add-wall: no --variant given; defaulting to codex (pass --variant to override)"
-    fi
+    #    would set them up itself. ($VARIANT is guaranteed non-empty by the
+    #    step-0 check; here we validate it against variants.yaml.)
     VARIANTS_JSON_FILE="$(mktemp -t possiblaw-variants.XXXXXX.json)"
     yaml_to_json "$VARIANTS_FILE" > "$VARIANTS_JSON_FILE"
     if ! list_variant_slugs | grep -qx "$VARIANT"; then
