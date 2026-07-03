@@ -1,7 +1,9 @@
 # Matter Isolation (Ethical Walls) — Architecture Decision
 
-**Status:** DECISION PENDING (operator). Research complete 2026-07-02; all claims
-file:line-verified against the pinned submodule (`c91a0623`).
+**Status:** DECIDED 2026-07-02 (operator) — **A (opt-in walls), mode A1 + Firm
+Overview; upstream: not now.** See Decision section. Research complete
+2026-07-02; all claims file:line-verified against the pinned submodule
+(`c91a0623`). Build pending (design/spec first).
 **Origin:** S1 finding G-1 of the 2026-07-01 atomic-work security review — any
 agent holding the company-scoped key can read every client's matter
 (`paperclip/server/src/routes/authz.ts:44` is the entire agent-side check).
@@ -135,6 +137,40 @@ unacceptable steady state for a legal-privilege product.
 
 ## Decision
 
-- Architecture: _pending operator_
-- A-mode (if A): _pending operator_
-- Upstream proposal: _pending operator_
+**Decided 2026-07-02 (operator, via clarifying Q&A):**
+
+- **Architecture: A — as an opt-in capability, not a partition.** One main
+  company holds the whole practice on one board, unchanged day-to-day. A
+  client gets its own walled company ONLY when an ethical screen requires it.
+  The operator's crux ("a firm wants to see everything in flight, not just
+  one client") is satisfied because walls are the exception and because of the
+  Firm Overview below. Humans/board always see everything under every option;
+  the wall binds agent keys only.
+- **A-mode: A1 + Firm Overview.** Walled clients run as additional companies
+  on the same instance (company switcher). To preserve the firm-wide
+  "everything in flight" view that per-company dashboards would fragment, the
+  layer adds a read-only **Firm Overview** dashboard: fan out
+  `GET /api/companies` (`server/src/routes/companies.ts:91`) →
+  `GET /api/companies/:companyId/issues` (`server/src/routes/issues.ts:1779`),
+  merge into one all-clients board, each row deep-linking into paperclip's UI
+  via the facade-proven `${PAPERCLIP_PUBLIC_URL}/:companyPrefix/...` shape
+  (`mcp-servers/firm-facade/src/deeplink.ts:5`). Human/board surface only —
+  agents are never pointed at it and their keys stay company-scoped, so the
+  wall holds. No cross-company issues endpoint exists upstream; the merge is
+  layer work by design. A2 (N data dirs / N ports) remains the documented
+  zero-code fallback until the A1 launcher pass ships.
+- **Upstream proposal: not now.** Nothing filed to paperclip (operator
+  explicitly does not want an upstream dependency or engagement). Revisit only
+  if posture changes; the read-audit event remains the likeliest quick accept
+  if it ever does.
+
+**Build scope (operator chose ALL-IN, one build; design approved
+2026-07-02):** the A1 launcher pass (`--add-wall`, per-company gate-proxy
+port + receipts chain + company binding; per-company facade config filename;
+org-name prefix preflight; `walls.json` registry) + the Firm Overview
+package + `authenticated`-mode support with per-lawyer client lists
+(membership-scoped visibility, `routes/companies.ts:91-101`) and
+approve-from-overview as the authenticated lawyer. Approved spec:
+`docs/superpowers/specs/2026-07-02-matter-isolation-a1-firm-overview-design.md`.
+`docs/known-limitations.md` read-scope language is updated only when the
+capability ships (stays honest until then).
