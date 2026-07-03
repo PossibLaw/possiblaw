@@ -1241,10 +1241,19 @@ kill_subshell_tree() {
 kill_paperclip_tree() { kill_subshell_tree "$1" "$PORT"; }
 
 kill_gate_proxy_tree() {
-    # No-op until the gate proxy has started; mirrors possiblaw.pid handling.
-    [ -n "$GATE_PROXY_PID" ] || return 0
-    kill_subshell_tree "$GATE_PROXY_PID" "$GATE_PORT"
-    [ -f "$GATE_PID_FILE" ] && rm -f "$GATE_PID_FILE"
+    # Sweeps every gate proxy started via start_gate_proxy_for (today: just the
+    # single firm proxy; later tasks add one per walled-client company).
+    # GATE_PID_FILES/GATE_PID_PORTS are paired by index so the port-sweep
+    # fallback in kill_subshell_tree still applies per proxy.
+    local i pf pid port
+    for i in "${!GATE_PID_FILES[@]}"; do
+        pf="${GATE_PID_FILES[$i]}"
+        port="${GATE_PID_PORTS[$i]:-}"
+        [ -f "$pf" ] || continue
+        pid="$(cat "$pf" 2>/dev/null || true)"
+        [ -n "$pid" ] && kill_subshell_tree "$pid" "$port"
+        rm -f "$pf"
+    done
     GATE_PROXY_PID=""
 }
 
@@ -1804,6 +1813,75 @@ if [ "$PROVISION_ROUTINES" = "true" ] && [ "$DRY_RUN" != "true" ] && [ -n "$COMP
     provision_intake_routine || true
 fi
 
+# Start one gate proxy bound to a single company. Args:
+#   $1 company_id  $2 gate_port  $3 receipts_path  $4 pid_file  $5 log_file  $6 label
+# Mirrors the original single-company block; warn-only on failure so a wall
+# never aborts the firm launch.
+GATE_PID_FILES=()
+GATE_PID_PORTS=()
+start_gate_proxy_for() {
+    local company_id="$1" gate_port="$2" receipts_path="$3" pid_file="$4" log_file="$5" label="$6"
+    if [ -n "$(lsof -nP -iTCP:"$gate_port" -sTCP:LISTEN -t 2>/dev/null || true)" ]; then
+        warn "[$label] port $gate_port is already in use; skipping gate-proxy start"
+        warn "(stop the other process or re-run with --gate-port <n>)"
+        return 0
+    fi
+    : > "$log_file"
+    if [ ! -d "$REPO_ROOT/gate-proxy/node_modules" ]; then
+        milestone "[$label] installing gate-proxy dependencies (first run)"
+        if ! pnpm -C "$REPO_ROOT/gate-proxy" install >>"$log_file" 2>&1; then
+            warn "[$label] gate-proxy dependency install failed (log: $log_file); continuing without the gate proxy"
+            return 0
+        fi
+    fi
+    milestone "[$label] starting gate proxy on http://127.0.0.1:$gate_port (log: $log_file)"
+    mkdir -p "$(dirname "$receipts_path")" "$HOME/.possiblaw/action-packages"
+    # Operator-exported egress creds (EGRESS_CRED_VARS) plus
+    # LOCAL_MODEL_URL / EXTERNAL_MODEL_URL pass through by inheritance —
+    # this is the ONLY child process the launcher starts without the scrub.
+    (
+        exec env \
+            GATE_PROXY_PORT="$gate_port" \
+            GATE_POLICY_PATH="$REPO_ROOT/companies/legal-operations/gate-policy.yaml" \
+            GATE_RECEIPTS_PATH="$receipts_path" \
+            PAPERCLIP_BASE_URL="$API_BASE" \
+            PAPERCLIP_COMPANY_ID="$company_id" \
+            GATE_ACTION_PACKAGE_DIR="$HOME/.possiblaw/action-packages" \
+            pnpm -C "$REPO_ROOT/gate-proxy" start
+    ) >>"$log_file" 2>&1 </dev/null &
+    local gate_proxy_pid="$!"
+    echo "$gate_proxy_pid" > "$pid_file"
+    GATE_PID_FILES+=("$pid_file")
+    GATE_PID_PORTS+=("$gate_port")
+
+    local gate_waited=0 gate_healthy="false" gate_http_code
+    while [ "$gate_waited" -lt "$GATE_HEALTH_TIMEOUT_SECS" ]; do
+        if ! kill -0 "$gate_proxy_pid" 2>/dev/null; then break; fi
+        gate_http_code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 "http://127.0.0.1:$gate_port/health" || true)"
+        if [ "$gate_http_code" = "200" ]; then gate_healthy="true"; break; fi
+        sleep 1
+        gate_waited=$(( gate_waited + 1 ))
+    done
+    if [ "$gate_healthy" = "true" ]; then
+        # Replace the subshell PID with the actual listener PID so
+        # `kill $(cat gate-proxy.pid)` does the right thing.
+        local gate_listen_pid
+        gate_listen_pid="$(lsof -nP -iTCP:"$gate_port" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
+        if [ -n "$gate_listen_pid" ]; then
+            echo "$gate_listen_pid" > "$pid_file"
+        fi
+        milestone "[$label] gate proxy healthy at http://127.0.0.1:$gate_port (receipts: $receipts_path)"
+    elif kill -0 "$gate_proxy_pid" 2>/dev/null; then
+        warn "[$label] gate proxy not healthy after ${GATE_HEALTH_TIMEOUT_SECS}s — continuing; gate-dependent"
+        warn "skills will fail visibly until it comes up (log: $log_file)"
+    else
+        warn "[$label] gate proxy exited during startup — continuing; gate-dependent skills will fail visibly"
+        tail -n 20 "$log_file" >&2 || true
+        rm -f "$pid_file"
+    fi
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 # Gate proxy (egress gates + receipts)
 # ---------------------------------------------------------------------------
@@ -1823,65 +1901,9 @@ if [ "$NO_GATE_PROXY" = "true" ]; then
     warn "gate proxy disabled (--no-gate-proxy, demo-only): egress runs ungated and unreceipted"
 elif [ -z "$COMPANY_ID" ]; then
     warn "no company id parsed from the import response; skipping the gate proxy"
-elif [ -n "$(lsof -nP -iTCP:"$GATE_PORT" -sTCP:LISTEN -t 2>/dev/null || true)" ]; then
-    warn "port $GATE_PORT is already in use; skipping gate-proxy start"
-    warn "(stop the other process or re-run with --gate-port <n>)"
 else
-    GATE_START_OK="true"
-    : > "$GATE_LOG"
-    if [ ! -d "$REPO_ROOT/gate-proxy/node_modules" ]; then
-        milestone "installing gate-proxy dependencies (first run)"
-        if ! pnpm -C "$REPO_ROOT/gate-proxy" install >>"$GATE_LOG" 2>&1; then
-            warn "gate-proxy dependency install failed (log: $GATE_LOG); continuing without the gate proxy"
-            GATE_START_OK="false"
-        fi
-    fi
-    if [ "$GATE_START_OK" = "true" ]; then
-        milestone "starting gate proxy on $GATE_PROXY_URL (log: $GATE_LOG)"
-        mkdir -p "$(dirname "$GATE_RECEIPTS_PATH")" "$HOME/.possiblaw/action-packages"
-        # Operator-exported egress creds (EGRESS_CRED_VARS) plus
-        # LOCAL_MODEL_URL / EXTERNAL_MODEL_URL pass through by inheritance —
-        # this is the ONLY child process the launcher starts without the scrub.
-        (
-            exec env \
-                GATE_PROXY_PORT="$GATE_PORT" \
-                GATE_POLICY_PATH="$REPO_ROOT/companies/legal-operations/gate-policy.yaml" \
-                GATE_RECEIPTS_PATH="$GATE_RECEIPTS_PATH" \
-                PAPERCLIP_BASE_URL="$API_BASE" \
-                PAPERCLIP_COMPANY_ID="$COMPANY_ID" \
-                GATE_ACTION_PACKAGE_DIR="$HOME/.possiblaw/action-packages" \
-                pnpm -C "$REPO_ROOT/gate-proxy" start
-        ) >>"$GATE_LOG" 2>&1 </dev/null &
-        GATE_PROXY_PID=$!
-        echo "$GATE_PROXY_PID" > "$GATE_PID_FILE"
-
-        GATE_WAITED=0
-        GATE_HEALTHY="false"
-        while [ "$GATE_WAITED" -lt "$GATE_HEALTH_TIMEOUT_SECS" ]; do
-            if ! kill -0 "$GATE_PROXY_PID" 2>/dev/null; then break; fi
-            GATE_HTTP_CODE="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 "$GATE_PROXY_URL/health" || true)"
-            if [ "$GATE_HTTP_CODE" = "200" ]; then GATE_HEALTHY="true"; break; fi
-            sleep 1
-            GATE_WAITED=$(( GATE_WAITED + 1 ))
-        done
-        if [ "$GATE_HEALTHY" = "true" ]; then
-            # Replace the subshell PID with the actual listener PID so
-            # `kill $(cat gate-proxy.pid)` does the right thing.
-            GATE_LISTEN_PID="$(lsof -nP -iTCP:"$GATE_PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
-            if [ -n "$GATE_LISTEN_PID" ]; then
-                echo "$GATE_LISTEN_PID" > "$GATE_PID_FILE"
-            fi
-            milestone "gate proxy healthy at $GATE_PROXY_URL (receipts: $GATE_RECEIPTS_PATH)"
-        elif kill -0 "$GATE_PROXY_PID" 2>/dev/null; then
-            warn "gate proxy not healthy after ${GATE_HEALTH_TIMEOUT_SECS}s — continuing; gate-dependent"
-            warn "skills will fail visibly until it comes up (log: $GATE_LOG)"
-        else
-            warn "gate proxy exited during startup — continuing; gate-dependent skills will fail visibly"
-            tail -n 20 "$GATE_LOG" >&2 || true
-            rm -f "$GATE_PID_FILE"
-            GATE_PROXY_PID=""
-        fi
-    fi
+    start_gate_proxy_for "$COMPANY_ID" "$GATE_PORT" "$GATE_RECEIPTS_PATH" "$GATE_PID_FILE" "$GATE_LOG" "firm"
+    GATE_PROXY_PID="$(cat "$GATE_PID_FILE" 2>/dev/null || true)"
 fi
 
 # ---------------------------------------------------------------------------
