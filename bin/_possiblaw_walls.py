@@ -25,6 +25,12 @@ def derive_prefix(org_name: str) -> str:
     return letters[:3]
 
 
+def validate_companies(companies) -> list:
+    if not isinstance(companies, list) or not all(isinstance(c, dict) for c in companies):
+        raise ValueError("companies JSON must be an array of company objects")
+    return companies
+
+
 def check_collision(org_name: str, companies: list) -> str:
     prefix = derive_prefix(org_name)
     for c in companies:
@@ -102,24 +108,19 @@ def _self_test() -> int:
     except LookupError as exc:
         assert "POS" in str(exc) and "PossibLaw" in str(exc)
 
-    # Validate bad JSON structure raises ValueError
-    # Valid companies list (list of dicts) passes validation
-    if not isinstance(companies, list) or not all(isinstance(c, dict) for c in companies):
-        raise AssertionError("valid companies list must pass validation")
-    # Non-list JSON fails validation
+    # validate_companies: valid list of dicts passes through unchanged
+    good = [{"name": "x", "issuePrefix": "ABC"}]
+    assert validate_companies(good) == good
+    # Non-list JSON raises ValueError
     try:
-        bad_json = {"error": "boom"}
-        if not isinstance(bad_json, list) or not all(isinstance(c, dict) for c in bad_json):
-            raise ValueError("companies JSON must be an array of company objects")
-        raise AssertionError("non-list JSON must fail validation")
+        validate_companies({"error": "boom"})
+        raise AssertionError("non-list JSON must raise")
     except ValueError as exc:
         assert "array of company objects" in str(exc)
-    # List with non-dict elements fails validation
+    # List with non-dict elements raises ValueError
     try:
-        bad_list = [{"name": "valid"}, "invalid string"]
-        if not isinstance(bad_list, list) or not all(isinstance(c, dict) for c in bad_list):
-            raise ValueError("companies JSON must be an array of company objects")
-        raise AssertionError("list with non-dict must fail validation")
+        validate_companies(["not-a-dict"])
+        raise AssertionError("list with non-dict must raise")
     except ValueError as exc:
         assert "array of company objects" in str(exc)
 
@@ -182,9 +183,7 @@ def main(argv: list) -> int:
                 return 2
             with open(args.companies_json, "r", encoding="utf-8") as fh:
                 companies = json.load(fh)
-            if not isinstance(companies, list) or not all(isinstance(c, dict) for c in companies):
-                raise ValueError("companies JSON must be an array of company objects")
-            print(check_collision(args.name, companies))
+            print(check_collision(args.name, validate_companies(companies)))
             return 0
         if args.registry and args.add:
             record = json.load(sys.stdin)
