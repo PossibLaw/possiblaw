@@ -18,7 +18,7 @@ iManage Work is the enterprise document-management system most large law firms r
 
 For solo / small-firm operators without an iManage subscription, the `connector-local-fs-doc-store` skill is the stand-in.
 
-**Credentials live in the gate proxy only.** If you see `credential_missing: IMANAGE_TOKEN`, the operator must export it before launching (see the walkthrough Gate Proxy section); never ask for or handle tokens yourself.
+**Write (upload) credentials will live in the gate proxy once iManage is implemented gate-side — they do not yet.** The v1 proxy returns `502 not_implemented` for `share_external` unconditionally, before it would ever check for an iManage credential; credential wiring arrives when the connector is implemented gate-side (see "Upload (check in)" below). For the **read** path, the agent holds its own `IMANAGE_TOKEN`; a `401` means it expired — the operator must refresh via the OAuth refresh token or re-authorize (see the walkthrough Gate Proxy section); never ask for or handle tokens yourself.
 
 ## Required Environment Variables
 

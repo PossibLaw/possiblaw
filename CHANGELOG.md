@@ -7,6 +7,90 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.35.0] — 2026-07-02 — Atomic-work review Sprints α–γ: measurable thesis, lawyer-grade delivery, reconstitution contract
+
+A full-repo review against the atomic-work thesis (plan-of-record:
+`docs/superpowers/plans/2026-07-01-atomic-work-review-and-improvement-plan.md`,
+six parallel review agents, 0×S0 / 8×S1 findings) followed by three executed
+sprints. Every task was implemented by a subagent, adversarially reviewed, and
+fix-rounds applied before commit.
+
+### Sprint α — prove the thesis + honesty
+- **Orchestration eval can now actually run Arm A.** The A/B harness passed the
+  manifest's agent *slug* where paperclip requires a UUID — every Arm A task
+  silently SKIPPED. New `orchestration-eval/src/agent-resolver.ts` resolves
+  slugs via paperclip's serialized `urlKey` (package slugs are never persisted;
+  `estates-lead` → `trusts-estates-lead` fixed in the LAB manifest). Thesis
+  variables are now measured: real wall-clock (was hardcoded 0), `timedOut`
+  surfaced, Arm B decomposition shape (child count/assignees/depth/per-child
+  cost), and cancelled/timed-out roots score **FAILED** against the all-pass
+  denominator instead of being judged on partials. Fixed a pre-existing bug
+  where the cost client read a nonexistent field (`totalCents` vs `costCents`)
+  so cost was silently null in every report. Tests 32→61.
+- **Docs honesty pass.** The README/walkthrough claim that runtime model
+  switches "obey the gate-proxy dataTerms tier-floor" corrected — the
+  dataTerms-aware branches are staged in code but unreachable at runtime (new
+  known-limitations subsection). New known-limitations section: agent read
+  scope is company-wide (paperclip authz is same-company only; no per-matter
+  isolation). DOCX round-trip overclaim corrected (the sweep diffs text only).
+  Hygiene: eleven variants (openrouter-cost row added), gpt-5.5 sidecar refs,
+  commercial-lead re-laned primary→routing, 5-lane rubric in the agent catalog,
+  unreachable `credential_missing` promises removed from 5 v1-blocked
+  connectors.
+- **Scripted eval coverage.** New `bin/_possiblaw_eval_coverage.py`
+  (`--write/--check/--self-test`) regenerates `evals/COVERAGE.md` from
+  directory listings; the hand-maintained table had drifted (claimed 7/346,
+  reality 8/352 with 12 case files).
+
+### Sprint β — lawyer-grade delivery (UI → OneDrive/Google Drive)
+- **Real .docx through the gate (`gate-proxy/`).** `upload_document` accepts
+  `contentBase64` + REQUIRED `documentText` (the citation gate runs on it — a
+  citation-bearing docx 403s exactly like text; no binary bypass) + `mimeType`
+  (default by extension). Strict base64, 25MB cap, notion binary fail-closed.
+  Receipt sha = decoded bytes. Human-gate approvals for binary uploads bind
+  the **full payload** (same bytes to a different folder or with swapped
+  documentText → `bait_and_switch` 403).
+- **Delivery lands where the firm works.** GDrive uploads take `folderId`
+  (`parents` — no more flat My-Drive-root dumps) and return `webViewLink`;
+  performed uploads receipt `meta.delivery {vendor, fileId, webUrl}`
+  (sanitized, whitelisted) and the Matter Trust Report gains a **Delivered
+  Artifacts** section linking the artifact.
+- **Tokens survive past an hour.** New `gate-proxy/src/token-provider.ts`:
+  Google refresh-token + Microsoft client-credentials exchange with in-memory
+  caching and static-token fallback; secrets never in errors/receipts.
+- **Notion no longer 400s on real drafts.** Text chunked ≤1,900 chars on
+  paragraph boundaries, ≤100 blocks/request, sequential PATCH for remainders.
+- **The courier files Word files.** `output-delivery-playbook` gains
+  per-destination `format: docx|md` (default md): pandoc-convert via
+  `output-local-docx`, base64 (GNU wrap-safe), gate call with full
+  `documentText`; pandoc missing = BLOCK-and-deliver-nothing; `matterFoldering`
+  filename convention; completion comments carry vendor/folder/filename/format/
+  webUrl. gate-proxy tests 310→399.
+
+### Sprint γ — the reconstitution contract
+- **New shared skill `reconstitution-playbook` (skills 174→175), wired into
+  all 36 routing agents.** Defines — for the first time — what a delegator
+  does when paperclip wakes it with `issue_children_completed`: live child
+  inventory (cancelled/output-less children = GAPS with real dispositions,
+  never silent completion), assemble-don't-rewrite synthesis, **meta-review
+  default-on** (risk-spotter child for operator/client/court-bound drafting
+  output; debate-judge + parent-stays-open on conflict; skips always visible
+  in the completion comment), deliverable **hoisted to the parent issue**
+  (endpoints verified file:line against the pinned submodule), fixed
+  5-heading completion-comment schema, fail-closed rules, single-child
+  pass-through that cannot bypass review.
+
+Validation battery on the branch head: gate-proxy 399/399,
+orchestration-eval 61/61, eval-harness 32/32, learning-loop 45/45,
+firm-facade 137/137, deadline-engine 35/35, `bash -n` + three python
+self-tests OK, dry-run `agents=178 skills=175 projects=3 warnings=0 errors=0`.
+
+Known follow-ups (tracked in the plan doc + SDD ledger): Sprint δ gates
+hardening (trusted confidentiality, ingress envelopes, notify/synced-folder
+bypass channels, learning-loop wall, tier-floor `useLocal` receipt honesty),
+Sprint ε external-skill vendoring (CaseMark Apache-2.0; Lawvable Apache/MIT
+subset only), operator-gated live delivery + Tier-2 round-trip test.
+
 ## [0.34.0] — 2026-06-29 — Per-segment provenance (Phase A) + co-equal positioning
 
 Review-driven batch (PR #14). The legal-data audit trail moves from

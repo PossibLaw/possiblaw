@@ -143,6 +143,25 @@ export interface ComputedDeadlineEntry {
   payloadSha256: string;
 }
 
+/**
+ * A delivered work-product artifact, projected from a performed upload_document
+ * egress receipt's meta.delivery. Carries the vendor file id + link (delivery
+ * METADATA) and the payload sha only — never the document text.
+ */
+export interface DeliveredArtifact {
+  seq: number;
+  ts: string;
+  tool: string;
+  outcome: ReceiptOutcome;
+  payloadSha256: string;
+  /** Destination vendor — "onedrive" | "gdrive" | "notion". */
+  vendor?: string;
+  /** Vendor-returned opaque file/page id. */
+  fileId?: string;
+  /** Canonical link to the delivered artifact (when the vendor returns one). */
+  webUrl?: string;
+}
+
 /** Authority provenance: what was retrieved + which outbound citations were unbacked. */
 export interface AuthorityProvenance {
   registrations: AuthorityRegistration[];
@@ -214,6 +233,12 @@ export interface SignoffBundle {
    * no matter content. v1: US-FED FRCP Rule 6 only.
    */
   deadlines: ComputedDeadlineEntry[];
+  /**
+   * Delivered work-product artifacts for this matter — projected from performed
+   * upload_document egress receipts whose meta.delivery the gate recorded.
+   * Vendor file id + link only (delivery metadata), never document text.
+   */
+  deliveries: DeliveredArtifact[];
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +306,23 @@ function metaProvenance(body: ReceiptBody): {
     summary,
     segments,
   };
+}
+
+/**
+ * Parse the meta.delivery object the gate records on a performed upload_document
+ * egress receipt. Defensive: reads only the string fields vendor/fileId/webUrl
+ * (delivery metadata); anything else is ignored. Returns null when no usable
+ * delivery metadata is present, so a receipt without a delivery is skipped.
+ */
+function metaDelivery(body: ReceiptBody): { vendor?: string; fileId?: string; webUrl?: string } | null {
+  const d = body.meta?.["delivery"];
+  if (d === null || typeof d !== "object" || Array.isArray(d)) return null;
+  const obj = d as Record<string, unknown>;
+  const out: { vendor?: string; fileId?: string; webUrl?: string } = {};
+  if (typeof obj["vendor"] === "string") out.vendor = obj["vendor"];
+  if (typeof obj["fileId"] === "string") out.fileId = obj["fileId"];
+  if (typeof obj["webUrl"] === "string") out.webUrl = obj["webUrl"];
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -532,6 +574,34 @@ export function assembleSignoffBundle(
       payloadSha256: e.body.payloadSha256,
     }));
 
+  // DELIVERED ARTIFACTS — projected from performed upload_document egress receipts
+  // for this matter whose meta.delivery the gate recorded. Vendor file id + link
+  // only (delivery metadata) — never document text.
+  const deliveries: DeliveredArtifact[] = [];
+  for (const e of matter) {
+    if (e.body.kind !== "egress") continue;
+    // Belt-and-suspenders: only a successful delivery (performed, or
+    // anonymized_performed for a masked-payload egress) should ever be
+    // surfaced as a "delivered artifact". meta.delivery is only ever written
+    // on the performAndReceipt success branch (server.ts), so this filter is
+    // defense-in-depth against a hand-crafted or future receipt that carries
+    // meta.delivery on a non-success outcome (e.g. "blocked").
+    if (e.body.outcome !== "performed" && e.body.outcome !== "anonymized_performed") continue;
+    const d = metaDelivery(e.body);
+    if (d === null) continue;
+    const row: DeliveredArtifact = {
+      seq: e.seq,
+      ts: e.ts,
+      tool: e.body.tool,
+      outcome: e.body.outcome,
+      payloadSha256: e.body.payloadSha256,
+    };
+    if (d.vendor !== undefined) row.vendor = d.vendor;
+    if (d.fileId !== undefined) row.fileId = d.fileId;
+    if (d.webUrl !== undefined) row.webUrl = d.webUrl;
+    deliveries.push(row);
+  }
+
   return {
     issueId,
     generatedAt: new Date().toISOString(),
@@ -546,6 +616,7 @@ export function assembleSignoffBundle(
     attestations,
     firmFacadeActivity,
     deadlines,
+    deliveries,
   };
 }
 
@@ -762,6 +833,29 @@ export function renderSignoffMarkdown(bundle: SignoffBundle): string {
       out.push(
         `| ${r.seq} | ${cell(r.ts)} | ${cell(r.tool)} | ${cell(r.boundary)} ` +
           `| ${cell(r.reason)} | \`${cell(r.payloadSha256)}\` |`,
+      );
+    }
+  }
+  out.push("");
+
+  // Delivered Artifacts
+  out.push("## Delivered Artifacts");
+  out.push("");
+  out.push(
+    "_Finished work products filed to an operator destination (OneDrive / Google " +
+      "Drive / Notion) via upload_document. The vendor file id and link are delivery " +
+      "metadata — the report never carries the document text (payload is the SHA only)._",
+  );
+  out.push("");
+  if (bundle.deliveries.length === 0) {
+    out.push("_No delivered artifacts for this matter._");
+  } else {
+    out.push("| seq | ts | tool | vendor | fileId | webUrl | payloadSha256 |");
+    out.push("| --- | --- | --- | --- | --- | --- | --- |");
+    for (const d of bundle.deliveries) {
+      out.push(
+        `| ${d.seq} | ${cell(d.ts)} | ${cell(d.tool)} | ${cell(d.vendor)} ` +
+          `| ${cell(d.fileId)} | ${cell(d.webUrl)} | \`${cell(d.payloadSha256)}\` |`,
       );
     }
   }

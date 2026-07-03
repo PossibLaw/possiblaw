@@ -1,7 +1,19 @@
 // orchestration-eval/src/await-completion.ts
 import type { PaperclipEvalClient } from "./paperclip-client.ts";
 
+// `cancelled` is terminal for POLLING (we must stop waiting), but it is a
+// FAILED outcome for SCORING — see failureReasonFor below.
 export const CLOSED_STATUSES = ["done", "cancelled"] as const;
+
+/** Task 1.3: a root issue that ends `cancelled`, or a run that hit the await
+ * timeout, is scored as FAILED for that run. It is NOT judged on whatever
+ * partial deliverable exists and is NOT skipped — it counts against the
+ * arm's all-pass rate. Returns null for a normally-closed (`done`) run. */
+export function failureReasonFor(closed: { status: string; timedOut: boolean }): "timed_out" | "cancelled" | null {
+  if (closed.timedOut) return "timed_out";
+  if (closed.status === "cancelled") return "cancelled";
+  return null;
+}
 
 interface AwaitOpts { intervalMs?: number; timeoutMs?: number; now?: () => number; sleep?: (ms: number) => Promise<void>; }
 

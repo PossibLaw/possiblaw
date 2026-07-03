@@ -19,6 +19,7 @@ Use this skill at the end of a task when the operator needs the deliverable as a
 - The deliverable will be redlined, filed, or sent to a counterparty as `.docx`.
 - The operator expects a Word-compatible artifact on disk in addition to the Paperclip comment.
 - The Markdown version is either already on disk (via `output-local-markdown`) or generated in memory for this conversion.
+- The `deliverables-courier` also runs this conversion before cloud filing when a delivery destination sets `format: docx` (see `output-delivery-playbook`); the resulting `.docx` is base64-encoded and filed via the gate proxy with the full source markdown carried as `documentText`.
 
 ## Prerequisite — pandoc
 

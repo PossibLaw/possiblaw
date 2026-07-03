@@ -141,6 +141,28 @@ Westlaw, midpage, iManage (upload), and NetDocuments (upload) are flagged
 `UNCONFIRMED` and need operator verification against current vendor docs
 before live use.
 
+### DOCX delivery: residual limits (binary egress shipped in 0.35.0)
+
+`upload_document` now accepts a binary body (`contentBase64` + a REQUIRED
+`documentText` plain-text companion + `mimeType` inferred from the `name`
+extension), and `output-delivery-playbook` files a pandoc-converted `.docx`
+when the delivery policy sets `format: docx` — so a real Word file reaches
+OneDrive/Google Drive. The remaining limits:
+
+- **The citation gate reads `documentText`, not the bytes.** The proxy cannot
+  decode a DOCX; the courier is instructed (and audited via the receipt sha)
+  to pass the full source markdown, but the text↔bytes correspondence is
+  workflow-enforced, not cryptographic.
+- **25 MB decoded cap** (`GATE_MAX_UPLOAD_BYTES` to override).
+- **Notion is text-only** — a binary payload to notion is refused fail-closed
+  (`502`, `error` naming `unsupported_binary_destination`); its text path is
+  chunked to the pages API limits.
+- **pandoc is a courier-host prerequisite** for `format: docx`; missing pandoc
+  blocks delivery (never a silent Markdown fallback).
+- Delivered `.docx` files are **not yet diffable** by the learning-loop sweep —
+  see "Box connector and native Google Docs export are deferred" under
+  Skill-improvement loop; that read/diff-side gap is now live, not moot.
+
 ## Legal-data MCP / research-query privacy
 
 ### Research queries egress directly to CourtListener — not through the gate proxy
@@ -216,6 +238,60 @@ whole file can also recompute every hash, so a wholesale rewrite is caught
 only against an externally anchored chain head (`POST /receipts/anchor`
 posts the head into a paperclip comment). Anchor periodically if receipts
 matter for your audit posture.
+
+### dataTerms tier-floor is staged, not enforced at runtime
+
+`variants.yaml` declares each cloud lane's `dataTerms` (ZDR / no-train /
+no-human-review / tenant-isolated — see the schema comment at the top of that
+file). This is a **declared posture consumed at import/selection time only**,
+not a live runtime guardrail, despite language elsewhere implying otherwise:
+
+- `dataTerms` is never loaded by the launcher or the gate proxy at runtime —
+  nothing reads `variants.yaml` again after import.
+- The tier-floor (`gate-proxy/src/gates/tier-floor.ts`, `evaluateTierFloor`)
+  only fires from one call site, inside the `anonymize` branch of tool egress
+  in `gate-proxy/src/server.ts`, and that call site never passes a `dataTerms`
+  argument. Every ZDR-aware branch in `evaluateTierFloor` is therefore
+  unreachable at runtime; the function always falls back to its legacy binary
+  local-vs-cloud behavior (fail-closed to anonymize/local, not a
+  dataTerms-aware decision).
+- Model-inference traffic — the agent CLI's own calls to its model vendor —
+  never traverses the gate proxy at all; only tool egress does. So a runtime
+  model switch to a weaker-terms lane (for example, moving an agent from
+  `claude-api`'s asserted-ZDR lane to `claude`'s non-ZDR subscription lane, or
+  a per-matter assignee override to a different adapter) is invisible to every
+  guard in this repo.
+
+Net: "runtime model choices obey the gate-proxy `dataTerms` tier-floor" is not
+an accurate description of current behavior. Wiring `dataTerms` through to the
+tier-floor call site is future gate work; until then, the operator's own
+discipline in choosing model overrides for confidential/privileged matters is
+the control, not the gate. See `README.md` → "Changing models after import"
+and `docs/operator-walkthrough.md` → "Variant setup" for the corrected claim.
+
+### Agent read scope is company-wide (no per-matter isolation)
+
+Every imported agent authenticates to paperclip with a company-scoped API key.
+Paperclip's only internal authorization check on an agent actor is
+same-company: `assertCompanyAccess` in
+`paperclip/server/src/routes/authz.ts:44` reduces to `req.actor.type ===
+"agent" && req.actor.companyId !== companyId` — there is no per-matter,
+per-issue, or ethical-wall check below the company level. Any agent in the
+company can read any issue, comment, or work product belonging to any other
+matter in the same company.
+
+The practical read-scope reality is **one company = one shared information
+pool** for every agent in it. This is the same underlying gap the Firm-Facing
+MCP Facade documents at its own layer (see "No ethical wall or cross-matter
+information barriers (deferred)" under "Firm-facing MCP facade (v1)" below) —
+paperclip has no per-matter read-isolation primitive, and PossibLaw does not
+add one internally either.
+
+Interim pattern for a firm or in-house team that needs an ethical wall between
+walled clients or matters: run **separate paperclip companies**, one per
+walled client/matter cluster (a fresh `--data-dir` or a second import), rather
+than relying on scoping within a single company. Per-matter isolation inside
+one company is not implemented.
 
 ## Hybrid variant
 
@@ -357,12 +433,24 @@ morning review is the gate that prevents spurious overlays from applying.
 
 ### Box connector and native Google Docs export are deferred
 
-The v1 sweep covers OneDrive and Google Drive (binary/DOCX round-trip). Box
-connector support is not yet implemented — files delivered to Box are not
+The v1 sweep covers OneDrive and Google Drive, but it diffs **plain-text /
+Markdown content only**: `learning-loop/src/diff.ts` (`diffLines`) is a
+line-level plain-text diff with no DOCX or PDF text-extraction step. Genuine
+binary-document diffing needs a text-extraction stage that is not yet wired
+into the learning loop — a parse bridge exists, but only inside
+`orchestration-eval` (for scoring Harvey LAB deliverables), and it is not
+reused here. As of 0.35.0 this gap is **live, not moot**: the delivery path
+CAN now file a real `.docx` to OneDrive/Google Drive (see "DOCX delivery:
+residual limits" under Connectors), so a lawyer's in-place edits to a
+delivered Word file are invisible to the sweep's text diff until DOCX text
+extraction is wired in. Firms that want the learn-from-edits loop today
+should deliver `format: md` (the default) for documents they expect to edit
+in place.
+
+Box connector support is not yet implemented — files delivered to Box are not
 tracked in the manifest and are invisible to the sweep. Native Google Docs
 files (`.gdoc` / `.gsheet` format) require a separate `files.export` call
-that is not yet wired up; only uploaded DOCX/PDF files stored in Drive are
-diffable today.
+that is not yet wired up.
 
 ### SkillOpt (eval-validated automatic refinement) is deferred
 

@@ -18,7 +18,7 @@ Clio Manage is the dominant practice-management SaaS for small and mid-size law 
 
 Clio is the system of record for matter metadata; documents stay in the doc-store connectors.
 
-**Credentials live in the gate proxy only.** If you see `credential_missing: CLIO_ACCESS_TOKEN`, the operator must export it before launching (see the walkthrough Gate Proxy section); never ask for or handle tokens yourself.
+**Write credentials will live in the gate proxy once Clio is implemented gate-side — they do not yet.** The v1 proxy returns `502 not_implemented` for `share_external` unconditionally, before it would ever check for a Clio credential; credential wiring arrives when the connector is implemented gate-side (see "Write operations" below). For the **read** path, the agent holds its own `CLIO_ACCESS_TOKEN`; a `401` means it expired or was issued for the wrong region — the operator must refresh or re-export it (see the walkthrough Gate Proxy section); never ask for or handle tokens yourself.
 
 The API is region-bound: tokens issued against the US host are not valid against the EU, CA, or AU hosts. Base URLs per the official OpenAPI spec (https://docs.developers.clio.com/openapi.json, accessed 2026-06-09):
 

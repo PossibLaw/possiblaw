@@ -732,3 +732,73 @@ test("PROVENANCE: matter with no provenance gets an empty section and zeroed tot
   });
   assert.match(renderSignoffMarkdown(bundle), /## Provenance/);
 });
+
+// ---------------------------------------------------------------------------
+// DELIVERIES (Task 4.5): delivered-artifact link projected into the bundle
+// ---------------------------------------------------------------------------
+
+test("DELIVERIES: performed upload_document with meta.delivery → projected + rendered with webUrl", () => {
+  const { chain } = freshChainPath();
+  const webUrl = "https://drive.google.com/file/d/gfile-1/view";
+  chain.append({
+    kind: "egress", tool: "upload_document", boundary: "THIRD_PARTY_EGRESS",
+    decision: "allow", outcome: "performed", payloadSha256: sha256hex("doc"),
+    agentId: "courier-1", issueId: "POS-DEL",
+    meta: { claimedConfidentiality: "standard", delivery: { vendor: "gdrive", fileId: "gfile-1", webUrl } },
+  });
+  const bundle = assembleSignoffBundle(chain, "POS-DEL");
+  assert.equal(bundle.deliveries.length, 1);
+  assert.equal(bundle.deliveries[0].vendor, "gdrive");
+  assert.equal(bundle.deliveries[0].fileId, "gfile-1");
+  assert.equal(bundle.deliveries[0].webUrl, webUrl);
+
+  const md = renderSignoffMarkdown(bundle);
+  assert.match(md, /## Delivered Artifacts/);
+  assert.ok(md.includes(webUrl), "markdown must render the delivery webUrl");
+  assert.ok(md.includes("gfile-1"), "markdown must render the vendor fileId");
+});
+
+test("DELIVERIES: delivery without webUrl projects vendor+fileId only; no crash", () => {
+  const { chain } = freshChainPath();
+  chain.append({
+    kind: "egress", tool: "upload_document", boundary: "THIRD_PARTY_EGRESS",
+    decision: "allow", outcome: "performed", payloadSha256: sha256hex("doc"),
+    agentId: "courier-1", issueId: "POS-DEL2",
+    meta: { delivery: { vendor: "notion", fileId: "page-1" } },
+  });
+  const bundle = assembleSignoffBundle(chain, "POS-DEL2");
+  assert.equal(bundle.deliveries.length, 1);
+  assert.equal(bundle.deliveries[0].fileId, "page-1");
+  assert.equal(bundle.deliveries[0].webUrl, undefined);
+  assert.match(renderSignoffMarkdown(bundle), /## Delivered Artifacts/);
+});
+
+// Finding 3 (hardening): a hand-crafted receipt carrying meta.delivery but
+// outcome:"blocked" must NOT be projected into the deliveries section — the
+// projection is belt-and-suspenders scoped to performed/anonymized_performed
+// outcomes only, even though the live server code path never writes
+// meta.delivery on a blocked receipt.
+test("DELIVERIES: hand-crafted receipt with meta.delivery but outcome:blocked is NOT projected", () => {
+  const { chain } = freshChainPath();
+  chain.append({
+    kind: "egress", tool: "upload_document", boundary: "THIRD_PARTY_EGRESS",
+    decision: "block", outcome: "blocked", payloadSha256: sha256hex("doc"),
+    agentId: "courier-1", issueId: "POS-DEL-BLOCKED",
+    meta: { delivery: { vendor: "gdrive", fileId: "gfile-blocked", webUrl: "https://drive.google.com/file/d/gfile-blocked/view" } },
+  });
+  const bundle = assembleSignoffBundle(chain, "POS-DEL-BLOCKED");
+  assert.deepEqual(bundle.deliveries, []);
+  assert.match(renderSignoffMarkdown(bundle), /No delivered artifacts/);
+});
+
+test("DELIVERIES: matter with no deliveries → empty section", () => {
+  const { chain } = freshChainPath();
+  chain.append({
+    kind: "egress", tool: "send_email", boundary: "THIRD_PARTY_EGRESS",
+    decision: "allow", outcome: "performed", payloadSha256: sha256hex("e"),
+    agentId: "a1", issueId: "POS-NODEL",
+  });
+  const bundle = assembleSignoffBundle(chain, "POS-NODEL");
+  assert.deepEqual(bundle.deliveries, []);
+  assert.match(renderSignoffMarkdown(bundle), /No delivered artifacts/);
+});

@@ -15,7 +15,7 @@ import {
 import { loadPolicy, DEFAULT_POLICY } from "./policy.ts";
 import type { Policy } from "./policy.ts";
 import type { PaperclipClient, ApprovalRecord } from "./paperclip-client.ts";
-import { PerformerError, type Performer, type PerformerRegistry } from "./connectors.ts";
+import { PerformerError, buildPerformers, type Performer, type PerformerRegistry } from "./connectors.ts";
 import { createGateServer, type GateServerDeps } from "./server.ts";
 import { CitationRegistry } from "./quality/citation-registry.ts";
 import { AuthorityRegistry } from "./quality/authority-registry.ts";
@@ -1776,6 +1776,309 @@ describe("gate server", () => {
     const md = await res.text();
     assert.match(md, /Matter Trust Report/);
     assert.match(md, /POS-123/);
+
+    await close();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 4.5 — delivered-artifact link in egress receipt → Matter Trust Report
+  // ---------------------------------------------------------------------------
+
+  // Happy: successful gdrive upload → receipt meta.delivery {vendor,fileId,webUrl};
+  // GET /receipts/bundle output includes the webUrl for that egress event.
+  it("delivery: gdrive upload_document → performed receipt meta.delivery; bundle includes webUrl", async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "r.jsonl");
+    const receipts = new ReceiptChain(filePath);
+    const webUrl = "https://drive.google.com/file/d/gfile-xyz/view";
+    const fakeUpload: Performer = async () => ({ id: "gfile-xyz", webUrl });
+    const performers: PerformerRegistry = { upload_document: fakeUpload };
+
+    const { baseUrl, close } = await startServer({
+      policy: POLICY_NO_CITATION_GATE,
+      receipts,
+      client: null,
+      performers,
+      localModelAvailable: false,
+    });
+
+    const payload = { destination: "gdrive", name: "report.md", content: "Delivered report body.", folderId: "folder-1" };
+    const { status, json } = await postEgress(baseUrl, "upload_document", {
+      payload,
+      meta: { agentId: "agent-1", issueId: "POS-DEL-1", confidentiality: "standard" },
+    });
+
+    assert.equal(status, 200);
+    assert.equal((json as Record<string, unknown>)["decision"], "allow");
+
+    // Receipt meta.delivery carries vendor + fileId + webUrl (metadata, not payload text)
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.outcome, "performed");
+    const meta = last.body.meta as Record<string, unknown>;
+    const delivery = meta["delivery"] as Record<string, unknown>;
+    assert.ok(delivery !== undefined && typeof delivery === "object", "receipt meta must carry delivery object");
+    assert.equal(delivery["vendor"], "gdrive");
+    assert.equal(delivery["fileId"], "gfile-xyz");
+    assert.equal(delivery["webUrl"], webUrl);
+
+    // Receipts file must NOT contain the document body text
+    const fileContents = fs.readFileSync(filePath, "utf8");
+    assert.ok(!fileContents.includes("Delivered report body."), "receipts file must not contain document body text");
+
+    // Matter Trust Report bundle (JSON) surfaces the webUrl
+    const bundleRes = await fetch(`${baseUrl}/receipts/bundle?issueId=POS-DEL-1`);
+    assert.equal(bundleRes.status, 200);
+    const bundle = await bundleRes.json() as Record<string, unknown>;
+    const deliveries = bundle["deliveries"] as Array<Record<string, unknown>>;
+    assert.ok(Array.isArray(deliveries) && deliveries.length === 1, "bundle must list one delivered artifact");
+    assert.equal(deliveries[0]["webUrl"], webUrl);
+    assert.equal(deliveries[0]["fileId"], "gfile-xyz");
+    assert.equal(deliveries[0]["vendor"], "gdrive");
+
+    // Markdown report renders the webUrl and does not crash
+    const mdRes = await fetch(`${baseUrl}/receipts/bundle?issueId=POS-DEL-1&format=md`);
+    assert.equal(mdRes.status, 200);
+    const md = await mdRes.text();
+    assert.match(md, /Delivered Artifacts/);
+    assert.ok(md.includes(webUrl), "markdown report must include the delivery webUrl");
+
+    await close();
+  });
+
+  // Edge: performer result lacks webUrl (e.g. Notion returns only page id) →
+  // meta.delivery has what exists; report renders without crash.
+  it("delivery: performer returns only id (no webUrl) → meta.delivery has vendor+fileId; report renders", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const fakeUpload: Performer = async () => ({ id: "page-abc" });
+    const performers: PerformerRegistry = { upload_document: fakeUpload };
+
+    const { baseUrl, close } = await startServer({
+      policy: POLICY_NO_CITATION_GATE,
+      receipts,
+      client: null,
+      performers,
+      localModelAvailable: false,
+    });
+
+    const payload = { destination: "notion", name: "Note", content: "body", parentPageId: "parent-1" };
+    const { status } = await postEgress(baseUrl, "upload_document", {
+      payload,
+      meta: { agentId: "agent-1", issueId: "POS-DEL-2" },
+    });
+    assert.equal(status, 200);
+
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    const meta = last.body.meta as Record<string, unknown>;
+    const delivery = meta["delivery"] as Record<string, unknown>;
+    assert.equal(delivery["vendor"], "notion");
+    assert.equal(delivery["fileId"], "page-abc");
+    assert.ok(!("webUrl" in delivery), "webUrl must be absent when performer did not return it");
+
+    // Markdown report still renders
+    const mdRes = await fetch(`${baseUrl}/receipts/bundle?issueId=POS-DEL-2&format=md`);
+    assert.equal(mdRes.status, 200);
+
+    await close();
+  });
+
+  // Failure/security: blocked egress → NO meta.delivery; document body text never in receipt.
+  it("delivery: blocked upload_document → no meta.delivery; body text absent from receipt", async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "r.jsonl");
+    const receipts = new ReceiptChain(filePath);
+    let callCount = 0;
+    const fakeUpload: Performer = async () => { callCount++; return { id: "should-not-happen", webUrl: "https://nope" }; };
+    const performers: PerformerRegistry = { upload_document: fakeUpload };
+
+    const blockPolicy: Policy = {
+      version: 1,
+      boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "block" },
+      citationGate: { boundaries: [], requireAuthorityProvenance: false },
+    };
+
+    const { baseUrl, close } = await startServer({
+      policy: blockPolicy,
+      receipts,
+      client: null,
+      performers,
+      localModelAvailable: false,
+    });
+
+    const SENTINEL = "SECRET_DELIVERY_BODY_SENTINEL_987";
+    const payload = { destination: "gdrive", name: "report.md", content: SENTINEL, folderId: "folder-1" };
+    const { status } = await postEgress(baseUrl, "upload_document", {
+      payload,
+      meta: { agentId: "agent-1", issueId: "POS-DEL-3" },
+    });
+
+    assert.equal(status, 403);
+    assert.equal(callCount, 0, "performer must NOT be called on a blocked egress");
+
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.outcome, "blocked");
+    const meta = (last.body.meta ?? {}) as Record<string, unknown>;
+    assert.ok(!("delivery" in meta), "blocked receipt must NOT carry meta.delivery");
+
+    const fileContents = fs.readFileSync(filePath, "utf8");
+    assert.ok(!fileContents.includes(SENTINEL), "receipts file must not contain document body text");
+
+    await close();
+  });
+
+  // Failure/security (4.3a end-to-end): invalid folderId through the REAL gdrive
+  // performer → vendor fetch NOT called, 502 + error receipt appended, no delivery.
+  it("delivery/4.3a: invalid folderId via real gdrive performer → 502 error receipt, no meta.delivery", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    let fetchCalled = 0;
+    const fakeFetch = (async () => {
+      fetchCalled++;
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const performers = buildPerformers({ GDRIVE_ACCESS_TOKEN: "tok" }, fakeFetch);
+
+    const { baseUrl, close } = await startServer({
+      policy: POLICY_NO_CITATION_GATE,
+      receipts,
+      client: null,
+      performers,
+      localModelAvailable: false,
+    });
+
+    const { status } = await postEgress(baseUrl, "upload_document", {
+      payload: { destination: "gdrive", name: "f.md", content: "body", folderId: "../../etc" },
+      meta: { agentId: "agent-1", issueId: "POS-DEL-4" },
+    });
+
+    assert.equal(status, 502, "invalid folderId → PerformerError → 502");
+    assert.equal(fetchCalled, 0, "vendor fetch must NOT be called on invalid folderId");
+
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.outcome, "error", "error receipt must be appended");
+    const meta = (last.body.meta ?? {}) as Record<string, unknown>;
+    assert.ok(!("delivery" in meta), "error receipt must NOT carry meta.delivery");
+
+    await close();
+  });
+
+  // Finding 1 regression: a real-gdrive-shaped vendor response (the REAL
+  // performer from buildPerformers, not a hand-rolled fake) must produce a
+  // receipt meta.delivery carrying webUrl end-to-end — the primary vendor
+  // must not silently lose its delivery link.
+  it("delivery: real gdrive performer with a real-gdrive-shaped response → receipt meta.delivery carries webUrl", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const webUrl = "https://drive.google.com/file/d/gfile-real/view";
+    const fakeFetch = (async () =>
+      new Response(JSON.stringify({ id: "gfile-real", webViewLink: webUrl }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch;
+    const performers = buildPerformers({ GDRIVE_ACCESS_TOKEN: "tok" }, fakeFetch);
+
+    const { baseUrl, close } = await startServer({
+      policy: POLICY_NO_CITATION_GATE,
+      receipts,
+      client: null,
+      performers,
+      localModelAvailable: false,
+    });
+
+    const { status } = await postEgress(baseUrl, "upload_document", {
+      payload: { destination: "gdrive", name: "f.md", content: "body", folderId: "folder-1" },
+      meta: { agentId: "agent-1", issueId: "POS-DEL-5" },
+    });
+    assert.equal(status, 200);
+
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.outcome, "performed");
+    const meta = last.body.meta as Record<string, unknown>;
+    const delivery = meta["delivery"] as Record<string, unknown>;
+    assert.equal(delivery["vendor"], "gdrive");
+    assert.equal(delivery["fileId"], "gfile-real");
+    assert.equal(delivery["webUrl"], webUrl);
+
+    await close();
+  });
+
+  // Finding 2: delivery fields are gated through isSafeAuthorityString before
+  // entering the hash-chained receipt. A webUrl containing CRLF must be
+  // omitted from meta.delivery, but the upload itself must still succeed and
+  // the other (safe) delivery fields must still survive.
+  it("delivery/Finding2: webUrl containing CRLF is omitted from meta.delivery; vendor+fileId survive", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const badWebUrl = "https://drive.google.com/file/d/x/view\r\nX-Injected: true";
+    const fakeUpload: Performer = async () => ({ id: "gfile-crlf", webUrl: badWebUrl });
+    const performers: PerformerRegistry = { upload_document: fakeUpload };
+
+    const { baseUrl, close } = await startServer({
+      policy: POLICY_NO_CITATION_GATE,
+      receipts,
+      client: null,
+      performers,
+      localModelAvailable: false,
+    });
+
+    const { status } = await postEgress(baseUrl, "upload_document", {
+      payload: { destination: "gdrive", name: "f.md", content: "body", folderId: "folder-1" },
+      meta: { agentId: "agent-1", issueId: "POS-DEL-6" },
+    });
+    assert.equal(status, 200, "upload must still succeed even though the delivery field is dropped");
+
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.outcome, "performed");
+    const meta = last.body.meta as Record<string, unknown>;
+    const delivery = meta["delivery"] as Record<string, unknown>;
+    assert.equal(delivery["vendor"], "gdrive", "vendor must still survive");
+    assert.equal(delivery["fileId"], "gfile-crlf", "fileId must still survive");
+    assert.ok(!("webUrl" in delivery), "webUrl containing CRLF must be omitted");
+
+    // Receipts file must never contain the raw CRLF-carrying value.
+    const fileContents = fs.readFileSync(path.join(dir, "r.jsonl"), "utf8");
+    assert.ok(!fileContents.includes("X-Injected"), "receipts file must not contain the injected value");
+
+    await close();
+  });
+
+  // Finding 2: a webUrl exceeding the 2048-char bound is omitted from
+  // meta.delivery, while vendor+fileId still survive.
+  it("delivery/Finding2: webUrl exceeding 2048 chars is omitted from meta.delivery; vendor+fileId survive", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const oversizedWebUrl = "https://drive.google.com/file/d/" + "x".repeat(2100) + "/view";
+    const fakeUpload: Performer = async () => ({ id: "gfile-oversized", webUrl: oversizedWebUrl });
+    const performers: PerformerRegistry = { upload_document: fakeUpload };
+
+    const { baseUrl, close } = await startServer({
+      policy: POLICY_NO_CITATION_GATE,
+      receipts,
+      client: null,
+      performers,
+      localModelAvailable: false,
+    });
+
+    const { status } = await postEgress(baseUrl, "upload_document", {
+      payload: { destination: "gdrive", name: "f.md", content: "body", folderId: "folder-1" },
+      meta: { agentId: "agent-1", issueId: "POS-DEL-7" },
+    });
+    assert.equal(status, 200);
+
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.outcome, "performed");
+    const meta = last.body.meta as Record<string, unknown>;
+    const delivery = meta["delivery"] as Record<string, unknown>;
+    assert.equal(delivery["vendor"], "gdrive");
+    assert.equal(delivery["fileId"], "gfile-oversized");
+    assert.ok(!("webUrl" in delivery), "webUrl exceeding 2048 chars must be omitted");
 
     await close();
   });

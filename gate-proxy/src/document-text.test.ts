@@ -18,3 +18,23 @@ test("returns null when the document field is absent or not a string", () => {
 test("returns null for tools that carry no reviewable document", () => {
   assert.equal(extractDocumentText("send_payment", { amount: 100 }), null);
 });
+
+// Task 4.1: binary uploads carry bytes in contentBase64; the reviewable text
+// the citation gate hashes is the REQUIRED documentText companion.
+test("upload_document with contentBase64 reads documentText (binary path)", () => {
+  assert.equal(
+    extractDocumentText("upload_document", { contentBase64: "UEsDBA==", documentText: "reviewable brief text" }),
+    "reviewable brief text",
+  );
+});
+
+test("upload_document with contentBase64 but missing/empty documentText → null (fail closed)", () => {
+  assert.equal(extractDocumentText("upload_document", { contentBase64: "UEsDBA==" }), null);
+  assert.equal(extractDocumentText("upload_document", { contentBase64: "UEsDBA==", documentText: "" }), null);
+  // content must NOT satisfy the gate for a binary upload — bytes could differ from it
+  assert.equal(extractDocumentText("upload_document", { contentBase64: "UEsDBA==", content: "decoy" }), null);
+});
+
+test("upload_document without contentBase64 still reads content (text path unchanged)", () => {
+  assert.equal(extractDocumentText("upload_document", { content: "memo body" }), "memo body");
+});

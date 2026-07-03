@@ -2,8 +2,9 @@
 #
 # Maps `metadata.possiblaw.modelLane` (set per agent in .paperclip.yaml) to
 # adapter + model overrides at company-import time. Pivoting on lane lets the
-# 11-agent package (and the planned 100-200-agent expansion) inherit the right
-# config automatically without per-agent variant boilerplate.
+# 178-agent package inherit the right config automatically without
+# per-agent variant boilerplate — this file grew from an original 11-agent
+# slice to today's full catalog with no changes needed here.
 #
 # Consumed by `bin/_possiblaw_variants.py` and applied by `bin/possiblaw` as
 # `adapterOverrides` on POST /api/companies/import.
@@ -249,6 +250,13 @@ variants:
       have Ollama running locally AND a one-time OpenCode global config declaring
       the 'ollama' provider in ~/.config/opencode/opencode.json. The launcher's
       preflight verifies both and offers to write the OpenCode config on first run.
+      Pin currency: unlike the OpenRouter-backed variants, there is no catalog
+      check for Ollama tags — the launcher preflight confirms the daemon and
+      OpenCode config are reachable, not that llama3.1:8b/llama3.1:70b are still
+      the best locally-pullable choice. Their currency against Ollama's current
+      model library is UNCONFIRMED / not re-verified by this repo; an operator
+      wanting a newer local model should edit these pins directly and pull the
+      corresponding tag.
     per_agent: {}
 
   llamacpp:
@@ -471,6 +479,11 @@ variants:
 
   openrouter-cost:
     label: "OpenRouter cost-tuned (GLM 5.2 cheap lanes, SOTA reasoning lanes)"
+    # Same multi-vendor OpenRouter catalog as `openrouter`, same conservative
+    # dataTerms posture (ZDR not asserted uniformly across upstream providers
+    # -> zdr:false, not confidential-capable). This is the cost-frontier
+    # experimental arm: routing/review/extractive lanes swap to GLM 5.2 to
+    # measure cost vs. quality against Claude Opus on primary/drafting.
     dataTerms:
       tier: cloud
       zdr: false
@@ -481,6 +494,20 @@ variants:
     requires_cli: opencode
     secret_env:
       OPENROUTER_API_KEY: "OpenRouter API Key"
+    notes: >
+      Experimental measurement variant for the orchestration eval's cost-frontier
+      experiment (Experiment 2), not a general-purpose operating choice —
+      routing/review/extractive lanes pin GLM 5.2 (openrouter/z-ai/glm-5.2)
+      while primary/drafting stay on claude-opus-4.7, so the eval can compare
+      cost and quality cell-by-cell. Added 2026-06-27 (CHANGELOG 0.31.0); the
+      GLM 5.2 pin's currency against the live OpenRouter catalog beyond that
+      date is UNCONFIRMED by this repo — rely on the launcher's keyless
+      catalog preflight (the same check `openrouter` gets against
+      openrouter.ai/api/v1/models) to catch drift at each launch, same as the
+      other two pins in this block. GLM-5.2-vs-Claude-Opus quality is
+      UNCONFIRMED — that comparison is the thesis under test; see
+      docs/known-limitations.md → "Orchestration eval" → "GLM 5.2 quality vs.
+      Claude Opus is UNCONFIRMED".
     default:
       adapterType: opencode_local
       adapterConfig:
