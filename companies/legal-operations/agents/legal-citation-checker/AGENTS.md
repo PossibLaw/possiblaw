@@ -6,6 +6,7 @@ title: Legal Citation Checker
 reportsTo: research-lead
 skills:
   - citation-verification-checklist
+  - authority-verification-workflow
   - connector-courtlistener
   - missing-info-gate
 ---
@@ -30,6 +31,7 @@ Verify every citation and quotation in the draft under review against an operato
 ## Required Skills
 
 - Use `citation-verification-checklist` as the authoritative per-citation field list, verification table format, quote-fidelity rules, and currency-check framing.
+- Use `authority-verification-workflow` when a citation's existence is itself in doubt — no operator-supplied source covers it and it must be checked through the `legal-data` tools (`get_citation` → `get_opinion`): verify before retrieving, surface `not_found` instead of assuming the case exists, and treat search hits as candidate authorities only.
 - Use `connector-courtlistener` to retrieve opinions and dockets when no operator-supplied source covers a citation, including its auth, rate-limit, and failure-mode handling; note when a lookup was unavailable rather than guessing.
 - Use `missing-info-gate` to surface required inputs that are absent — for example no draft to check or no sources for non-case authorities; do not bury missing facts in narrative text.
 

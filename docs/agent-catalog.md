@@ -1,6 +1,6 @@
 # PossibLaw Agent Catalog
 
-178 agents · 176 skills · 34 teams under two executives. Derived from `companies/legal-operations/` (agent frontmatter + `.paperclip.yaml` lanes); regenerate after package changes.
+179 agents · 178 skills · 34 teams under two executives. Derived from `companies/legal-operations/` (agent frontmatter + `.paperclip.yaml` lanes); regenerate after package changes.
 
 The catalog is the menu — import what your firm practices. `./bin/possiblaw --teams <names>` (e.g. `litigation,commercial`, or presets `boutique` / `inhouse`) imports just those teams plus the executives, meta-reviewers, capability builder, and the skills they reference. See the operator walkthrough.
 
@@ -332,7 +332,7 @@ Every agent works inside paperclip issues, never sends/files/serves anything ext
 | `experience-database-curator` | extractive | Matter-experience records for pitches with confidentiality flags. |
 | `competitive-intel-monitor` | extractive | Public-source competitive-intel briefing tables with citations. |
 
-### Ops Lead (`ops-lead`) — 8 specialists
+### Ops Lead (`ops-lead`) — 9 specialists
 
 | Agent | Lane | What it does |
 |---|---|---|
@@ -342,6 +342,7 @@ Every agent works inside paperclip issues, never sends/files/serves anything ext
 | `new-matter-conflicts-screener` | review | Structured conflicts screening with hits flagged, never cleared. |
 | `engagement-letter-drafter` | drafting | Engagement-letter skeleton drafting, never sent to clients. |
 | `deliverables-courier` | extractive | Files finished work products to policy-declared OneDrive/Drive/Notion destinations with read-back verification; never alters content. |
+| `correspondence-clerk` | extractive | Inbound email triage with untrusted-content envelopes and gate-routed outbound send execution of already-approved drafts; never authors substantive content. |
 | `learning-scribe` | drafting | Captures lawyer feedback and `remember this:` comments, generalizes them into sanitized firm-memory lessons, and posts human-approval cards. |
 | `skill-improvement-scribe` | drafting | Diffs lawyers' finalized delivered documents against the agent's drafts and proposes sanitized, generalized skill-edit improvements for morning human review. |
 

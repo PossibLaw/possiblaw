@@ -1266,6 +1266,35 @@ agents:
       possiblaw:
         modelLane: drafting
         adapterDecision: codex-local-default-2026-06-09
+  correspondence-clerk:
+    role: specialist
+    icon: mail
+    capabilities: Inbound email triage with untrusted-content envelopes and gate-routed outbound send execution of already-approved drafts; never authors substantive content.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: medium
+        dangerouslyBypassApprovalsAndSandbox: true
+        timeoutSec: 600
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: true
+        wakeOnOnDemand: true
+        wakeOnAutomation: true
+    inputs:
+      env:
+        GATE_PROXY_URL:
+          kind: plain
+          requirement: optional
+          default: "http://127.0.0.1:3801"
+    metadata:
+      possiblaw:
+        modelLane: extractive
+        adapterDecision: codex-local-default-2026-07-02
   clause-extractor:
     role: specialist
     icon: list
@@ -4545,6 +4574,7 @@ sidebar:
     - ops-vendor-intake
     - ops-sop-curator
     - hr-internal-coordinator
+    - correspondence-clerk
     - clause-extractor
     - risk-spotter
     - debate-judge

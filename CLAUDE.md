@@ -85,7 +85,7 @@ When resuming prior work, read `${REPO_ROOT}/.claude/history.md` first.
 `./bin/possiblaw --dry-run --variant codex --non-interactive --yes --mission "smoke test"` - Validate the import body against `/api/companies/import/preview` without writing (`--non-interactive` requires `--mission`).
 `./bin/possiblaw --list-variants` - Show available variants and their requirements.
 `bash -n bin/possiblaw` - Static-check the launcher.
-`python3 bin/_possiblaw_variants.py --self-test && python3 bin/_possiblaw_inline_source.py --self-test` - Self-test the Python helpers.
+`python3 bin/_possiblaw_variants.py --self-test && python3 bin/_possiblaw_inline_source.py --self-test && python3 bin/_possiblaw_eval_coverage.py --self-test && python3 bin/_possiblaw_vendor_skill.py --self-test` - Self-test the Python helpers.
 `pnpm -C paperclip install` - Install the paperclip submodule's dependencies (the only pnpm usage left).
 `pnpm -C deadline-engine test` - Run the deadline-engine node:test suite (35 tests: FRCP Rule 6 forward/backward, mail +3, federal holidays, business-day roll, invalid-days guard, multi-TZ UTC guard).
 `pnpm -C learning-loop test` - Run the learning-loop node:test suite (45 tests: sanitizer, ledger, memory, recurrence, remember-parser, store, CLI, manifest, diff, proposals).
@@ -104,8 +104,8 @@ Run the launcher dry-run + helper self-tests before handoff. Expected dry-run pl
 
 ## Code Map
 - Entry point: `bin/possiblaw` (bash launcher).
-- Package root: `companies/legal-operations/` — 178 agents under `agents/`, 176 skills under `skills/`, 3 projects under `projects/`, eval convention under `evals/`, `variants.yaml`, `.paperclip.yaml`.
-- Org chart: chief-of-staff (orchestrator), chief-counsel, 34 leads (28 legal practices: commercial, employment, ip, privacy, litigation, corporate, regulatory, research, tax, real-estate, ma, banking-finance, securities, restructuring, immigration, healthcare, antitrust, trade-compliance, insurance, construction, govcon, environmental, estates, family-law, investigations, ai-governance, advertising, benefits; 6 business functions: bd, ops, finance, marketing, admin, legal-ops), plus 141 specialists (incl. meta-reviewers risk-spotter/debate-judge/reconciler, capability-builder — operator-review gated, and skill-improvement-scribe). Each lead's AGENTS.md routing table is the authoritative specialist list; the full catalog is `docs/agent-catalog.md`.
+- Package root: `companies/legal-operations/` — 179 agents under `agents/`, 178 skills under `skills/`, 3 projects under `projects/`, eval convention under `evals/`, `variants.yaml`, `.paperclip.yaml`.
+- Org chart: chief-of-staff (orchestrator), chief-counsel, 34 leads (28 legal practices: commercial, employment, ip, privacy, litigation, corporate, regulatory, research, tax, real-estate, ma, banking-finance, securities, restructuring, immigration, healthcare, antitrust, trade-compliance, insurance, construction, govcon, environmental, estates, family-law, investigations, ai-governance, advertising, benefits; 6 business functions: bd, ops, finance, marketing, admin, legal-ops), plus 143 specialists (incl. meta-reviewers risk-spotter/debate-judge/reconciler, capability-builder — operator-review gated, and skill-improvement-scribe). Each lead's AGENTS.md routing table is the authoritative specialist list; the full catalog is `docs/agent-catalog.md`.
 - Historical source material: `layer/` (agents, skills, workflows, connector YAML, eval datasets) — convert into the package, don't extend.
 - Docs: `docs/operator-walkthrough.md` (canonical getting-started), `docs/paperclip-package.md`, `docs/known-limitations.md`, `docs/ARCHITECTURE.md` (decision log).
 - Plan + handoff: `/Users/salvadorcarranza/.claude/plans/eventual-munching-fairy.md` (plan-of-record, local-only), `.agent/PLAN.md` (active work queue), `.agent/HANDOFF.md`.

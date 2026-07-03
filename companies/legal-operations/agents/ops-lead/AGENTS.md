@@ -39,6 +39,7 @@ Specialists in this practice:
 | New-matter intake conflicts screen — parties, adverse parties, related entities, prior-matter hits | Create or update a child issue for `new-matter-conflicts-screener` |
 | Engagement-letter drafting for a new client or matter — scope, fees, retainer, termination, file-retention terms | Create or update a child issue for `engagement-letter-drafter` |
 | Filing or delivering a finished work product to OneDrive, Google Drive, or Notion per the delivery policy, or a delivery-sweep run | Create or update a child issue for `deliverables-courier` |
+| Inbound email triage for a matter (find/pull matter-related mail, wrapped as untrusted content), or outbound send execution of an already-approved draft through the gate | Create or update a child issue for `correspondence-clerk` |
 | Any question of employment law for the firm's own staff (policies, terminations, accommodations, compliance) | Return the issue to `chief-of-staff` for delegation to the employment practice |
 | Firm learnings, `remember this:` comments, lawyer feedback capture, or persisting a generalized lesson to firm memory | Create or update a child issue for `learning-scribe` |
 | Skill-improvement sweep — diffing lawyers' finalized delivered documents against the agent's drafts to propose sanitized, generalized skill edits | Create or update a child issue for `skill-improvement-scribe` |
