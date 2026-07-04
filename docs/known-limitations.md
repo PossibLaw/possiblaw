@@ -420,6 +420,15 @@ authenticated` still writes the persistent `<data-dir>/better-auth.secret`
 file — the secret is generated before the server boots, upstream of the
 dry-run exit.
 
+This secret-inheritance issue is one instance of a broader trust floor:
+on a single-UID `local_trusted` (or single-UID hosted) deployment, an agent
+that can run arbitrary shell reads anything the operator's user can — the
+gate proxy's env, `~/.codex` auth state, and the whole firm's matters on
+disk. That floor, why the gate proxy still closes the *credential-in-env*
+path, and what hosting / user-separation would and would not fix are worked
+out in full in
+`docs/designs/gate-proxy-egress-and-conflicts-threat-model.md`.
+
 ## Hybrid variant
 
 Not shipped. Paperclip's `assigneeAdapterOverrides` only merges config
