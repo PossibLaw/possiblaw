@@ -2033,6 +2033,15 @@ GATE_PROXY_PID=""
 GATE_PID_FILES=()
 GATE_PID_PORTS=()
 
+# Server-lifecycle state. Declared before the signal trap installs so a signal
+# landing early never dereferences them under `set -u`, and so kill_paperclip_tree
+# can tell a server WE started (safe to tear down) from one we merely REATTACHED
+# to (someone else's — must be left running).
+WE_STARTED_SERVER="false"
+REATTACHED="false"
+SKIP_IMPORT="false"
+PAPERCLIP_PID=""
+
 kill_subshell_tree() {
     # Kill the subshell wrapper, all its descendants, and any process holding the given port.
     local subshell="$1"
@@ -2073,7 +2082,15 @@ kill_subshell_tree() {
     fi
 }
 
-kill_paperclip_tree() { kill_subshell_tree "$1" "$PORT"; }
+kill_paperclip_tree() {
+    # Never tear down a server we only reattached to (kill_subshell_tree's
+    # port-sweep fallback would otherwise kill the operator's live listener on
+    # $PORT even when $1 is empty). Only sweep servers this run actually spawned.
+    if [ "${WE_STARTED_SERVER:-false}" != "true" ]; then
+        return 0
+    fi
+    kill_subshell_tree "$1" "$PORT"
+}
 
 kill_gate_proxy_tree() {
     # Sweeps every gate proxy started via start_gate_proxy_for (today: just the
@@ -2207,6 +2224,27 @@ fi
 # We launch it in the background and treat the subshell as our server handle.
 # ---------------------------------------------------------------------------
 
+API_BASE="http://127.0.0.1:$PORT"
+HEALTH_URL="$API_BASE/api/health"
+
+# Reattach instead of spawning a duplicate. If a healthy paperclip already
+# listens on $PORT, `paperclipai onboard` binds the NEXT free port, and the
+# health poll below hits the pre-existing server and returns 200 — so every
+# re-run silently leaks an orphaned duplicate (this is what wedged ~20 onboard
+# trees against the live :3100 server; see docs/known-limitations.md). Detect a
+# healthy server and reuse it. --reset can't safely wipe the data dir out from
+# under a running server, so refuse that combination.
+if [ "$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 3 "$HEALTH_URL" 2>/dev/null || true)" = "200" ]; then
+    if [ "$RESET" = "true" ]; then
+        err "a paperclip server is already running on :$PORT; --reset would wipe its data dir out from under it."
+        err "stop it first:  kill \$(cat \"$LAUNCHER_PID_FILE\")   — or launch on a disposable --port/--data-dir."
+        exit 2
+    fi
+    REATTACHED="true"
+    milestone "reattaching to the paperclip already healthy on :$PORT (no new server spawned)"
+fi
+
+if [ "$REATTACHED" != "true" ]; then
 milestone "running: paperclipai onboard --yes (background; runs the server inline)"
 log "(log: $LAUNCHER_LOG)"
 # Egress-credential scrub: adapter-spawned agents inherit the paperclip
@@ -2302,6 +2340,9 @@ if [ "$AUTH_MODE" = "authenticated" ]; then
     warn "a hostile or prompt-injected agent could read it and forge sessions; treat agent code/skills as trusted in authenticated mode until upstream supports env allowlisting (see docs/known-limitations.md)"
 fi
 
+    WE_STARTED_SERVER="true"
+fi  # end spawn-only block (skipped entirely when reattaching to a live server)
+
 # Replace the subshell PID in $LAUNCHER_PID_FILE with the actual server PID
 # (the process listening on $PORT) so `kill $(cat ...pid)` does the right thing.
 SERVER_PID="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
@@ -2325,7 +2366,41 @@ print(len(items) if isinstance(items, list) else 0)
 " 2>/dev/null \
         || echo 0
 )"
-if [ "$EXISTING_COUNT" -gt 0 ] && [ "$RESET" != "true" ]; then
+# Reattach-without-reimport: if we reattached to a live server that ALREADY
+# has the package imported, reuse the existing company instead of importing a
+# duplicate. (Dry-run still POSTs /import/preview — it is read-only — so it is
+# excluded here.) The gate proxy, wall re-wiring, mission PATCH, banner, and
+# browser-open downstream all run normally against the resolved company.
+if [ "$REATTACHED" = "true" ] && [ "$EXISTING_COUNT" -gt 0 ] && [ "$DRY_RUN" != "true" ] && [ "$RESET" != "true" ]; then
+    SKIP_IMPORT="true"
+    # Resolve which company to reopen: prefer an exact --org-name match, else the
+    # sole company, else leave empty (banner falls back to the server root URL).
+    # Guarded with `|| echo ''` like the EXISTING_COUNT block above: under
+    # `set -euo pipefail` an unguarded curl|python substitution aborts the whole
+    # launcher when curl trips a write error (exit 23) as python drains the pipe.
+    COMPANY_ID="$(
+        curl --silent --max-time 5 "$API_BASE/api/companies" 2>/dev/null \
+        | PCW_ORG="$ORG_NAME" python3 -c "
+import json, os, sys
+want = (os.environ.get('PCW_ORG') or '').strip().lower()
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+items = d if isinstance(d, list) else (d.get('companies') or d.get('data') or d.get('items') or [])
+items = [it for it in items if isinstance(it, dict)]
+match = next((it for it in items if (it.get('name') or '').strip().lower() == want and want), None)
+if match is None and len(items) == 1: match = items[0]
+print((match.get('id') or match.get('companyId') or '') if match is not None else '')
+" 2>/dev/null \
+            || echo ''
+    )"
+    milestone "reattach-without-reimport: $EXISTING_COUNT company(ies) already present on :$PORT — skipping import (use --reset for a fresh import)"
+    [ -n "$COMPANY_ID" ] && log "reattach: reusing company id $COMPANY_ID" \
+        || warn "reattach: could not single out a company (multiple present, no --org-name match); opening the server root"
+    if [ "$FIRM_FACADE" = "true" ]; then
+        warn "reattach skips import; the firm-facade MCP config was NOT re-emitted (re-run with --reset, or stop the server first, to regenerate it)"
+    fi
+fi
+if [ "$EXISTING_COUNT" -gt 0 ] && [ "$RESET" != "true" ] && [ "$SKIP_IMPORT" != "true" ]; then
     warn "Data dir already contains $EXISTING_COUNT company(ies). This run will add another."
     if [ "$ASSUME_YES" != "true" ] && [ "$NON_INTERACTIVE" != "true" ]; then
         if ! confirm "Continue importing alongside the existing company?"; then
@@ -2337,36 +2412,36 @@ if [ "$EXISTING_COUNT" -gt 0 ] && [ "$RESET" != "true" ]; then
     fi
 fi
 
-# ---------------------------------------------------------------------------
-# Build the import POST body
-# ---------------------------------------------------------------------------
-
-if ! build_import_body "$ORG_NAME"; then
-    kill_paperclip_tree "$PAPERCLIP_PID"
-    rm -f "$LAUNCHER_PID_FILE"
-    exit 1
-fi
-
-# ---------------------------------------------------------------------------
-# POST /api/companies/import  (or /import/preview when --dry-run)
-# ---------------------------------------------------------------------------
-
-if [ "$DRY_RUN" = "true" ]; then
-    IMPORT_URL="$API_BASE/api/companies/import/preview"
-    milestone "POST $IMPORT_URL (dry-run)"
-else
-    IMPORT_URL="$API_BASE/api/companies/import"
-    milestone "POST $IMPORT_URL"
-fi
-
 IMPORT_RESPONSE_FILE="$DATA_DIR/possiblaw-import.response"
 IMPORT_ERR_FILE="$DATA_DIR/possiblaw-import.err"
 IMPORT_STATUS_FILE="$DATA_DIR/possiblaw-import.status"
 
-if ! run_import "$IMPORT_URL" "$BODY_FILE" "$IMPORT_RESPONSE_FILE" "$IMPORT_STATUS_FILE" "$IMPORT_ERR_FILE"; then
-    kill_paperclip_tree "$PAPERCLIP_PID"
-    rm -f "$LAUNCHER_PID_FILE"
-    exit 1
+if [ "$SKIP_IMPORT" != "true" ]; then
+    # -----------------------------------------------------------------------
+    # Build the import POST body
+    # -----------------------------------------------------------------------
+    if ! build_import_body "$ORG_NAME"; then
+        kill_paperclip_tree "$PAPERCLIP_PID"
+        rm -f "$LAUNCHER_PID_FILE"
+        exit 1
+    fi
+
+    # -----------------------------------------------------------------------
+    # POST /api/companies/import  (or /import/preview when --dry-run)
+    # -----------------------------------------------------------------------
+    if [ "$DRY_RUN" = "true" ]; then
+        IMPORT_URL="$API_BASE/api/companies/import/preview"
+        milestone "POST $IMPORT_URL (dry-run)"
+    else
+        IMPORT_URL="$API_BASE/api/companies/import"
+        milestone "POST $IMPORT_URL"
+    fi
+
+    if ! run_import "$IMPORT_URL" "$BODY_FILE" "$IMPORT_RESPONSE_FILE" "$IMPORT_STATUS_FILE" "$IMPORT_ERR_FILE"; then
+        kill_paperclip_tree "$PAPERCLIP_PID"
+        rm -f "$LAUNCHER_PID_FILE"
+        exit 1
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -2401,18 +2476,26 @@ PY
     exit 0
 fi
 
-COMPANY_ID="$(json_get_str company.id < "$IMPORT_RESPONSE_FILE")"
-AGENT_COUNT="$(python3 -c "import json; d=json.load(open('$IMPORT_RESPONSE_FILE')); print(len(d.get('agents') or []))")"
-WARNING_COUNT="$(python3 -c "import json; d=json.load(open('$IMPORT_RESPONSE_FILE')); print(len(d.get('warnings') or []))")"
-log "company id: $COMPANY_ID"
-log "agents imported: $AGENT_COUNT"
-log "warnings: $WARNING_COUNT"
-if [ "$WARNING_COUNT" -gt 0 ]; then
-    python3 -c "
+if [ "$SKIP_IMPORT" = "true" ]; then
+    # Reattach: COMPANY_ID was resolved from the running server above; there is
+    # no fresh import response to count agents/warnings from.
+    AGENT_COUNT="(existing)"
+    WARNING_COUNT=0
+    log "company id: $COMPANY_ID (reused; import skipped)"
+else
+    COMPANY_ID="$(json_get_str company.id < "$IMPORT_RESPONSE_FILE")"
+    AGENT_COUNT="$(python3 -c "import json; d=json.load(open('$IMPORT_RESPONSE_FILE')); print(len(d.get('agents') or []))")"
+    WARNING_COUNT="$(python3 -c "import json; d=json.load(open('$IMPORT_RESPONSE_FILE')); print(len(d.get('warnings') or []))")"
+    log "company id: $COMPANY_ID"
+    log "agents imported: $AGENT_COUNT"
+    log "warnings: $WARNING_COUNT"
+    if [ "$WARNING_COUNT" -gt 0 ]; then
+        python3 -c "
 import json
 d=json.load(open('$IMPORT_RESPONSE_FILE'))
 for w in (d.get('warnings') or []): print('  warn:', w)
 "
+    fi
 fi
 
 # Pull the company record so we get shortCode + final name.
@@ -2464,7 +2547,7 @@ if [ -n "$COMPANY_ID" ] && [ -n "$MISSION" ]; then
     fi
 fi
 
-if [ "$PROVISION_ROUTINES" = "true" ] && [ "$DRY_RUN" != "true" ] && [ -n "$COMPANY_ID" ]; then
+if [ "$PROVISION_ROUTINES" = "true" ] && [ "$DRY_RUN" != "true" ] && [ "$SKIP_IMPORT" != "true" ] && [ -n "$COMPANY_ID" ]; then
     provision_intake_routine "$COMPANY_ID" "$IMPORT_RESPONSE_FILE" || true
 fi
 
@@ -2555,7 +2638,7 @@ fi
 SECRET_BIND_FAILED="false"
 SECRET_IDS_FILE="$(mktemp -t possiblaw-secret-ids.XXXXXX.json)"
 printf '{}' > "$SECRET_IDS_FILE"
-if [ -n "$SECRET_ENV_TSV" ] && [ -n "$COMPANY_ID" ]; then
+if [ "$SKIP_IMPORT" != "true" ] && [ -n "$SECRET_ENV_TSV" ] && [ -n "$COMPANY_ID" ]; then
     milestone "creating company secret(s) for the API key(s)"
     while IFS=$'\t' read -r env_key env_name; do
         [ -n "$env_key" ] || continue
@@ -2624,7 +2707,7 @@ json.dump(d, open(path, "w"))
 PY
 fi
 
-if [ -n "$COMPANY_ID" ] && { [ -n "$SECRET_ENV_TSV" ] || [ "$NO_GATE_PROXY" != "true" ] || [ -n "$BUSINESS_DIR" ]; }; then
+if [ "$SKIP_IMPORT" != "true" ] && [ -n "$COMPANY_ID" ] && { [ -n "$SECRET_ENV_TSV" ] || [ "$NO_GATE_PROXY" != "true" ] || [ -n "$BUSINESS_DIR" ]; }; then
     patch_agent_envs "$COMPANY_ID" "$IMPORT_RESPONSE_FILE" "$OVERRIDES_FILE" "$SECRET_IDS_FILE" "$PLAIN_ENV_FILE"
     if [ "$SECRET_BIND_FAILED" = "true" ]; then
         warn "env binding incomplete — affected agents keep their import-time adapter config."
@@ -2632,7 +2715,7 @@ if [ -n "$COMPANY_ID" ] && { [ -n "$SECRET_ENV_TSV" ] || [ "$NO_GATE_PROXY" != "
 fi
 rm -f "$SECRET_IDS_FILE" "$PLAIN_ENV_FILE"
 
-if [ "$FIRM_FACADE" = "true" ] && [ -n "$COMPANY_ID" ]; then
+if [ "$SKIP_IMPORT" != "true" ] && [ "$FIRM_FACADE" = "true" ] && [ -n "$COMPANY_ID" ]; then
     emit_facade_config "$COMPANY_ID" "$IMPORT_RESPONSE_FILE" "$GATE_PROXY_URL" "$DATA_DIR/firm-facade-mcp.json" "$COMPANY_SHORT_CODE"
 fi
 
