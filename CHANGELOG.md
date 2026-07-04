@@ -7,6 +7,36 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [0.39.0] — 2026-07-03 — Launcher reattaches to a live server instead of spawning duplicates
+
+Fixes a resource leak in `bin/possiblaw`: every run (and every `--dry-run`)
+unconditionally spawned a fresh `paperclipai onboard` server. When one was
+already healthy on `$PORT`, paperclip's onboard bound the *next* free port while
+the launcher's health poll hit the pre-existing server and returned 200 — so
+each re-run silently orphaned a duplicate. Repeated dry-runs/tests against the
+operator's live `:3100` accumulated ~20 wedged onboard trees (~20 GB RAM, all
+pointed at one embedded-Postgres data dir → "sorry, too many clients already").
+
+- **Reattach-without-reimport.** Before spawning, the launcher probes
+  `http://127.0.0.1:$PORT/api/health`. On a 200 it reattaches to the existing
+  server (no new process); if that server already has the package imported it
+  skips the import instead of adding a duplicate company. The gate proxy, wall
+  re-wiring, mission PATCH, banner, and browser-open all run against the resolved
+  company (exact `--org-name` match, else the sole company, else the dashboard
+  falls back to the server root). `--dry-run` still POSTs `/import/preview`
+  (read-only) against the reattached server.
+- **`--reset` guard.** With a server already live on `$PORT`, `--reset` now
+  refuses (exit `2`) rather than wiping the data dir out from under a running
+  Postgres; stop the server first (`kill $(cat <data-dir>/possiblaw.pid)`).
+- **Never tears down a borrowed server.** `kill_paperclip_tree` (the Ctrl-C trap
+  and every import error path) is a no-op unless this run actually spawned the
+  server, so `kill_subshell_tree`'s port-sweep fallback can no longer kill the
+  operator's live listener on `$PORT` during a reattach.
+- Verified end-to-end: a live `:3100` `--dry-run` reattaches read-only with no
+  new spawn; a disposable two-run test confirms run 2 spawns no duplicate server
+  and imports no duplicate company (exit 0), and `--reset`-against-live returns
+  exit 2. `bash -n` + all five Python helper self-tests green.
+
 ## [0.38.0] — 2026-07-03 — Matter isolation A1 + Firm Overview: opt-in ethical walls, authenticated mode, one global board
 
 The matter-isolation workstream from the atomic-work review (S1 finding G-1:

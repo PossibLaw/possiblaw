@@ -39,6 +39,26 @@ The CLI default HTTP timeout is 2 minutes. ~6 DB writes × ~1.5s per write ×
 - For >200 agents on a slow disk, expect to bump `IMPORT_MAX_TIME_SECS` at
   the top of `bin/possiblaw`.
 
+## Launcher server lifecycle: reattach, and dry-run leaves a server running
+
+Since 0.39.0 the launcher reattaches to a paperclip already healthy on `$PORT`
+instead of spawning a duplicate. Previously every run (and every `--dry-run`)
+started a fresh `onboard` server; when one was already up, paperclip's onboard
+bound the *next* free port while the health poll hit the pre-existing server, so
+each re-run silently orphaned a duplicate (~20 accumulated against the live
+`:3100` — ~20 GB RAM, all sharing one embedded-Postgres data dir → "sorry, too
+many clients already"). Two residual sharp edges remain:
+
+- **A `--dry-run` with no server yet on `$PORT` still spawns one and leaves it
+  running** by design ("dry-run complete; server still running"), so the operator
+  can browse or re-run without `--dry-run`. Subsequent runs on the *same* port
+  reattach to it, but a dry-run on a *fresh* `--port`/`--data-dir` each time
+  leaves one server per port. Stop it with `kill $(cat <data-dir>/possiblaw.pid)`,
+  or reuse the same `--port` so the next run reattaches.
+- **`--reset` against a live server on `$PORT` is refused (exit 2)** — the data
+  dir cannot be safely wiped out from under a running Postgres. Stop the server
+  first (`kill $(cat <data-dir>/possiblaw.pid)`), then re-run with `--reset`.
+
 ## UI
 
 ### Sidebar agent list is not virtualized
