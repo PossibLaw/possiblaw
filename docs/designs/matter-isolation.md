@@ -123,7 +123,10 @@ wall is ethically required.
    planned, the wall-crossing service must be designed WITH this decision.
 3. **Deployment mode?** On single-machine `local_trusted`, walls bind agents
    only. If the wall must stop humans/software on the box, the fix is
-   `authenticated` + hosted — which shifts the calculus toward B.
+   `authenticated` + hosted — which shifts the calculus toward B. The full
+   cost/benefit of that move (what hosting buys, the same-UID agent tier it
+   does *not* close, and the conflicts-vs-exfiltration taxonomy) is worked
+   out in `docs/designs/gate-proxy-egress-and-conflicts-threat-model.md`.
 
 ## Recommendation (research verdict)
 
