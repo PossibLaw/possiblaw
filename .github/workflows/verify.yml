@@ -28,7 +28,7 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Install pnpm
-        run: corepack enable && corepack prepare pnpm@9.15.4 --activate
+        run: npm install --global pnpm@9.15.4 && pnpm --version
 
       - name: Install credential-free validation dependencies
         shell: bash
