@@ -38,6 +38,7 @@ describe("FacadeReceiptWriter", () => {
     const { fakeFetch, calls } = makeCapturingFetch();
     const writer = new FacadeReceiptWriter({
       gateProxyUrl: "http://gate:9000",
+      apiKey: "agent-secret",
       fetchImpl: fakeFetch,
     });
 
@@ -58,6 +59,7 @@ describe("FacadeReceiptWriter", () => {
       String((init.headers as Record<string, string>)["content-type"] ?? "").startsWith("application/json"),
       "content-type must be application/json",
     );
+    assert.equal((init.headers as Record<string, string>)["authorization"], "Bearer agent-secret");
 
     const sentBody = JSON.parse(init.body as string) as Record<string, unknown>;
     assert.equal(sentBody["tool"], "create_matter");

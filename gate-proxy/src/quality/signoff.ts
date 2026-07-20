@@ -509,6 +509,7 @@ export function assembleSignoffBundle(
       (e) =>
         e.body.kind !== "firm_facade" &&
         e.body.kind !== "deadline" &&
+        e.body.outcome !== "reserved" &&
         e.body.approvalId !== undefined &&
         e.body.approvalId !== "",
     )

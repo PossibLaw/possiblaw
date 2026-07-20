@@ -180,7 +180,7 @@ export function buildDepsFromEnv(
   const client = new FirmFacadeClient({ baseUrl, companyId, apiKey });
 
   // Construct the receipt writer that POSTs to the gate proxy
-  const receipts = new FacadeReceiptWriter({ gateProxyUrl });
+  const receipts = new FacadeReceiptWriter({ gateProxyUrl, apiKey });
 
   // Load policy; fail-closed when GATE_POLICY_PATH is absent or unreadable
   const policy = loadFirmFacadePolicy(env["GATE_POLICY_PATH"]);

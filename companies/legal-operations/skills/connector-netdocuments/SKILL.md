@@ -87,6 +87,7 @@ Upload operations go through the proxy — never the NetDocuments upload API dir
 
 ```sh
 curl -sS -X POST \
+  -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
   -H "Content-Type: application/json" \
   --data "$(jq -n \
     --arg op "create_document" \

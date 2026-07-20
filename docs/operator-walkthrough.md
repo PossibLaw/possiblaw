@@ -15,8 +15,8 @@ The first hands-on step below exercises exactly that loop: a simulated court
 filing pauses at the human gate, you approve it in the dashboard, and the
 receipt trail shows the whole exchange.
 
-The 179 agents, 178 skills, and 34 teams are the interchangeable parts
-inside that pipeline. The rest of this walkthrough — variants, demo
+The 179 working agents, one wake-disabled facade service principal, 178 skills,
+and 34 teams are the interchangeable parts inside that pipeline. The rest of this walkthrough — variants, demo
 profiles, team subsets, delivery, the NDA matter — is how you choose which
 parts to run and watch them work.
 
@@ -295,7 +295,8 @@ the demo data is fictional.
 ### Team subset import (`--teams`)
 
 The catalog is the menu — import what your firm or in-house team practices. By
-default the launcher imports all 179 agents; `--teams` imports only the named
+default the launcher imports all 180 identities (179 working agents plus the
+facade service principal); `--teams` imports only the named
 teams:
 
 ```bash
@@ -346,16 +347,15 @@ export POSSIBLAW_DELIVERY_POLICY="$HOME/PossibLaw/delivery-policy.yaml"
 destinations:
   firm-onedrive:
     kind: onedrive
-    driveId: "b!xxxxxxxx"
-    folderId: "01ABCDEF"
+    destinationId: firm-review-onedrive
     trustedFor: [confidential, privileged]   # YOUR tenant -> your call
   kb-notion:
     kind: notion
-    databaseId: "a1b2c3d4-..."
+    # No destinationId: authenticated production emits a HUMAN ACTION handoff.
 
 rules:
   - match: { workProductType: client-alert }
-    mode: auto                  # always file these
+    mode: on-request            # Notion is a reviewed manual placement
     destination: kb-notion
   - match: { projectSlug: commercial-reviews }
     mode: on-request            # file only when you ask
@@ -365,8 +365,8 @@ rules:
 Some work-product types can auto-file (`mode: auto` — picked up by the
 declared `delivery-sweep` routine; wire its schedule in the paperclip UI
 after import), others only when you ask ("file this to OneDrive"). No
-policy file means local-only plus on-request delivery — nothing auto-files
-out of the box.
+policy file means local-only — nothing auto-files and issue text cannot
+introduce a new provider target.
 
 Privacy gate: confidential/privileged work products only go to destinations
 you declare `trustedFor` that tier. Many legal teams connect their own
@@ -379,8 +379,13 @@ Per-vendor tokens (set the ones you use):
 | Env | Destination | Where to get it |
 |---|---|---|
 | `MS_GRAPH_TOKEN` | OneDrive for Business / SharePoint | Your Entra ID app or Graph Explorer; scopes per `skills/connector-onedrive/SKILL.md` |
+| `POSSIBLAW_ONEDRIVE_REVIEW_DRIVE_ID` + `POSSIBLAW_ONEDRIVE_REVIEW_PARENT_ITEM_ID` | Exact OneDrive trusted-review root behind `firm-review-onedrive` | Copy the drive and parent-item IDs as the operator; they compile into the gate's private runtime map and are never sent by an agent |
 | `GDRIVE_ACCESS_TOKEN` | Google Drive | OAuth flow per `skills/connector-google-drive/SKILL.md` |
-| `NOTION_API_KEY` | Notion | notion.so/my-integrations; share the target page/database with the integration |
+| `POSSIBLAW_GDRIVE_REVIEW_FOLDER_ID` | Exact Google Drive trusted-review root behind `firm-review-google` | Copy the folder ID as the operator; it compiles into the gate's private runtime map and is never sent by an agent |
+
+Authenticated production has no trusted Notion-write alias. A Notion policy
+entry produces a human review/placement handoff; it never carries a page or
+database ID into `upload_document`.
 
 ### The Gate Proxy (egress gates + receipts)
 
@@ -400,14 +405,16 @@ and passes them to the proxy only:
 | Env | Goes to | Purpose |
 |---|---|---|
 | `MS_GRAPH_TOKEN` | proxy only | OneDrive / SharePoint delivery (write credential) |
+| `POSSIBLAW_ONEDRIVE_REVIEW_DRIVE_ID` + `POSSIBLAW_ONEDRIVE_REVIEW_PARENT_ITEM_ID` | launcher → private gate authorization | Exact OneDrive trusted-review tuple; not an agent input |
 | `GDRIVE_ACCESS_TOKEN` | proxy only | Google Drive delivery (write credential) |
-| `NOTION_API_KEY` | proxy only | Notion page/database writes (write credential) |
+| `POSSIBLAW_GDRIVE_REVIEW_FOLDER_ID` | launcher → private gate authorization | Exact Google Drive trusted-review folder; not an agent input |
 | `GMAIL_TOKEN` | proxy only | Gmail send |
 | `EXTERNAL_MODEL_API_KEY` | proxy only | External model endpoint auth |
 | `LOCAL_MODEL_URL` / `EXTERNAL_MODEL_URL` | proxy (endpoints, not credentials) | Anonymizer / external-model routing |
 
-An agent that tries to call a vendor directly using the above vars simply
-has no token — the proxy is the only credentialed egress path out.
+An ordinary launcher-run agent does not receive the write tokens or trusted
+root IDs. This environment scrub is defense-in-depth, not host isolation: use
+the hardened worker topology for an attacker-capable agent boundary.
 
 **Citation gate (Phase 2).** On the boundaries in `gate-policy.yaml`
 `citationGate.boundaries` (default: court filing + third-party egress), the
@@ -439,17 +446,17 @@ Operational notes:
 - `--gate-port <n>` picks the proxy port (default 3801); `--no-gate-proxy`
   skips the proxy entirely (demo-only — egress runs ungated and
   unreceipted).
-- Receipts land in
-  `~/.possiblaw/gate-receipts/<data-dir-name>/receipts.jsonl`; verify the
-  chain any time with `curl http://127.0.0.1:3801/receipts/verify`.
-- A proxy failure never blocks the dashboard: the launcher warns and
-  continues, and gate-dependent skills fail visibly until it comes up.
-  Log: `<data-dir>/gate-proxy.log`; stop it with
-  `kill $(cat <data-dir>/gate-proxy.pid)`.
-- `PAPERCLIP_GATE_API_KEY` is not set by the launcher: local_trusted
-  instances accept unauthenticated local board calls. Any
-  non-local-trusted deployment must export it (minted via
-  `paperclipai auth login`) before launching.
+- Receipts land in a data-directory/company-bound path under
+  `~/.possiblaw/gate-receipts/`. In production, receipt read/bundle/anchor
+  routes remain inaccessible until an explicit audit principal is approved;
+  do not grant them to a team lead by inference.
+- In the default demo profile, a proxy failure warns and gate-dependent skills
+  fail visibly. In `--production`, an unavailable, unattested, or misbound
+  proxy aborts startup.
+- Production mints/reuses a dedicated company-scoped gate-agent key. If an
+  operator supplies one, both `PAPERCLIP_GATE_API_KEY` and its matching
+  `PAPERCLIP_GATE_AGENT_ID` are required; the board administration key is a
+  separate `PAPERCLIP_API_KEY`.
 - Dry-runs never start the proxy.
 
 ### Preflight model probe (codex / codex-api / claude / claude-api)
@@ -938,7 +945,7 @@ prefix collision: CON already used by company "Conflicted Client, LLC"
 A successful run imports the full package as a brand-new paperclip company,
 starts that company its **own** gate proxy (never the firm's), writes a
 per-wall facade config when `--firm-facade` is active
-(`firm-facade-mcp-CON.json`), provisions the intake routine unless
+(`firm-facade-mcp-<company-id>.json`), provisions the intake routine unless
 `--no-routines`, and records the wall in `<data-dir>/walls.json`:
 
 ```
@@ -947,12 +954,15 @@ screened team setup: invite ONLY this client's lawyers to the new company
 (dashboard → Company Settings → Members)
 ```
 
-Re-running `--add-wall` for the same client name is how you repair a
-partially-wired wall (a dead gate proxy, a missing facade config) — it is
-not an error to avoid.
+Re-running `--add-wall` for the same client name stops at the prefix
+collision. A dead registered wall gate returns on the next successful
+launcher run; repair an unrecorded partial wall from the registry procedure
+in the runbook.
 
-Against an authenticated instance (`--auth-mode authenticated`), pass
-`--api-key <pcp_board_…>` so the command can call the running firm's API.
+Against an authenticated instance (`--auth-mode authenticated`), set
+`PAPERCLIP_API_KEY` or pass `--api-key-file <0600-path>` so the command can
+call the running firm's API. Literal `--api-key` values are rejected to keep
+bearer tokens out of process arguments.
 Relaunching against the same `--data-dir` brings every registered wall's
 gate proxy back up alongside the firm's own, every time.
 

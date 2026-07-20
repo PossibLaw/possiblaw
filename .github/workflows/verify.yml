@@ -1,0 +1,58 @@
+name: PossibLaw validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  credential-free:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out pinned submodules
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          submodules: recursive
+
+      - name: Use repository-pinned Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install pnpm
+        run: npm install --global pnpm@9.15.4 && pnpm --version
+
+      - name: Install credential-free validation dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check \
+            -r deployments/firm-single-tenant/requirements-test.txt
+          packages=(
+            paperclip
+            deadline-engine
+            eval-harness
+            firm-overview
+            gate-proxy
+            learning-loop
+            mcp-servers/firm-facade
+            mcp-servers/legal-data
+            orchestration-eval
+          )
+          for package in "${packages[@]}"; do
+            pnpm -C "$package" install --frozen-lockfile
+          done
+
+      - name: Run repository validation
+        run: ./bin/verify
+
+      - name: Verify the validation entrypoint contract
+        run: bash tests/verify.test.sh

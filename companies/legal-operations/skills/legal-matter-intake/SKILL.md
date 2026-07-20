@@ -29,7 +29,7 @@ Use this skill before drafting or routing a new legal matter. Capture what is kn
     Once captured, register it as the matter's floor with the gate proxy so a later
     mislabeled request cannot downgrade it (raise-only; at egress the gate applies
     `max(registered floor, per-request claim)`):
-    `curl -sS -X POST "$GATE_PROXY_URL/matters/classification" -H 'Content-Type: application/json' -d '{"issueId":"<matter issue id>","tier":"<standard|confidential|privileged>"}'`
+    `curl -sS -X POST "$GATE_PROXY_URL/matters/classification" -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" -H 'Content-Type: application/json' -d '{"issueId":"<matter issue id>","tier":"<standard|confidential|privileged>"}'`
     Map client-confidential → `confidential`, privileged/attorney-client material →
     `privileged`, public/internal → `standard`. Registration is one-time per matter
     and cannot be lowered afterward — when in doubt, register the higher tier.

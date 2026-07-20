@@ -85,6 +85,7 @@ Invoice creation (money-movement) goes through the proxy — never the QBO API d
 
 ```sh
 curl -sS -X POST \
+  -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
   -H "Content-Type: application/json" \
   --data "$(jq -n \
     --arg customerId "$CUSTOMER_ID" \

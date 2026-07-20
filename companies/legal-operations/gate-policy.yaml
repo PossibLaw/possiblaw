@@ -12,9 +12,14 @@
 version: 1
 
 boundaries:
-  # Data leaving the firm's environment to a third-party service (email, file
-  # shares, external uploads). SOFT by default — receipted but not blocked.
-  THIRD_PARTY_EGRESS: allow
+  # Data leaving the firm's environment to a third-party service (email,
+  # external shares, or an upload outside an exact configured firm review
+  # destination) requires human approval. Production trusted-firm uploads are
+  # the narrow exception: the authenticated courier supplies a destinationId
+  # alias, and the gate resolves it to a launcher-compiled Drive/OneDrive tuple
+  # before hashing or dispatch. Raw vendor folder/drive/page selectors are
+  # rejected in authenticated mode.
+  THIRD_PARTY_EGRESS: human
 
   # Confidential or privileged content sent to a cloud inference endpoint.
   # Anonymize strips known entities before the payload leaves the perimeter.
@@ -54,11 +59,9 @@ citationGate:
 # Tuning examples
 # ---------------------------------------------------------------------------
 
-# Recommended for opposing-counsel / court-adjacent correspondence:
-# promote THIRD_PARTY_EGRESS to hard so every outbound email requires approval.
-#
-# boundaries:
-#   THIRD_PARTY_EGRESS: human
+# To restore permissive demo behavior outside production, an operator may set
+# THIRD_PARTY_EGRESS to allow explicitly. Do not use that override for a firm
+# deployment: it makes email and untrusted external delivery pass-through.
 
 # Citation gate + authority provenance (anti-hallucination). Retrieved
 # authorities are registered with the gate (POST /quality/authority); the gate

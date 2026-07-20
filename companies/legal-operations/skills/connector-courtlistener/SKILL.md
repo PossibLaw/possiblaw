@@ -74,7 +74,13 @@ On every successful retrieval that yields a citation, the adapter **registers th
 
 Queries themselves can carry privileged facts — a search string like `"Acme Holdings v. Smith arbitration clause 2025"` may identify a matter, client, or strategy. Keep queries to neutral legal terms (e.g. `indemnification software license` rather than the client's name).
 
-For **confidential** or **privileged** matters the adapter applies **best-effort redaction**: `sanitizeArgs` strips legal-entity names, emails, SSNs, EINs, and phone numbers from the `query` before the request is sent. Set the tier via env `POSSIBLAW_MATTER_PRIVACY_TIER` (default when unset: `confidential` — fail-closed). Three important caveats apply:
+For **confidential** or **privileged** matters the adapter applies
+**best-effort defense-in-depth redaction** to query/search/citation strings.
+Detectors cover common legal-entity names, person-name captions, role-labeled
+person names, docket/matter numbers, emails, SSNs, EINs, and phone numbers
+before the request is sent. Set the tier via env
+`POSSIBLAW_MATTER_PRIVACY_TIER` (default when unset: `confidential` —
+fail-closed). Three important caveats apply:
 
 1. **Best-effort only, not enforcement.** Sanitization is regex-based and structurally incomplete — it cannot catch every client-identifying term (e.g. an informal matter nickname, a judge's name tied to a confidential proceeding, or a non-standard entity name). Write neutral queries as a practice discipline; the sanitizer is a safety net, not a guarantee.
 2. **Process-global, not per-matter.** The tier is a startup setting read once from the environment. A single running server cannot vary the tier across different matters — all queries in that process run at the same tier. If you need per-matter tier variation, run separate server processes with distinct env configs.

@@ -1,0 +1,6 @@
+# Copy this file and list only the files/directories needed by one worker.
+# The stager rejects symlinks, hard links, traversal, nested secrets, and
+# sensitive names such as .env, .git, .ssh, *.key, *.p12, and *.pem.
+AGENTS.md
+companies/legal-operations/skills/reconstitution-playbook
+docs/workflows/contracts.md

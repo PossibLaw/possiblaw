@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![PoC](https://img.shields.io/badge/status-proof--of--concept-orange.svg)](#whats-not-in-this-poc)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-24.18.0-brightgreen.svg)](https://nodejs.org)
 [![paperclip layer](https://img.shields.io/badge/paperclip-layer%2C%20not%20a%20fork-lightgrey.svg)](FOUNDATION.md)
 
 Agents do the legal and business work autonomously. The product is the path that work travels: egress writes cross hard-gated trust boundaries, every gate decision lands in a tamper-evident receipt chain, and humans decide at the boundaries that matter — not on every step. PossibLaw ships this as a *layer* on the paperclip control plane (wired as a pinned git submodule, never modified), not a fork. Run it as a law firm, or as an in-house legal team that handles first-pass work with its own agents and escalates to outside counsel only for the judgment it doesn't own.
@@ -16,7 +16,7 @@ Agents do the legal and business work autonomously. The product is the path that
 A chat window that drafts a whole contract in one shot gives you one big, opaque output to trust or distrust. PossibLaw is built the other way: **work is decomposed into the smallest reviewable units — one agent, one skill, one gate decision, one receipt — because small units are where control and quality come from.**
 
 - **More control.** You approve at the boundary that matters (a court filing, a signature, a payment), not on every keystroke and not on one monolithic "submit." Each atomic action is independently classified, gated, and logged — so you can allow the routine and stop the consequential.
-- **Better work.** A focused agent doing one bounded task (NDA redline, citation check, diligence summary) is easier to make correct, easier to eval, and easier to swap than a generalist doing everything. The 179 agents / 178 skills are atomic on purpose: composable parts, each with its own evals, each replaceable without touching the rest.
+- **Better work.** A focused agent doing one bounded task (NDA redline, citation check, diligence summary) is easier to make correct, easier to eval, and easier to swap than a generalist doing everything. The 180 agents / 178 skills are atomic on purpose: composable parts, each with its own evals, each replaceable without touching the rest. One of those agents is a non-working service principal used only by the firm facade.
 - **Provenance per unit.** Because the unit is small, its provenance is legible: this output, citing these authorities, approved by this human, recorded in this receipt. That is exactly the slice a regulator or insurer asks to see.
 
 The catalog is the supporting cast. The atomic pipeline — decompose, gate, receipt — is the product.
@@ -31,18 +31,18 @@ Pipeline spine: boundary classify → policy → anonymize → human gate → ci
 
 What a firm actually gets:
 
-- **Hard-gated egress (structural).** Every egress write — email send, document upload, e-signature, payment, court filing, external delete — routes through a loopback Gate Proxy (`gate-proxy/`, default `http://127.0.0.1:3801`). Egress credentials exist **only** in the proxy process; the launcher scrubs them from the agent runtime, so a misbehaving agent's direct vendor call fails for want of credentials. Policy is the firm's to tune, per trust boundary, in [`companies/legal-operations/gate-policy.yaml`](companies/legal-operations/gate-policy.yaml): `allow` is pass-through + receipt; `anonymize` / `human` / `block` are hard gates.
+- **Gate-enforced egress on the configured transport.** Every supported egress write — email send, document upload, e-signature, payment, court filing, external delete — routes through a Gate Proxy (`gate-proxy/`, loopback by default). The launcher removes egress credentials from Paperclip's server/adapter environment and gives them to the proxy process. Policy is the firm's to tune, per trust boundary, in [`companies/legal-operations/gate-policy.yaml`](companies/legal-operations/gate-policy.yaml): `allow` is pass-through + receipt; `anonymize` / `human` / `block` are hard gates. In `--production`, every protected request authenticates the caller's own Paperclip agent key, enforces the company, and authorizes the immutable agent ID against an exact default-deny capability map; only exact `GET /health` and `GET /ready` remain public. The shipped baseline grants email send to `correspondence-clerk`, trusted-root upload to `deliverables-courier`, citation/authority registration to `legal-citation-checker`, and deadline receipts to `deadline-calculator`. Drive/OneDrive roots are server-resolved aliases; callers cannot supply vendor folder/drive IDs. Ordinary third-party egress is human-gated, and unassigned capabilities stay denied. **Production status:** authorization is implemented and credential-free tested, but live multi-agent/provider validation and worker isolation remain release gates. Same-UID local execution can still read process/filesystem secrets or bypass the proxy; use the hardened reference topology and its sacrificial isolation eval before claiming multi-lawyer readiness.
 - **Human gates are paperclip-native.** Six boundaries are classified (`THIRD_PARTY_EGRESS`, `CONFIDENTIAL_TO_CLOUD`, `COURT_FILING`, `SIGNATURE`, `MONEY_MOVEMENT`, `IRREVERSIBLE_EXTERNAL_OP`); court filings, signatures, payments, and irreversible external ops default to `human`. The gate opens an approval, the agent stands down, a human decides in the dashboard, and the agent is woken on approve. Approvals are payload-hash-bound — an approval for payload X never authorizes payload Y.
-- **Receipts for everything.** Every gate decision — performed, pending, blocked, error — appends to a SHA-256 hash-chained, append-only receipt log. `GET /receipts/verify` checks the chain; `POST /receipts/anchor` writes the chain head into a paperclip comment. Payloads never appear in receipts — only their sha256.
-- **The agents are the interchangeable parts.** 179 atomic agents / 178 skills across 34 teams do the work inside the pipeline, with eleven model variants that swap providers per lane without touching the package. The catalog is the supporting cast; the pipeline is the product.
-- **Firm-facing MCP facade (Phase 3 — v1).** An outside assistant (Claude Desktop, Codex, or any MCP client) can connect to the firm over stdio as a client. The facade exposes the firm AS an MCP server behind a fixed five-noun allowlist: `create_matter`, `get_matter_status`, `list_work_products`, `fetch_work_product`, `request_approval`. Human-only approvals — the facade has no approve tool, and the company-scoped agent key 403s on board-decide endpoints on authenticated instances. Work-product text is default-closed and opt-in (`firmFacade.allowWorkProductText` in `gate-policy.yaml`). Every facade action is receipted through the gate proxy so it appears in the same hash-chained audit spine as internal egress. Start with `./bin/possiblaw --firm-facade`: the launcher mints a company-scoped agent key and writes a ready-to-paste MCP config to `<data-dir>/firm-facade-mcp.json` (mode 600). Implementation: [`mcp-servers/firm-facade/`](mcp-servers/firm-facade/). Walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md). Honest limits: [docs/known-limitations.md](docs/known-limitations.md) → "Firm-facing MCP facade (v1)".
+- **Receipts for everything.** Every gate decision — reserved, performed, pending, blocked, error — appends with fsync to a company-bound SHA-256 hash chain guarded by a single-writer lease. A durable reservation precedes dispatch, and a stable operation ID prevents an identical action from being silently replayed after response loss. `GET /receipts/verify` checks the chain; `POST /receipts/anchor` writes the chain head into a Paperclip comment. Payloads never appear in receipts — only their sha256. Strong tamper resistance still requires an anchor stored outside the same host/user trust domain.
+- **The agents are the interchangeable parts.** 179 working agents plus one service-only facade recorder / 178 skills across 34 teams operate inside the pipeline, with eleven model variants that swap providers per lane without touching the package. The catalog is the supporting cast; the pipeline is the product.
+- **Firm-facing MCP facade (Phase 3 — v1).** An outside assistant (Claude Desktop, Codex, or any MCP client) can connect to the firm over stdio as a client. The facade exposes the firm AS an MCP server behind a fixed five-noun allowlist: `create_matter`, `get_matter_status`, `list_work_products`, `fetch_work_product`, `request_approval`. Human-only approvals — the facade has no approve tool, and the company-scoped agent key 403s on board-decide endpoints on authenticated instances. Work-product text is default-closed and opt-in (`firmFacade.allowWorkProductText` in `gate-policy.yaml`). Every facade action is receipted through the gate proxy so it appears in the same hash-chained audit spine as internal egress. Start with `./bin/possiblaw --firm-facade`: the launcher mints a key only for the wake-disabled `firm-facade-recorder` service identity (never a chief or working specialist) and writes a ready-to-paste MCP config to `<data-dir>/firm-facade-mcp.json` (mode 600). Implementation: [`mcp-servers/firm-facade/`](mcp-servers/firm-facade/). Walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md). Honest limits: [docs/known-limitations.md](docs/known-limitations.md) → "Firm-facing MCP facade (v1)".
 - **Deterministic deadline engine (Phase 4 — v1).** Court-filing deadlines are computed by code (FRCP Rule 6, `deadline-engine/`), never by an LLM. The `deadline-calculator` agent routes all deadline questions through the `legal-deadline-calculation` skill, which invokes the engine CLI and reports the exact date with a full rule-application trace. Every computed deadline is audited in the Matter Trust Report via a `deadline` receipt kind. Prerequisite: `pnpm -C deadline-engine install`. Honest limits: US-FED only (`jurisdiction: "US-FED"`); state/CPR courts return `UNCONFIRMED`; audit-only in v1 — the deadline is visible and recorded in the report but does not yet block a late filing. Agent + skill: `companies/legal-operations/`. Engine: [`deadline-engine/`](deadline-engine/). Walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md) → "Compute a filing deadline." Honest limits: [docs/known-limitations.md](docs/known-limitations.md) → "Deadline engine (v1)".
 
 ## What's enforced vs routed vs advisory
 
 | Surface | Status today | Mechanism |
 |---|---|---|
-| Egress writes (email, upload, signature, payment, court filing, external delete) | **Enforced — structural** | Gate Proxy holds the only egress credentials; the launcher scrubs them from the server/agent env; per-boundary policy + hash-chained receipts on every path |
+| Egress writes (email, upload, signature, payment, court filing, external delete) | **Enforced on the configured gate transport; host isolation not yet production-approved** | Gate Proxy receives the egress credentials; the launcher overrides/scrubs them from the server/adapter env; per-boundary policy + durable reservation + hash-chained receipts on every path. Same-UID agents remain a documented bypass risk until the isolated-worker deployment/eval lands. |
 | Privacy tier — confidential/privileged payloads sent through the gate | **Enforced at the gate** | Deterministic masker over caller-supplied matter entities + pattern classes, recall measured in the test suite (100% on its labeled fixture; gated at ≥95% with zero entity leaks; fail-closed to block when it cannot vouch, e.g. no entity list) — or routed to a local model when one is configured ([docs/privilege-and-confidentiality.md](docs/privilege-and-confidentiality.md)). Since 0.36.0 the tier itself is trustworthy: a matter registered via `POST /matters/classification` carries a **raise-only floor** (the gate applies `max(floor, per-request claim)` — an agent cannot downgrade a registered matter), and unlabeled secondary-model traffic defaults to `confidential` fail-closed. A `dataTerms`-aware tier-floor (ZDR / no-train / no-human-review / tenant-isolated classification, with a hard-block on training/consumer endpoints) exists in code but the live call site never passes `dataTerms` — **staged, not wired at runtime**: [docs/known-limitations.md](docs/known-limitations.md) → "dataTerms tier-floor is staged, not enforced at runtime" |
 | Privacy tier — agents' own primary-lane model calls | **Routed, not proxied** | A routing choice: local-model variants per lane (`ollama`, `llamacpp` in `variants.yaml`) plus the advisory `privacy-encoder` skill. Primary-lane calls do not pass the proxy. |
 | Citation verification | **Enforced at the gate (Phase 2)** | Court/third-party egress **carrying legal citations** is **blocked** until a registered, payload-bound, deterministically re-checked citation verification exists for the document being filed or sent. The `legal-citation-checker` agent executes `citation-verification-checklist` (character-by-character quote-fidelity, side-by-side discrepancy tables), then POSTs the result to `POST /quality/citation`; the gate detects citations in the outbound document and calls `CitationRegistry.has(docSha256)` before any dispatch — including the human gate. A document with no detectable citations has nothing to re-check and passes. Fail-closed: a gated payload with no reviewable document text at all is blocked. Caveat: citation verification itself is an agent step — the gate enforces that it was performed and passed, not that the cited authority is authoritative. |
@@ -57,16 +57,48 @@ PossibLaw helps a firm take the **reasonable steps** that Rule 1.6 and ABA Forma
 - **Local-model tier-floor.** Matters tagged `metadata.possiblaw.privacyTier: confidential|privileged` route the sensitive step through a local model lane (`ollama` / `llamacpp`); the launcher warns at startup if no local lane is reachable.
 - **Documented data terms, not marketing claims.** We frame this honestly. Sending matter data to a cloud model under genuine enterprise zero-retention / no-train terms **does not, by itself, waive attorney-client privilege** — and conversely, local-only is a confidentiality and risk-reduction choice, *not* a privilege guarantee. PossibLaw is engineered for "reasonable steps to protect confidentiality and privilege," never "privilege-safe." The full legal posture, the confidentiality-vs-privilege distinction, the 2026 case law, and the do/don't marketing language live in [docs/privilege-and-confidentiality.md](docs/privilege-and-confidentiality.md).
 
-Sharp edges are documented, not hidden — see [docs/known-limitations.md](docs/known-limitations.md): `local_trusted` dev instances accept unauthenticated local board calls (the human gate binds agents via credential isolation; production deployments with auth enabled get the structural gate too); the receipt chain assumes a single writer, and same-user tampering is caught only against an externally anchored head; `share_external` writes (HubSpot, Linear, Clio, iManage, NetDocuments) are visibly refused in v1 rather than silently credentialed; Slack/Teams notification webhooks (operator-configured, no matter content) remain direct in v1. Which connector takes which path: [docs/connectors-inventory.md](docs/connectors-inventory.md).
+Sharp edges are documented, not hidden — see [docs/known-limitations.md](docs/known-limitations.md): `local_trusted` dev instances accept unauthenticated local board calls; the authenticated production-safety launcher now fails closed on gate/custody/identity errors, but same-UID agent isolation is still a release blocker; the receipt chain assumes a single writer, and same-user tampering is caught only against an externally anchored head; `share_external` writes (HubSpot, Linear, Clio, iManage, NetDocuments) are visibly refused in v1 rather than silently credentialed; Slack/Teams notification webhooks (operator-configured, no matter content) remain direct in v1. Which connector takes which path: [docs/connectors-inventory.md](docs/connectors-inventory.md).
 
-## The 5-minute path: clone → launch → see the receipt
+## Validate the checkout
+
+PossibLaw-owned packages are pinned to Node `24.18.0` (`.nvmrc`) and CI uses pnpm `9.15.4`. After installing the submodule and package dependencies, run the complete credential-free battery from any working directory:
+
+```bash
+/absolute/path/to/possiblaw/bin/verify
+```
+
+The command runs all owned package tests/typechecks, launcher and helper safety tests, package rendering, manifest checks, variants, and eval coverage. It explicitly reports authenticated two-lawyer, live launcher, and provider round-trip checks as `SKIP`; those are operator-gated and are never reported as passing without receipts. CI runs the same entrypoint in [`.github/workflows/verify.yml`](.github/workflows/verify.yml).
+
+## Deployment and setup
+
+Choose the path that matches the operator and the data involved:
+
+| Path | Intended use | Security posture |
+|---|---|---|
+| **Local launcher** | One operator evaluating or developing PossibLaw on their own workstation | Loopback-only `local_trusted`; not a shared or remote production deployment |
+| **Docker Compose** | The reference deployment for one firm or one in-house legal department | Authenticated control plane, distinct non-root workers, scoped networks/credentials, persistent volumes; live isolation and the release gates below are still required |
+| **Azure tenant** | A firm or legal department deploying the Docker reference inside its own Azure tenant | Can add Entra/RBAC, private networking, Bastion, Key Vault, encrypted disks, monitoring, and immutable backups; those controls must be configured and attested |
+| **Hostinger VPS** | A small firm or legal department operating the Docker reference on a dedicated VPS | Self-managed VPS controls plus the PossibLaw Compose topology; Hostinger's Paperclip one-click template installs upstream Paperclip, not PossibLaw |
+
+Never publish Paperclip's port `3100` directly to the internet. The reference Compose file binds it to host loopback. Use a firm VPN or SSH tunnel for bootstrap, then a reviewed TLS reverse proxy/private ingress for users.
+
+### Local: clone → launch → see the receipt
+
+Use this path for a single operator on a trusted workstation. Install Git, Python 3, `curl`, Node `24.18.0`, and pnpm `9.15.4`, then verify the versions:
+
+```bash
+node --version   # v24.18.0
+pnpm --version   # 9.15.4
+python3 --version
+```
 
 **Step 1 — clone and launch (2 min)**
 
 ```bash
-git clone https://github.com/PossibLaw/possiblaw && cd possiblaw
+git clone https://github.com/PossibLaw/possiblaw
+cd possiblaw
 git submodule update --init --recursive
-pnpm -C paperclip install
+pnpm -C paperclip install --frozen-lockfile
 ./bin/possiblaw
 # answer three prompts (org name, mission, variant)
 # → browser opens to your paperclip dashboard, agents loaded, gate proxy running
@@ -80,7 +112,7 @@ Add `--variant <slug>` to skip the interactive prompt, `--list-variants` to see 
 # simulate an agent attempting a court filing:
 curl -s -X POST http://127.0.0.1:3801/egress/file_court_document \
   -H 'content-type: application/json' \
-  -d '{"payload":{"caption":"Acme v. Globex","court":"D. Del."},"meta":{"confidentiality":"standard"}}'
+  -d '{"payload":{"caption":"Acme v. Globex","court":"D. Del.","documentText":"The parties request a scheduling conference."},"meta":{"confidentiality":"standard"}}'
 # → 202 pending_approval + an approval in the paperclip dashboard. Approve it
 #   there, then re-run the same curl with "approvalId":"<id>" added to meta
 #   → 200, action package written to ~/.possiblaw/action-packages/ for a
@@ -90,20 +122,147 @@ curl -s http://127.0.0.1:3801/receipts/verify
 # → {"ok":true,"length":N,"head":"..."} — the tamper-evident trail
 ```
 
+Stop with `Ctrl-C`. Re-running the launcher reattaches to a healthy server on the selected port instead of starting a duplicate. Use `--port <port>` and `--gate-port <port>` for alternate loopback ports; use a different `--data-dir` for a separate disposable instance.
+
 Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); package layout: [docs/paperclip-package.md](docs/paperclip-package.md); sharp edges: [docs/known-limitations.md](docs/known-limitations.md).
+
+### Docker Compose: authenticated single-tenant reference
+
+Use a dedicated, patched Linux host with Docker Engine and Compose v2. The bundled stack is intentionally fail-closed: its placeholder model gateways return `503` until the operator replaces them with reviewed, authenticated gateways.
+
+1. Clone the complete repository and verify the container runtime:
+
+   ```bash
+   git clone https://github.com/PossibLaw/possiblaw
+   cd possiblaw
+   git submodule update --init --recursive
+   docker version
+   docker compose version
+   ```
+
+2. Create ignored deployment configuration and owner-only bootstrap material:
+
+   ```bash
+   cd deployments/firm-single-tenant
+   cp .env.example .env
+   ./scripts/init-secrets.sh
+   ```
+
+   Do not put board, model-provider, Drive, or OneDrive tokens in `.env`. The script creates private file-backed bootstrap secrets and deliberately leaves Gate keys unusable until identity provisioning succeeds.
+
+3. Run the credential-free topology and staging checks:
+
+   ```bash
+   python3 -m venv /tmp/possiblaw-deploy-venv
+   . /tmp/possiblaw-deploy-venv/bin/activate
+   python -m pip install -r requirements-test.txt
+   ./tests/run.sh
+   deactivate
+   ```
+
+4. Start only PostgreSQL and authenticated Paperclip:
+
+   ```bash
+   docker compose up -d db paperclip
+   docker compose ps
+   ```
+
+5. Open `http://127.0.0.1:3100` on the host, complete the board-claim/login flow, and keep the board token in an owner-only file or the operator shell—never in an argument, tracked file, or chat transcript.
+
+6. Complete the [bootstrap sequence](deployments/firm-single-tenant/README.md#bootstrap-sequence): preview and import the PossibLaw company, persist immutable principal bindings, put the resulting non-secret company/agent IDs in `.env`, provision the two workers, then start the Gate and its relays.
+
+7. Run the sacrificial isolation eval before enabling agent heartbeats:
+
+   ```bash
+   ./scripts/run-isolation-eval.sh
+   ```
+
+   Every boolean must be `true`; every string must be a lowercase 64-character SHA-256 value. A missing or false result is a deployment failure.
+
+8. Confirm restart persistence without deleting named volumes:
+
+   ```bash
+   docker compose restart
+   docker compose ps
+   ```
+
+   `docker compose down` preserves named volumes; `docker compose down --volumes` deletes deployment data and is intentionally not part of this setup guide.
+
+The full topology, exact provisioning commands, threat boundaries, workspace staging rules, and release gates are in [`deployments/firm-single-tenant/README.md`](deployments/firm-single-tenant/README.md).
+
+### Azure: deploy inside the firm's tenant
+
+Azure is an infrastructure host for the same Docker Compose reference; PossibLaw does not yet ship an ARM/Bicep template or a **Deploy to Azure** button.
+
+1. Have the firm's Azure administrator create a dedicated resource group, VNet/subnet, and Ubuntu 24.04 LTS VM in the firm's tenant. Use Trusted Launch with Secure Boot and vTPM, a system-assigned managed identity, encrypted OS/data disks, and organization-approved RBAC.
+2. Give the VM no public IP. Apply an NSG that denies unsolicited inbound traffic and use Azure Bastion, the firm's VPN, or another approved private access path. Restrict outbound provider traffic with the firm's firewall or authenticated egress proxy; an NSG alone is not a domain-aware egress control.
+3. Configure Key Vault for operator/provider secrets and a Recovery Services vault for VM backups. The current Compose reference consumes file-backed secrets, so any Key Vault-to-host retrieval procedure must write only owner-readable files on encrypted storage and must not place values in `.env`, cloud-init output, or process arguments.
+4. Connect to the private VM through the approved administrative path. If that path provides SSH, add a local forward while bootstrapping:
+
+   ```bash
+   ssh -L 3100:127.0.0.1:3100 <approved-azure-vm-ssh-target>
+   ```
+
+5. Install Docker Engine with Compose v2 from Docker's [official Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/), then follow the Docker Compose steps above on the VM.
+6. Keep Paperclip private. For staff access, place a reviewed TLS reverse proxy/private ingress in front of loopback Paperclip and integrate it with the firm's identity, Conditional Access, logging, and incident-response standards.
+7. Run the isolation eval on the exact VM, enable backup immutability only after a restore test, and record the image digests, firewall policy, backup receipt, and deployment results.
+
+Azure can supply the infrastructure controls the design requires, but tenancy alone is not an attestation. The deployment is not production-approved until the PossibLaw release gates and the firm's legal, security, privacy, retention, and provider reviews pass. Official references checked **2026-07-20**: [Azure VM Zero Trust](https://learn.microsoft.com/en-us/security/zero-trust/azure-infrastructure-virtual-machines), [Azure Bastion](https://learn.microsoft.com/en-us/azure/bastion/bastion-overview), [Key Vault](https://learn.microsoft.com/en-us/azure/key-vault/general/overview), [VM Backup](https://learn.microsoft.com/en-us/azure/backup/backup-azure-vms-introduction), and [immutable backup vaults](https://learn.microsoft.com/en-us/azure/backup/backup-azure-immutable-vault-concept).
+
+### Hostinger: deploy the custom stack on a VPS
+
+Hostinger's [Paperclip application](https://www.hostinger.com/applications/paperclip) is a convenient one-click deployment of upstream Paperclip. It does **not** include PossibLaw's company package, Gate Proxy, capability map, isolated workers, receipt custody, or pinned layer. Do not select it when the intended result is a PossibLaw deployment.
+
+1. Create a dedicated Hostinger VPS using its Ubuntu 24.04 Docker template. Choose capacity for the control plane, PostgreSQL, Gate, two workers, model gateways, builds, backups, and expected concurrency; do not select a size from this README without measuring the firm's workload.
+2. In hPanel, restrict the VPS firewall to the firm's approved administrative sources and required TLS ingress. Do not open port `3100` publicly.
+3. Connect with SSH and verify Compose v2:
+
+   ```bash
+   ssh <admin-user>@<vps-ip>
+   docker version
+   docker compose version
+   ```
+
+4. Clone the full repository on the VPS and follow the Docker Compose steps above. The current build uses repository-relative Docker contexts and private generated files, so pasting only `compose.yaml` into Docker Manager is not a complete PossibLaw install.
+5. From the operator workstation, create an SSH tunnel for the board claim and bootstrap:
+
+   ```bash
+   ssh -L 3100:127.0.0.1:3100 <admin-user>@<vps-ip>
+   ```
+
+   Then open `http://127.0.0.1:3100` locally.
+
+6. Configure a reviewed TLS reverse proxy/private access layer, encrypted off-host backups, monitoring, patching, and explicit provider egress restrictions. Hostinger infrastructure features do not replace the Compose isolation eval or the application release gates.
+7. Run `./scripts/run-isolation-eval.sh`, test a restart, and perform a restore drill before using real matter data.
+
+Hostinger Docker Manager supports custom Compose projects and a **Deploy on Hostinger** button, but PossibLaw does not yet publish the self-contained images, bootstrap automation, or Compose artifact that a truthful one-click button requires. One-click deployment remains future work. Official Hostinger references checked **2026-07-20**: [Docker VPS template](https://www.hostinger.com/support/8306612-how-to-use-the-docker-vps-template-at-hostinger/), [Docker Manager](https://www.hostinger.com/support/12040789-hostinger-docker-manager-for-vps-simplify-your-container-deployments/), [custom Compose deployment](https://www.hostinger.com/support/12040815-how-to-deploy-your-first-container-with-hostinger-docker-manager/), and [Paperclip application guide](https://www.hostinger.com/support/how-to-get-started-with-the-paperclip-at-hostinger/).
+
+### Release gates for any shared or hosted deployment
+
+Do not use real client data or call a shared/hosted deployment production-ready until all applicable gates are recorded:
+
+- The exact target host passes `docker compose config`, image builds, health checks, saved SSH-environment probes, and `run-isolation-eval.sh`.
+- The blocked placeholder AI gateways are replaced with reviewed, authenticated, scoped gateways; provider egress is restricted outside Compose.
+- TLS/private ingress, secret management, image digest pinning/scanning, SBOMs, monitoring, patching, incident response, backups, and a successful restore drill are in place.
+- The authenticated two-lawyer/ethical-wall test passes on the target deployment.
+- Drive or OneDrive upload, exact-version readback, approval, and delivery pass with disposable targets.
+- Receipt heads are anchored outside the deployment's host/admin trust domain; retention and legal-hold requirements are configured.
+- The pinned Paperclip failed-request secret-logging risk and invite-page query-shape defect are fixed, isolated, or explicitly accepted by the operator.
+
+The canonical status is [docs/known-limitations.md](docs/known-limitations.md), the manual test sequence is [docs/operator-test-checklist.md](docs/operator-test-checklist.md), and the complete deployment gate is [deployments/firm-single-tenant/README.md#release-gates](deployments/firm-single-tenant/README.md#release-gates).
 
 ## The catalog (the interchangeable parts)
 
 | Capability | Detail |
 |---|---|
-| **Org chart** | Chief of Staff + Chief Counsel + 34 leads — 28 legal practices (commercial, employment, IP, privacy, litigation, corporate, regulatory, research, tax, real estate, M&A, banking & finance, securities, restructuring, immigration, healthcare, antitrust, trade compliance, insurance, construction, government contracts, environmental/ESG, trusts & estates, family law, investigations, AI governance, advertising, benefits) and 6 business functions (BD, ops, finance, marketing, admin, legal ops) — + 143 specialists (incl. meta-reviewers — risk-spotter, debate-judge, reconciler — and a Capability Builder, operator-review gated) — **179 agents total**; full roster in [docs/agent-catalog.md](docs/agent-catalog.md) |
+| **Org chart** | Chief of Staff + Chief Counsel + 34 leads — 28 legal practices (commercial, employment, IP, privacy, litigation, corporate, regulatory, research, tax, real estate, M&A, banking & finance, securities, restructuring, immigration, healthcare, antitrust, trade compliance, insurance, construction, government contracts, environmental/ESG, trusts & estates, family law, investigations, AI governance, advertising, benefits) and 6 business functions (BD, ops, finance, marketing, admin, legal ops) — + 143 working specialists (incl. meta-reviewers — risk-spotter, debate-judge, reconciler — and a Capability Builder, operator-review gated) + one non-working facade service principal — **180 agents total**; full roster in [docs/agent-catalog.md](docs/agent-catalog.md) |
 | **Skills** | 173: contract drafting and review playbooks (NDA, MSA, SOW, amendments, SaaS, renewals, OSS compliance), per-practice playbooks and checklists across all 28 legal practices, firm-business skills (prebill review, trust accounting, conflicts screening, engagement letters, CLE tracking, client alerts, competitive intel), matter intake, missing-info gate, privacy encoder, Slack/Teams notifications, Markdown/DOCX output, capability authoring, connector descriptors (research, doc stores, e-signature, CRM, billing, practice management, email, drive), **firm-memory** (HOT firm preferences injected at import via `--business`) |
 | **Firm learning loop** | `remember this:` comments on issues are sanitized (fail-closed ethical-wall), proposed as Paperclip approval cards, and accumulated in `businesses/<slug>/learnings/`. Approved lessons are injected into the `firm-memory` skill on the next `--business <slug>` launch. **Tier-2 edit-learning:** agents also learn from the lawyer's finalized edits made directly in OneDrive/Google Drive (external-destination capture) — a nightly sweep diffs each delivered file against its delivered draft, distills a sanitized skill-overlay proposal, and surfaces it in the morning digest for yes/no/edit review; approved overlays apply on the next `--business <slug>` launch. Tier-2 SkillOpt (eval-validated automatic refinement) and Box connector remain deferred. |
 | **Projects & tasks** | NDA Matters, Commercial Reviews, Eval Results; starter issues + a recurring renewal scan |
 | **Model lanes** | Per-agent `modelLane` metadata (primary / routing / drafting / review / extractive) — variants map each lane to the right model automatically |
 | **Team subsets** | `--teams litigation,commercial` (or presets `boutique` / `inhouse`) — import only the practices your firm or in-house team runs; chiefs, meta-reviewers, and the skill closure come along automatically. The `inhouse` preset is a first-class operating model, not just a demo: an in-house legal team runs first-pass work with its own agents and escalates to outside counsel only for the judgment it doesn't own |
 | **Demos** | `--demo law-firm` / `inhouse-legal` / `biglaw-practice-group` — synthetic demo matters for a boutique firm, an in-house department, and a BigLaw practice group |
-| **Delivery** | `deliverables-courier` files finished work products to your own OneDrive/SharePoint, Google Drive, or Notion per an operator policy file — auto-file or on-request per work-product type, privacy-tier gated, local copy always retained |
+| **Delivery** | `deliverables-courier` files finished work products to exact operator-configured OneDrive/SharePoint or Google Drive roots through server-resolved aliases — auto-file or on-request per work-product type, privacy-tier gated, local copy always retained. Authenticated-production Notion writes are an explicit human-placement handoff, not an agent write. |
 | **Theme** | `--theme possiblaw` (default) — light-first dashboard with a warm launch palette; `light` / `dark` also available |
 | **Firm-facing MCP facade** | Drive the firm from your own MCP assistant (Claude Desktop, Codex, or any MCP client) via a fixed five-noun allowlist; human-only approvals; work-product text default-closed; every facade action receipted through the gate proxy. `./bin/possiblaw --firm-facade`. Honest: stdio v1; human approves in the Paperclip dashboard. [`mcp-servers/firm-facade/`](mcp-servers/firm-facade/) |
 | **Deterministic deadline engine** | Court-filing deadlines computed by code (FRCP Rule 6), never by an LLM; result audited in the Matter Trust Report. `deadline-calculator` agent + [`deadline-engine/`](deadline-engine/). Honest: US-FED only; audit-only (visible in the report, not yet blocking); `pnpm -C deadline-engine install` prerequisite. |

@@ -498,6 +498,28 @@ describe("createMatter", () => {
 // ---------------------------------------------------------------------------
 
 describe("requestApproval", () => {
+  it("rejects a cross-company matter before creating an approval", async () => {
+    const deps = makeDeps({
+      client: {
+        async getIssue(_id: string): Promise<IssueRecord> {
+          return { ...fakeIssue, companyId: "company-foreign-999" };
+        },
+      },
+    });
+
+    await assert.rejects(
+      () => requestApproval(
+        { matterId: FAKE_MATTER_ID, action: "file_motion", summary: "File motion" },
+        deps,
+      ),
+      /company_scope_violation/,
+    );
+    assert.equal(deps.client.createApprovalCalls.length, 0);
+    assert.equal(deps.receipts.calls.length, 1);
+    assert.equal(deps.receipts.calls[0].outcome, "error");
+    assert.deepEqual(deps.receipts.calls[0].meta, { reason: "company_scope_violation" });
+  });
+
   it("calls createApproval with type:'request_board_approval', issueIds:[matterId], payload carrying action+summary", async () => {
     const deps = makeDeps({
       publicBaseUrl: "https://app.possiblaw.io",

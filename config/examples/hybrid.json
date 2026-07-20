@@ -1,0 +1,95 @@
+{
+  "schema": "possiblaw/config/v1",
+  "identity": {
+    "slug": "example-hybrid-legal",
+    "displayName": "Example Hybrid Legal Team",
+    "persona": "hybrid"
+  },
+  "deployment": {
+    "mode": "managed-sandbox",
+    "environment": "staging",
+    "region": "us-east"
+  },
+  "teams": [
+    {
+      "id": "commercial-corporate-team",
+      "enabled": true,
+      "agents": [
+        "commercial-lead",
+        "contract-reviewer",
+        "corporate-lead",
+        "corporate-governance-reviewer"
+      ],
+      "skills": ["legal-contract-review-dispatcher", "corporate-governance-review-checklist"]
+    },
+    {
+      "id": "employment-ip-team",
+      "enabled": true,
+      "agents": ["employment-lead", "ip-lead", "ip-infringement-analyst"],
+      "skills": ["employment-policy-review-checklist", "legal-ip-infringement-triage"]
+    }
+  ],
+  "workflowPacks": [
+    { "id": "inhouse-commercial", "enabled": true },
+    { "id": "firm-corporate", "enabled": true },
+    { "id": "firm-employment", "enabled": true },
+    { "id": "firm-ip", "enabled": true },
+    { "id": "inhouse-privacy", "enabled": false }
+  ],
+  "models": {
+    "variant": "codex",
+    "lanes": {
+      "review": { "variant": "claude", "maxTurns": 60 },
+      "extractive": { "variant": "ollama", "maxTurns": 30 }
+    }
+  },
+  "capabilities": {
+    "allowedTools": [
+      "legal-data.search_opinions",
+      "legal-data.get_citation"
+    ],
+    "connectors": [
+      { "id": "connector-google-drive", "enabled": false },
+      { "id": "connector-onedrive", "enabled": false },
+      { "id": "connector-courtlistener", "enabled": true }
+    ]
+  },
+  "gate": {
+    "policyRef": "companies/legal-operations/gate-policy.yaml",
+    "boundaries": {
+      "THIRD_PARTY_EGRESS": "human",
+      "CONFIDENTIAL_TO_CLOUD": "anonymize",
+      "COURT_FILING": "human",
+      "SIGNATURE": "human",
+      "MONEY_MOVEMENT": "human",
+      "IRREVERSIBLE_EXTERNAL_OP": "human"
+    },
+    "citationGate": {
+      "boundaries": ["COURT_FILING", "THIRD_PARTY_EGRESS"],
+      "requireAuthorityProvenance": false
+    },
+    "firmFacade": { "allowWorkProductText": false }
+  },
+  "trustedDestinations": [],
+  "routines": [
+    {
+      "id": "learning-sweep",
+      "enabled": false,
+      "schedule": { "cron": "0 3 * * *", "timezone": "UTC" },
+      "concurrencyPolicy": "coalesce_if_active"
+    }
+  ],
+  "budgets": {
+    "costMode": "subscription",
+    "companyMonthlyCents": 0,
+    "variantMonthlyCents": { "codex": 0, "claude": 0, "ollama": 0 },
+    "agentMonthlyCents": {}
+  },
+  "capacity": {
+    "heartbeatConcurrency": 2,
+    "maxConcurrentRuns": 2,
+    "adapterTimeoutSeconds": 900,
+    "maxTurns": 60,
+    "laneMaxTurns": { "routing": 25, "review": 60, "extractive": 30 }
+  }
+}

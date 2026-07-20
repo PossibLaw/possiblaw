@@ -1,0 +1,383 @@
+name: possiblaw-firm-single-tenant
+
+x-hardened: &hardened
+  read_only: true
+  cap_drop: ["ALL"]
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
+x-relay: &relay
+  <<: *hardened
+  build:
+    context: ../..
+    dockerfile: deployments/firm-single-tenant/relay.Dockerfile
+  user: "65532:65532"
+  tmpfs:
+    - /tmp
+
+x-worker: &worker
+  <<: *hardened
+  build:
+    context: ../..
+    dockerfile: deployments/firm-single-tenant/worker.Dockerfile
+    args:
+      CODEX_CLI_VERSION: "0.144.1"
+      CLAUDE_CODE_VERSION: "2.1.208"
+  user: "10001:10001"
+  init: true
+  tmpfs:
+    - /tmp
+    - /run
+    - /home/possiblaw
+  healthcheck:
+    test: ["CMD", "/usr/local/bin/worker-healthcheck"]
+    interval: 10s
+    timeout: 3s
+    retries: 12
+    start_period: 10s
+
+services:
+  db:
+    image: postgres:17.5-alpine3.22
+    environment:
+      POSTGRES_USER: paperclip
+      POSTGRES_DB: paperclip
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    networks:
+      control_internal:
+        ipv4_address: 172.30.0.10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperclip -d paperclip"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  paperclip:
+    <<: *hardened
+    build:
+      context: ../../paperclip
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    entrypoint: ["/reference/paperclip-entrypoint.sh"]
+    command: ["node", "--import", "./server/node_modules/tsx/dist/loader.mjs", "server/dist/index.js"]
+    environment:
+      NODE_ENV: production
+      HOME: /paperclip
+      HOST: 0.0.0.0
+      PORT: "3100"
+      SERVE_UI: "true"
+      PAPERCLIP_HOME: /paperclip
+      PAPERCLIP_INSTANCE_ID: default
+      PAPERCLIP_CONFIG: /paperclip/instances/default/config.json
+      PAPERCLIP_DEPLOYMENT_MODE: authenticated
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: private
+      PAPERCLIP_PUBLIC_URL: ${PAPERCLIP_PUBLIC_URL:-http://127.0.0.1:3100}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      BETTER_AUTH_SECRET_FILE: /run/secrets/better_auth_secret
+    secrets:
+      - postgres_password
+      - better_auth_secret
+    networks:
+      control_internal:
+        ipv4_address: 172.30.0.20
+    ports:
+      - 127.0.0.1:${PAPERCLIP_HOST_PORT:-3100}:3100
+    volumes:
+      - paperclip_data:/paperclip
+      - ./scripts/paperclip-entrypoint.sh:/reference/paperclip-entrypoint.sh:ro
+    tmpfs:
+      - /tmp
+      - /run
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:3100/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  gate:
+    <<: *hardened
+    build:
+      context: ../..
+      dockerfile: deployments/firm-single-tenant/gate.Dockerfile
+    user: "1000:1000"
+    environment:
+      NODE_ENV: production
+      GATE_PROXY_PORT: "3801"
+      GATE_REQUIRE_AUTH: "true"
+      GATE_POLICY_PATH: /etc/possiblaw/gate-policy.yaml
+      GATE_AUTHORIZATION_PATH: /run/possiblaw/gate-authorization.json
+      GATE_RECEIPTS_PATH: /var/lib/possiblaw-gate/receipts.jsonl
+      GATE_SHUTDOWN_TIMEOUT_MS: "10000"
+      PAPERCLIP_BASE_URL: http://paperclip:3100
+      PAPERCLIP_COMPANY_ID: ${PAPERCLIP_COMPANY_ID:?set PAPERCLIP_COMPANY_ID}
+      PAPERCLIP_GATE_AGENT_ID: ${PAPERCLIP_GATE_AGENT_ID:?set PAPERCLIP_GATE_AGENT_ID}
+      PAPERCLIP_GATE_API_KEY_FILE: /run/secrets/gate_control_agent_key
+    secrets:
+      - gate_control_agent_key
+    networks:
+      control_internal:
+        ipv4_address: 172.30.0.30
+      gate_provider_egress:
+        ipv4_address: 172.33.0.30
+    volumes:
+      - gate_receipts:/var/lib/possiblaw-gate
+      - ../../companies/legal-operations/gate-policy.yaml:/etc/possiblaw/gate-policy.yaml:ro
+      - ./runtime/gate-authorization.json:/run/possiblaw/gate-authorization.json:ro
+    tmpfs:
+      - /tmp
+      - /run
+    depends_on:
+      paperclip:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3801/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  gate-loopback-relay:
+    <<: *relay
+    network_mode: service:gate
+    command:
+      - TCP-LISTEN:3802,bind=172.30.0.30,reuseaddr,fork
+      - TCP:127.0.0.1:3801
+    depends_on:
+      gate:
+        condition: service_healthy
+
+  gate-ingress-a:
+    <<: *relay
+    command:
+      - TCP-LISTEN:3802,bind=172.31.0.10,reuseaddr,fork
+      - TCP:172.30.0.30:3802
+    networks:
+      control_internal:
+        ipv4_address: 172.30.0.41
+      worker_a_internal:
+        ipv4_address: 172.31.0.10
+    depends_on:
+      - gate-loopback-relay
+
+  gate-ingress-b:
+    <<: *relay
+    command:
+      - TCP-LISTEN:3802,bind=172.32.0.10,reuseaddr,fork
+      - TCP:172.30.0.30:3802
+    networks:
+      control_internal:
+        ipv4_address: 172.30.0.42
+      worker_b_internal:
+        ipv4_address: 172.32.0.10
+    depends_on:
+      - gate-loopback-relay
+
+  ssh-ingress-a:
+    <<: *relay
+    command:
+      - TCP-LISTEN:2222,bind=172.30.0.51,reuseaddr,fork
+      - TCP:172.31.0.20:2222
+    networks:
+      control_internal:
+        ipv4_address: 172.30.0.51
+      worker_a_internal:
+        ipv4_address: 172.31.0.40
+    ports:
+      - 127.0.0.1:${WORKER_A_SSH_HOST_PORT:-22221}:2222
+    depends_on:
+      worker-a:
+        condition: service_healthy
+
+  ssh-ingress-b:
+    <<: *relay
+    command:
+      - TCP-LISTEN:2222,bind=172.30.0.52,reuseaddr,fork
+      - TCP:172.32.0.20:2222
+    networks:
+      control_internal:
+        ipv4_address: 172.30.0.52
+      worker_b_internal:
+        ipv4_address: 172.32.0.40
+    ports:
+      - 127.0.0.1:${WORKER_B_SSH_HOST_PORT:-22222}:2222
+    depends_on:
+      worker-b:
+        condition: service_healthy
+
+  ai-gateway-a:
+    <<: *hardened
+    build:
+      context: ../..
+      dockerfile: deployments/firm-single-tenant/probe-gateway.Dockerfile
+    user: "65532:65532"
+    environment:
+      AI_GATEWAY_API_KEY_FILE: /run/secrets/worker_a_ai_gateway_key
+      AI_GATEWAY_PORT: "4000"
+    secrets:
+      - worker_a_ai_gateway_key
+    networks:
+      worker_a_internal:
+        ipv4_address: 172.31.0.30
+      worker_a_provider_egress:
+        ipv4_address: 172.35.0.41
+    tmpfs:
+      - /tmp
+      - /run
+
+  ai-gateway-b:
+    <<: *hardened
+    build:
+      context: ../..
+      dockerfile: deployments/firm-single-tenant/probe-gateway.Dockerfile
+    user: "65532:65532"
+    environment:
+      AI_GATEWAY_API_KEY_FILE: /run/secrets/worker_b_ai_gateway_key
+      AI_GATEWAY_PORT: "4000"
+    secrets:
+      - worker_b_ai_gateway_key
+    networks:
+      worker_b_internal:
+        ipv4_address: 172.32.0.30
+      worker_b_provider_egress:
+        ipv4_address: 172.36.0.42
+    tmpfs:
+      - /tmp
+      - /run
+
+  worker-a:
+    <<: *worker
+    environment:
+      POSSIBLAW_WORKER_ID: worker-a
+      POSSIBLAW_GATE_URL: http://gate-ingress-a:3802
+      POSSIBLAW_GATE_API_KEY_FILE: /run/secrets/worker_a_gate_key
+      POSSIBLAW_AI_GATEWAY_URL: http://ai-gateway-a:4000
+      POSSIBLAW_AI_GATEWAY_API_KEY_FILE: /run/secrets/worker_a_ai_gateway_key
+      POSSIBLAW_PEER_WORKER_HOST: worker-b
+      POSSIBLAW_PEER_WORKER_IP: 172.32.0.20
+      POSSIBLAW_FOREIGN_COMPANY_HOST: foreign-company-sentinel
+      POSSIBLAW_FOREIGN_COMPANY_IP: 172.34.0.20
+      POSSIBLAW_SSH_INGRESS_HOST: ssh-ingress-a
+    secrets:
+      - worker_a_ssh_authorized_key
+      - worker_a_gate_key
+      - worker_a_ai_gateway_key
+    networks:
+      worker_a_internal:
+        ipv4_address: 172.31.0.20
+    volumes:
+      - worker_a_state:/var/lib/possiblaw-worker
+      - worker_a_workspace:/workspace
+
+  worker-b:
+    <<: *worker
+    environment:
+      POSSIBLAW_WORKER_ID: worker-b
+      POSSIBLAW_GATE_URL: http://gate-ingress-b:3802
+      POSSIBLAW_GATE_API_KEY_FILE: /run/secrets/worker_b_gate_key
+      POSSIBLAW_AI_GATEWAY_URL: http://ai-gateway-b:4000
+      POSSIBLAW_AI_GATEWAY_API_KEY_FILE: /run/secrets/worker_b_ai_gateway_key
+      POSSIBLAW_PEER_WORKER_HOST: worker-a
+      POSSIBLAW_PEER_WORKER_IP: 172.31.0.20
+      POSSIBLAW_FOREIGN_COMPANY_HOST: foreign-company-sentinel
+      POSSIBLAW_FOREIGN_COMPANY_IP: 172.34.0.20
+      POSSIBLAW_SSH_INGRESS_HOST: ssh-ingress-b
+    secrets:
+      - worker_b_ssh_authorized_key
+      - worker_b_gate_key
+      - worker_b_ai_gateway_key
+    networks:
+      worker_b_internal:
+        ipv4_address: 172.32.0.20
+    volumes:
+      - worker_b_state:/var/lib/possiblaw-worker
+      - worker_b_workspace:/workspace
+
+  foreign-company-sentinel:
+    <<: *hardened
+    profiles: ["isolation-eval"]
+    build:
+      context: ../..
+      dockerfile: deployments/firm-single-tenant/probe-gateway.Dockerfile
+    user: "65532:65532"
+    environment:
+      AI_GATEWAY_ALLOW_UNAUTHENTICATED_HEALTH: "true"
+      AI_GATEWAY_PORT: "4000"
+    networks:
+      foreign_company_internal:
+        ipv4_address: 172.34.0.20
+    tmpfs:
+      - /tmp
+      - /run
+
+networks:
+  control_internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  worker_a_internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+  worker_b_internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.32.0.0/24
+  gate_provider_egress:
+    ipam:
+      config:
+        - subnet: 172.33.0.0/24
+  foreign_company_internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.34.0.0/24
+  worker_a_provider_egress:
+    ipam:
+      config:
+        - subnet: 172.35.0.0/24
+  worker_b_provider_egress:
+    ipam:
+      config:
+        - subnet: 172.36.0.0/24
+
+volumes:
+  postgres_data:
+  paperclip_data:
+  gate_receipts:
+  worker_a_state:
+  worker_a_workspace:
+  worker_b_state:
+  worker_b_workspace:
+
+secrets:
+  postgres_password:
+    file: ./.secrets/postgres-password
+  better_auth_secret:
+    file: ./.secrets/better-auth-secret
+  gate_control_agent_key:
+    file: ./.secrets/gate-control-agent-key
+  worker_a_ssh_authorized_key:
+    file: ./.secrets/worker-a-ssh-client-key.pub
+  worker_a_gate_key:
+    file: ./.secrets/worker-a-gate-key
+  worker_a_ai_gateway_key:
+    file: ./.secrets/worker-a-ai-gateway-key
+  worker_b_ssh_authorized_key:
+    file: ./.secrets/worker-b-ssh-client-key.pub
+  worker_b_gate_key:
+    file: ./.secrets/worker-b-gate-key
+  worker_b_ai_gateway_key:
+    file: ./.secrets/worker-b-ai-gateway-key

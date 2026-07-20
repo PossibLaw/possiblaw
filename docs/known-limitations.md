@@ -214,11 +214,14 @@ configurations.
 
 ### Sanitization is best-effort regex redaction, not a guarantee
 
-For `confidential` and `privileged` tiers the server runs `sanitizeArgs`, which strips
-legal-entity names, emails, SSNs, EINs, and phone numbers from the query before egress.
-This is structurally incomplete:
+For `confidential` and `privileged` tiers the server runs `sanitizeArgs`, which applies
+best-effort detectors for common legal-entity names, person-name captions, role-labeled
+person names, docket/matter numbers, emails, SSNs, EINs, and phone numbers before
+egress. It covers `query`/search-like fields and citation strings such as `cite`.
+This remains structurally incomplete:
 
-- Informal matter nicknames, judge names, or non-standard entity forms are not caught.
+- Informal matter nicknames, judge names, unusual captions, or non-standard entity
+  forms may not be caught.
 - Redaction quality depends on the regex patterns matching the identifier's format.
 - The sanitizer is a safety net; neutral query term discipline remains required.
 
@@ -286,14 +289,15 @@ the acknowledgment never opens a privileged export path.
 
 On a dev machine, paperclip runs as a `local_trusted` instance and accepts
 unauthenticated loopback board calls — that is why the launcher can skip
-`PAPERCLIP_GATE_API_KEY`. The flip side: the human-approval gate is
-enforceable only against the agents' *missing egress credentials* (egress
-write tokens exist solely in the gate-proxy process, so agents have no
-direct egress write path to a vendor; agent-side read tokens must be
-read-scoped per each connector skill). An arbitrary local process outside the agent sandbox could still
-call the board or a vendor directly. Production deployments with auth
-enabled (export `PAPERCLIP_GATE_API_KEY`, minted via `paperclipai auth
-login`) get the structural gate as well.
+gate-agent credentials. The flip side: the human-approval gate is enforceable
+only on calls that actually traverse it. The launcher removes egress secrets
+from the server/adapter environment, but an arbitrary local process can still
+call the board or a vendor directly. Authenticated production-safety mode now
+requires a board key, a dedicated company/agent-scoped gate identity, signed
+startup readiness, and launcher-owned listener processes; it still does not
+isolate an arbitrary same-UID agent from host files, process credentials, or
+direct network egress. Multi-lawyer production readiness therefore remains
+blocked on the isolated-worker reference deployment and sacrificial-agent eval.
 
 ### Matter-classification floor (v1)
 
@@ -306,29 +310,102 @@ Honest limits:
   as before. The fail-closed `unspecifiedConfidentialityDefault` covers only
   unlabeled `query_external_model` traffic. Registering the floor at intake
   (see `legal-matter-intake`) is what makes the guarantee bind.
-- **The registration route is loopback-only but unauthenticated.** Raise-only
-  merge means a hostile registration can never *lower* a floor — the worst
-  case is an unwanted raise (availability, fail-closed direction) — and every
-  registration attempt is hash-chain receipted. Route auth plus an opt-in
-  strict registered-matters-only mode are the follow-up hardening pass.
+- **Authentication depends on the launch profile.** In `--production`, the
+  route requires the calling agent's `PAPERCLIP_API_KEY`, validates it through
+  Paperclip, enforces the gate's company, and derives the receipt `agentId`
+  from that authenticated identity. In the default non-production profile,
+  inbound gate authentication remains disabled for local demo compatibility.
+  Raise-only merge means a hostile local registration can never *lower* a
+  floor — the worst case is an unwanted raise (availability, fail-closed
+  direction) — and every registration attempt is hash-chain receipted.
 - **Raise-only is irreversible by design.** A mistaken over-registration
   cannot be lowered; re-import into a fresh data dir if a floor was set in
   error.
 
 ### Receipt chain assumes a single writer
 
-The hash-chained receipts file (`receipts.jsonl`) is append-only under a
-single-writer assumption: one gate-proxy process per file. Two proxies
-pointed at the same `GATE_RECEIPTS_PATH` will interleave appends and break
-the chain. The launcher derives the path from the data-dir name
-(`~/.possiblaw/gate-receipts/<data-dir-name>/`), so parallel disposable
-launches stay isolated as long as their `--data-dir` values differ.
+The hash-chained receipts file (`receipts.jsonl`) remains a single-writer
+store. The gate now takes an exclusive process-lifetime writer lease and
+refuses a second writer rather than interleaving appends. The launcher binds
+the path to the canonical data-directory hash plus company/wall identity under
+`~/.possiblaw/gate-receipts/`, validates containment/no symlinks, and records
+`companyId` in new receipts. A separately tested multi-writer storage adapter
+does not exist.
 
 Tamper-evidence has a same-user limit: a local process that can rewrite the
 whole file can also recompute every hash, so a wholesale rewrite is caught
 only against an externally anchored chain head (`POST /receipts/anchor`
 posts the head into a paperclip comment). Anchor periodically if receipts
 matter for your audit posture.
+
+Dispatches are deliberately conservative after uncertainty. The gate fsyncs a
+stable operation reservation before external action, bounds each outbound
+fetch through complete response-body consumption, rejects responses above the
+validated `GATE_FETCH_MAX_RESPONSE_BYTES` cap (10 MiB by default), and has a
+hard shutdown deadline that releases the writer lease and exits nonzero. Any
+previously recorded operation ID — including a completed or
+indeterminate one — is not dispatched again automatically. An operator must
+reconcile the vendor state and deliberately create a distinct future attempt;
+there is no automated reconciliation UI or vendor-wide idempotency integration
+yet.
+
+### Production gate authentication does not replace worker isolation
+
+`--production` protects all gate routes except exact `GET /health` and
+`GET /ready`. It validates each bearer key through Paperclip
+`GET /api/agents/me`, requires the configured company, derives the receipt
+agent identity, and rejects caller-supplied identity spoofing. This closes
+unauthenticated and cross-company calls through the supported gate transport.
+
+It does not stop a hostile process running as the same OS user from reading
+gate credentials or custody files, inspecting same-user process state where
+the host allows it, or calling a provider directly. Separate worker identity,
+restricted mounts, and network egress policy remain the production boundary.
+
+### Production gate capabilities are default-deny and intentionally incomplete
+
+Authenticated production ingress now authorizes the immutable Paperclip
+`(companyId, agentId)` principal against an exact route/tool allowlist. Portable
+configuration names package agents by slug, but the launcher resolves those
+slugs to company-bound immutable IDs before the gate starts; the gate never
+authorizes by mutable name, slug, role, URL key, caller metadata, or wildcard.
+Only exact `GET /health` and `GET /ready` are public. An authenticated request
+for an unmapped route or an ungranted capability fails closed and produces a
+hash-only authorization-denial receipt before any handler or vendor call.
+
+The shipped baseline grants only currently approved specialist ownership:
+
+- `correspondence-clerk` may request gated email send;
+- `deliverables-courier` may upload documents to configured firm-review roots;
+- `legal-citation-checker` may register citation and authority evidence; and
+- `deadline-calculator` may record deterministic deadline receipts.
+
+Trusted Drive and OneDrive uploads use caller-facing aliases. The launcher
+resolves each alias from operator environment references to an exact Google
+Drive folder or exact OneDrive `(driveId, parentItemId)` tuple, then the gate
+constructs the vendor payload server-side. Raw caller-supplied provider IDs are
+rejected. The shipped policy requires human review for ordinary
+`THIRD_PARTY_EGRESS`; only a principal-authorized, server-resolved firm-review
+root receives the narrow automatic-workspace exception. Client/counterparty
+sends, court filings, signatures, payments, external deletion, and every
+unassigned route remain denied or human-gated.
+
+This matrix is deliberately not feature-complete. Matter classification,
+receipt bundle/read/anchor ownership, and the prohibited high-consequence
+actions have no approved principal yet, so production denies them. Team leads
+have not been granted those capabilities by inference. The runtime compiler
+and denial paths are covered by credential-free tests, but disposable live
+multi-agent/provider validation is still `OPERATOR-GATED`.
+
+### Paperclip can log failed secret-request bodies
+
+At the pinned Paperclip commit, the request logger records the request body on
+HTTP failures while redacting only the authorization header. A failed secret
+creation request can therefore persist its plaintext `value` in Paperclip's
+server log. PossibLaw does not patch the pinned submodule. Until an upstream
+redaction fix is pinned, production operators must tightly restrict and retain
+those logs, avoid copying them into broad observability sinks, and treat this
+as a release blocker for launcher-managed provider-secret provisioning.
 
 ### dataTerms tier-floor is staged, not enforced at runtime
 
@@ -411,7 +488,7 @@ still apply exactly as before:
 Per-matter isolation inside one company is still not implemented — see
 `docs/workflows/ethical-walls.md` → "What a wall does not do."
 
-### Authenticated mode: `BETTER_AUTH_SECRET` is visible to agent processes
+### Authenticated mode: `BETTER_AUTH_SECRET` remains reachable to same-UID agents
 
 Paperclip's authenticated boot reads its signing secret from the server
 process environment and nowhere else —
@@ -419,21 +496,19 @@ process environment and nowhere else —
 `process.env.BETTER_AUTH_SECRET` (falling back to
 `PAPERCLIP_AGENT_JWT_SECRET`) with no file-based alternative at the pinned
 commit. So when `--auth-mode authenticated` is on, the launcher has no
-choice but to place the secret in the server's env — and adapter-spawned
-agent processes inherit that env wholesale. Unlike egress credentials, it
-cannot be scrubbed the way the launcher's `EGRESS_CRED_VARS` scrub works:
-the server itself needs it live.
+choice but to place the secret in the server's env and persist it for session
+continuity. The launcher now injects an explicit empty `BETTER_AUTH_SECRET`
+override into imported agent adapter configs, so an ordinary agent environment
+does not receive the value. The persisted file is created/read with no-follow,
+regular-file, owner, link-count, mode-0600, and exclusive-create checks.
 
-The consequence: a hostile or prompt-injected agent that reads its own
-process environment could exfiltrate `BETTER_AUTH_SECRET` and forge user
-sessions on the instance. No layer-side fix exists at the pinned commit —
-env allowlisting for agent spawns (handing agents a curated env instead of
-the server's) would be an upstream paperclip change, as would a file-based
-secret. The launcher warns at authenticated boot. Until upstream supports
-one of those, **treat agent code and skills as trusted in authenticated
-mode** — the same trust you already extend by running them on your machine,
-but worth stating because authenticated mode otherwise reads as a strict
-trust upgrade.
+The remaining consequence is more fundamental: an unsandboxed agent running
+as the same OS user can read the persisted file, inspect same-user process
+state where the host permits it, and reach vendor networks directly. Empty
+adapter-env overrides are not a security boundary against that attacker. Until
+the reference deployment runs agents under a separate identity/container with
+restricted mounts, a curated environment, and egress policy, **treat agent code
+and skills as trusted and do not claim multi-lawyer production readiness**.
 
 One related side effect: `--dry-run` combined with `--auth-mode
 authenticated` still writes the persistent `<data-dir>/better-auth.secret`
@@ -651,10 +726,13 @@ does NOT prove the source passage genuinely came from the cited authority —
 that link is enforced by the `legal-citation-checker` agent's workflow, not
 cryptographically. On a `local_trusted` dev instance, any local process can
 call `POST /quality/citation` to register a verification (the same trust model
-as the human-approval gate — see "Gate proxy" above); production deployments
-with `PAPERCLIP_GATE_API_KEY` enabled get the structural boundary. Good-law
-and currency checks (KeyCite / Shepard's) are never performed by the gate and
-remain operator/counsel follow-ups.
+as the human-approval gate — see "Gate proxy" above). Production gate ingress
+validates the calling agent key and derives its identity; the separate
+gate-agent key authenticates the gate's own control-plane calls. A same-UID
+unsandboxed agent remains able to bypass local transport controls until worker
+isolation lands. Good-law and currency checks (KeyCite /
+Shepard's) are never performed by the gate and remain operator/counsel
+follow-ups.
 
 ### Per-segment provenance is citation-backing only (Phase A)
 
@@ -715,8 +793,9 @@ this by provisioning a company-scoped key (`type: "agent"`) so the facade
 authenticates as an agent, not a board actor, and cannot call `assertBoard`. If
 the mint fails and the operator does not manually provision a key, the structural
 "cannot approve" guarantee holds only at the code level (no approve code path
-exists), not at the paperclip auth layer. Production deployments with
-`PAPERCLIP_GATE_API_KEY` enabled get the full structural boundary.
+exists), not at the paperclip auth layer. Authenticated production-safety mode
+requires a pinned company/agent identity, but the broader same-UID worker
+isolation blocker still applies.
 
 ### Work-product full text is default-closed + opt-in
 
@@ -878,7 +957,10 @@ The claim that GLM 5.2 is cost-competitive with Claude Opus 4 on legal tasks is 
 
 The minted agent key is returned once by Paperclip and written to
 `<data-dir>/firm-facade-mcp.json` (mode 600). It cannot be retrieved again from
-Paperclip. If the file is lost, revoke the old key and mint a new one.
+Paperclip. The launcher mints it only on the wake-disabled
+`firm-facade-recorder` service identity; it never falls back to
+`chief-of-staff` or another working agent. If the file is lost, revoke the old
+key and mint a new one.
 
 `PAPERCLIP_PUBLIC_URL` defaults to the Paperclip loopback base
 (`http://127.0.0.1:<port>`), so approval deep links in `request_approval`

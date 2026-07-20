@@ -30,6 +30,23 @@ test("confidential tier strips a Party=... matter caption", () => {
   assert.match(r.query, /antitrust/);
 });
 
+test("privileged tier strips person-name case captions", () => {
+  const r = sanitizeQuery("Smith v. Jones negligent supervision standard", "privileged");
+  assert.ok(!/Smith/.test(r.query), `person name leaked: ${r.query}`);
+  assert.ok(!/Jones/.test(r.query), `person name leaked: ${r.query}`);
+  assert.match(r.query, /negligent supervision standard/);
+});
+
+test("privileged tier strips labeled person names and docket numbers", () => {
+  const r = sanitizeQuery(
+    "client Jane Smith docket 2024-CV-01234 trade secret injunction",
+    "privileged",
+  );
+  assert.ok(!/Jane Smith/.test(r.query), `person name leaked: ${r.query}`);
+  assert.ok(!/2024-CV-01234/.test(r.query), `docket leaked: ${r.query}`);
+  assert.match(r.query, /trade secret injunction/);
+});
+
 test("redaction never leaves an empty query when neutral terms remain", () => {
   const r = sanitizeQuery("ACME Inc. software license", "confidential");
   assert.ok(r.query.trim().length > 0);

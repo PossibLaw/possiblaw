@@ -195,8 +195,9 @@ public.
 
 **Hosted `authenticated` in your tenant:**
 - **Infra:** VM/container, persistent volume for the data dir, backups,
-  supervision (systemd — the launcher is laptop-shaped; the
-  reattach-without-reimport gap gets more annoying here), TLS + stable base
+  supervision (systemd — the launcher is laptop-shaped, and production
+  deliberately refuses to attach to a pre-existing unattested process),
+  TLS + stable base
   URL if exposure is public (`authenticated` + explicit
   `PAPERCLIP_AUTH_PUBLIC_BASE_URL` enforced at boot; private/VPN exposure is
   much lighter).

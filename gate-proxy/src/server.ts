@@ -36,6 +36,16 @@ import { documentSha256, extractCitations } from "./citations.ts";
 import { extractDocumentText } from "./document-text.ts";
 import { buildProvenance } from "./provenance/provenance.ts";
 import { DEFAULT_MAX_UPLOAD_BYTES, decodeBase64Strict, isValidMimeType, resolveUploadMimeType } from "./upload.ts";
+import { dispatchOperationId, hasUnresolvedDispatch } from "./operations.ts";
+import { createStartupProof } from "./startup-attestation.ts";
+import type { InboundAuthenticator } from "./inbound-auth.ts";
+import {
+  DEFAULT_GATE_AUTHORIZATION,
+  resolveGateRoute,
+  isGateRequestAuthorized,
+  resolveTrustedDestination,
+  type GateAuthorizationPolicy,
+} from "./authorization.ts";
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -62,6 +72,23 @@ export interface GateServerDeps {
    * GATE_MAX_UPLOAD_BYTES env override. Invalid values fall back to the default.
    */
   maxUploadBytes?: number;
+  /** Authenticated company-scoped control-plane probe used by GET /ready. */
+  paperclipReadiness?: (() => Promise<void>) | null;
+  /** Process-stable identity returned by GET /ready. */
+  instanceId?: string;
+  /** Expected Paperclip company binding returned by GET /ready. */
+  companyId?: string | null;
+  /** SHA-256 of the effective gate policy returned by GET /ready. */
+  policyDigest?: string;
+  /** One-time launcher secret used only to derive the bound readiness proof. */
+  startupSecret?: string;
+  /** Optional production boundary: authenticate every non-probe request. */
+  inboundAuth?: {
+    companyId: string;
+    authenticate: InboundAuthenticator;
+  } | null;
+  /** Company-bound immutable agent-ID authorization compiled by the launcher. */
+  authorization?: GateAuthorizationPolicy;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +204,13 @@ function isValidId(id: unknown): boolean {
   return SAFE_ID_RE.test(id);
 }
 
+function bearerToken(authorization: string | undefined): string | null {
+  if (authorization === undefined || authorization.length > 4120) return null;
+  const match = authorization.match(/^Bearer ([A-Za-z0-9\-._~+/]+=*)$/i);
+  const token = match?.[1];
+  return token !== undefined && token.length <= 4096 ? token : null;
+}
+
 // ---------------------------------------------------------------------------
 // performAndReceipt — shared helper for the four near-identical perform blocks
 // ---------------------------------------------------------------------------
@@ -218,6 +252,41 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
 
   // I5: claimedConfidentiality in every egress receipt meta
   const claimedConfidentiality = sanitizeClaimedConfidentiality(meta.confidentiality);
+  const operationId = dispatchOperationId({
+    target: "performer",
+    tool,
+    payloadSha256,
+    issueId: meta.issueId,
+    approvalId: approvalId ?? meta.approvalId,
+  });
+
+  // Persist and fsync an intent before any performer can cause an external
+  // side effect. If the process dies after dispatch but before the completion
+  // receipt, the durable `reserved` entry records an indeterminate dispatch
+  // that operators can reconcile instead of leaving an invisible action.
+  try {
+    receipts.assertAppendable();
+    if (hasUnresolvedDispatch(receipts, operationId)) {
+      sendJson(res, 409, { error: "indeterminate_dispatch", operationId });
+      return;
+    }
+    receipts.append({
+      kind: "egress",
+      tool,
+      boundary,
+      decision,
+      outcome: "reserved",
+      payloadSha256,
+      agentId: meta.agentId,
+      issueId: meta.issueId,
+      approvalId: approvalId ?? meta.approvalId,
+      operationId,
+      meta: { dispatchReservation: true, claimedConfidentiality },
+    });
+  } catch {
+    sendJson(res, 503, { error: "receipts_unavailable" });
+    return;
+  }
 
   const performer = performers[tool];
   try {
@@ -264,6 +333,7 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
       agentId: meta.agentId,
       issueId: meta.issueId,
       approvalId: approvalId ?? meta.approvalId,
+      operationId,
       meta: receiptMeta,
     });
 
@@ -276,7 +346,12 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
     sendJson(res, 200, { decision: responseDecisionLabel, result: finalResult });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const errorReceiptMeta: Record<string, unknown> = { error: msg, claimedConfidentiality, ...(extraReceiptMeta ?? {}) };
+    const errorReceiptMeta: Record<string, unknown> = {
+      error: msg,
+      claimedConfidentiality,
+      dispatchIndeterminate: true,
+      ...(extraReceiptMeta ?? {}),
+    };
     receipts.append({
       kind: "egress",
       tool,
@@ -287,6 +362,7 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
       agentId: meta.agentId,
       issueId: meta.issueId,
       approvalId: approvalId ?? meta.approvalId,
+      operationId,
       meta: errorReceiptMeta,
     });
     sendJson(res, 502, { error: msg });
@@ -300,6 +376,26 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
 export function createGateServer(deps: GateServerDeps): http.Server {
   const { policy, receipts, client, performers, localModelAvailable } = deps;
   const log = deps.log ?? noop;
+  const instanceId = deps.instanceId ?? crypto.randomUUID();
+  const companyId = deps.companyId ?? null;
+  const authorization = deps.authorization ?? DEFAULT_GATE_AUTHORIZATION;
+  const policyDigest = deps.policyDigest ?? sha256hex(canonicalJson({ policy, authorization }));
+  if (
+    deps.inboundAuth !== undefined &&
+    deps.inboundAuth !== null &&
+    authorization.companyId !== deps.inboundAuth.companyId
+  ) {
+    throw new Error("authenticated gate requires company-bound runtime authorization");
+  }
+  if (
+    deps.startupSecret !== undefined &&
+    (companyId === null || companyId.trim().length === 0)
+  ) {
+    throw new Error("startup attestation requires a concrete company binding");
+  }
+  const startupProof = deps.startupSecret === undefined
+    ? undefined
+    : createStartupProof(deps.startupSecret, instanceId, companyId as string, policyDigest);
   // Task H: matter-classification floors. Auto-constructed from the same
   // receipt chain when not supplied so the safe default always exists.
   const matterClassifications =
@@ -340,6 +436,116 @@ export function createGateServer(deps: GateServerDeps): http.Server {
   const server = http.createServer(async (req, res) => {
     const url = req.url ?? "/";
     const method = req.method ?? "GET";
+    const routeResolution = resolveGateRoute(method, url);
+
+    // Health/readiness probes intentionally remain public. Every other route
+    // authenticates before reading the body or touching the receipt chain.
+    let authenticatedAgentId: string | undefined;
+    const publicProbe = routeResolution.kind === "public";
+    if (!publicProbe && deps.inboundAuth !== undefined && deps.inboundAuth !== null) {
+      const token = bearerToken(req.headers.authorization);
+      if (token === null) {
+        sendJson(res, 401, { error: "unauthorized" });
+        return;
+      }
+      let identity;
+      try {
+        identity = await deps.inboundAuth.authenticate(token);
+      } catch {
+        sendJson(res, 401, { error: "unauthorized" });
+        return;
+      }
+      if (identity.companyId !== deps.inboundAuth.companyId) {
+        sendJson(res, 403, { error: "forbidden" });
+        return;
+      }
+      if (!isValidId(identity.agentId) || identity.agentId === undefined) {
+        sendJson(res, 401, { error: "unauthorized" });
+        return;
+      }
+      authenticatedAgentId = identity.agentId;
+      if (routeResolution.kind === "invalid") {
+        sendJson(res, 400, { error: routeResolution.error });
+        return;
+      }
+      if (routeResolution.kind === "unmapped") {
+        try {
+          receipts.append({
+            kind: "authorization",
+            tool: "unmapped_request",
+            boundary: null,
+            decision: "block",
+            outcome: "blocked",
+            payloadSha256: sha256hex(`${method}\n${url}`),
+            agentId: authenticatedAgentId,
+            meta: { reason: "unmapped_route", enforcementDigest: policyDigest },
+          });
+        } catch {
+          sendJson(res, 503, { error: "receipts_unavailable" });
+          return;
+        }
+        log(`authorization_denied agentId=${authenticatedAgentId} target=unmapped_request`);
+        sendJson(res, 403, { error: "forbidden" });
+        return;
+      }
+      if (
+        routeResolution.kind === "protected" &&
+        !isGateRequestAuthorized(authorization, authenticatedAgentId, routeResolution.target)
+      ) {
+        try {
+          receipts.append({
+            kind: "authorization",
+            tool: routeResolution.target,
+            boundary: null,
+            decision: "block",
+            outcome: "blocked",
+            payloadSha256: sha256hex(""),
+            agentId: authenticatedAgentId,
+            meta: { reason: "capability_missing", enforcementDigest: policyDigest },
+          });
+        } catch {
+          sendJson(res, 503, { error: "receipts_unavailable" });
+          return;
+        }
+        log(`authorization_denied agentId=${authenticatedAgentId} target=${routeResolution.target}`);
+        sendJson(res, 403, { error: "forbidden" });
+        return;
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // GET /ready — durable receipts first, then authenticated Paperclip.
+    // ------------------------------------------------------------------
+    if (method === "GET" && url === "/ready") {
+      try {
+        receipts.assertAppendable();
+      } catch {
+        sendJson(res, 503, { ok: false, error: "receipts_unavailable" });
+        return;
+      }
+      if (client !== null && (deps.paperclipReadiness === undefined || deps.paperclipReadiness === null)) {
+        sendJson(res, 503, { ok: false, error: "paperclip_unavailable" });
+        return;
+      }
+      if (deps.paperclipReadiness !== undefined && deps.paperclipReadiness !== null) {
+        try {
+          await deps.paperclipReadiness();
+        } catch {
+          sendJson(res, 503, { ok: false, error: "paperclip_unavailable" });
+          return;
+        }
+      }
+      sendJson(res, 200, {
+        ok: true,
+        receipts: "ready",
+        paperclip: deps.paperclipReadiness ? "ready" : "not_configured",
+        instanceId,
+        companyId,
+        policyDigest,
+        ...(startupProof !== undefined ? { startupProof } : {}),
+      });
+      return;
+    }
 
     // ------------------------------------------------------------------
     // GET /health
@@ -437,6 +643,28 @@ export function createGateServer(deps: GateServerDeps): http.Server {
         const { issueId } = parsed as Record<string, unknown>;
         // Compute anchorText ONCE then reuse for both the comment and the receipt hash
         const anchorText = receipts.anchorText();
+        const operationId = dispatchOperationId({
+          target: "paperclip_comment",
+          tool: "anchor",
+          payloadSha256: sha256hex(anchorText),
+          issueId: typeof issueId === "string" ? issueId : undefined,
+        });
+        receipts.assertAppendable();
+        if (hasUnresolvedDispatch(receipts, operationId)) {
+          sendJson(res, 409, { error: "indeterminate_dispatch", operationId });
+          return;
+        }
+        receipts.append({
+          kind: "anchor",
+          tool: "anchor",
+          boundary: null,
+          decision: null,
+          outcome: "reserved",
+          operationId,
+          payloadSha256: sha256hex(anchorText),
+          agentId: authenticatedAgentId,
+          meta: { dispatchReservation: true },
+        });
         await client.postIssueComment(issueId as string, anchorText);
         const anchorReceiptBody: ReceiptBody = {
           kind: "anchor",
@@ -444,7 +672,9 @@ export function createGateServer(deps: GateServerDeps): http.Server {
           boundary: null,
           decision: null,
           outcome: "performed",
+          operationId,
           payloadSha256: sha256hex(anchorText),
+          agentId: authenticatedAgentId,
         };
         const entry = receipts.append(anchorReceiptBody);
         sendJson(res, 200, { anchored: true, head: entry.hash });
@@ -481,6 +711,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_json" });
           return;
@@ -505,8 +736,27 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_registration: requires string 'document', rows[] of {citation, match[, quoted, sourcePassage]} (max 500), valid meta ids" });
+          return;
+        }
+        if (
+          authenticatedAgentId !== undefined &&
+          rawMeta["agentId"] !== undefined &&
+          rawMeta["agentId"] !== authenticatedAgentId
+        ) {
+          deps.receipts.append({
+            kind: "quality",
+            tool: "citation_verification",
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
+            meta: { error: "agent_identity_mismatch" },
+          });
+          sendJson(res, 403, { error: "agent_identity_mismatch" });
           return;
         }
         let result;
@@ -514,7 +764,10 @@ export function createGateServer(deps: GateServerDeps): http.Server {
           result = deps.citationRegistry.register({
             document: b["document"] as string,
             rows: rows as { citation: string; match: string; quoted?: string; sourcePassage?: string }[],
-            meta: { agentId: rawMeta["agentId"] as string | undefined, issueId: rawMeta["issueId"] as string | undefined },
+            meta: {
+              agentId: authenticatedAgentId ?? rawMeta["agentId"] as string | undefined,
+              issueId: rawMeta["issueId"] as string | undefined,
+            },
           });
         } catch (err) {
           deps.receipts.append({
@@ -524,6 +777,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: `registration_rejected: ${err instanceof Error ? err.message : "invalid input"}` });
           return;
@@ -569,6 +823,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_json" });
           return;
@@ -593,6 +848,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_authority: requires non-empty 'citation', 64-hex 'sha256', 'source'[, 'sourceUrl', 'retrievedAt', 'meta']" });
           return;
@@ -608,6 +864,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_authority: citation does not contain a recognized legal citation" });
           return;
@@ -620,6 +877,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             source: b["source"] as string,
             sourceUrl: b["sourceUrl"] as string | undefined,
             retrievedAt: b["retrievedAt"] as string | undefined,
+            agentId: authenticatedAgentId,
           });
         } catch (err) {
           deps.receipts.append({
@@ -629,6 +887,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: `authority_rejected: ${err instanceof Error ? err.message : "invalid input"}` });
           return;
@@ -678,6 +937,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_json" });
           return;
@@ -696,6 +956,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_tool: must be one of create_matter, get_matter_status, list_work_products, fetch_work_product, request_approval" });
           return;
@@ -712,6 +973,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_outcome: must be one of performed, anonymized_performed, pending, blocked, error" });
           return;
@@ -728,6 +990,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_payloadSha256: must be 64-char lowercase hex" });
           return;
@@ -751,8 +1014,27 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_id: optional id fields must match [A-Za-z0-9-]{1,64} if present" });
+          return;
+        }
+        if (
+          authenticatedAgentId !== undefined &&
+          agentId !== undefined &&
+          agentId !== authenticatedAgentId
+        ) {
+          deps.receipts.append({
+            kind: "firm_facade",
+            tool,
+            boundary: null,
+            decision: null,
+            outcome: "error",
+            payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
+            meta: { error: "agent_identity_mismatch" },
+          });
+          sendJson(res, 403, { error: "agent_identity_mismatch" });
           return;
         }
 
@@ -767,6 +1049,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
               decision: null,
               outcome: "error",
               payloadSha256: sha256hex(rawBody),
+              agentId: authenticatedAgentId,
             });
             sendJson(res, 400, { error: "invalid_meta: must be a plain object if present" });
             return;
@@ -779,6 +1062,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
               decision: null,
               outcome: "error",
               payloadSha256: sha256hex(rawBody),
+              agentId: authenticatedAgentId,
             });
             sendJson(res, 400, { error: `invalid_meta: serialized meta must be <= ${FACADE_META_MAX_BYTES} bytes` });
             return;
@@ -803,7 +1087,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
           decision: null,
           outcome,
           payloadSha256,
-          agentId: agentId as string | undefined,
+          agentId: authenticatedAgentId ?? agentId as string | undefined,
           issueId: ((issueId ?? matterId) as string | undefined),
           approvalId: approvalId as string | undefined,
           ...(Object.keys(receiptMeta).length > 0 ? { meta: receiptMeta } : {}),
@@ -848,6 +1132,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_json" });
           return;
@@ -864,6 +1149,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_matterId: required, must match [A-Za-z0-9-]{1,64}" });
           return;
@@ -879,6 +1165,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, { error: "invalid_payloadSha256: must be 64-char lowercase hex" });
           return;
@@ -900,6 +1187,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, {
             error: "invalid_meta: required plain object {deadline:YYYY-MM-DD, rule:FRCP-6, jurisdiction:US-FED, direction:forward|backward, days:positive-integer, serviceByMail:boolean}",
@@ -916,6 +1204,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, {
             error: "invalid_meta: must have exactly {deadline, rule, jurisdiction, direction, days, serviceByMail} — no extra or missing fields",
@@ -937,6 +1226,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
           sendJson(res, 400, {
             error: "invalid_meta: deadline must be YYYY-MM-DD, rule must be FRCP-6, jurisdiction must be US-FED, direction must be forward|backward, days must be positive integer, serviceByMail must be boolean",
@@ -954,6 +1244,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
           decision: null,
           outcome: "performed",
           payloadSha256,
+          agentId: authenticatedAgentId,
           issueId: matterId as string,
           meta: {
             deadline: meta["deadline"],
@@ -997,6 +1288,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(rawBody),
+            agentId: authenticatedAgentId,
           });
         };
         let parsed: unknown;
@@ -1019,7 +1311,11 @@ export function createGateServer(deps: GateServerDeps): http.Server {
         }
         let result;
         try {
-          result = matterClassifications.register({ issueId, tier });
+          result = matterClassifications.register({
+            issueId,
+            tier,
+            agentId: authenticatedAgentId,
+          });
         } catch (err) {
           errorReceipt();
           sendJson(res, 400, {
@@ -1062,10 +1358,23 @@ export function createGateServer(deps: GateServerDeps): http.Server {
     // ------------------------------------------------------------------
     const egressMatch = url.match(/^\/egress\/([^/?#]+)(?:\?.*)?$/);
     if (method === "POST" && egressMatch) {
-      const tool = decodeURIComponent(egressMatch[1]);
+      let tool: string;
+      try {
+        tool = decodeURIComponent(egressMatch[1]);
+      } catch {
+        sendJson(res, 400, { error: "invalid_tool" });
+        return;
+      }
       // C2 (a): entire egress handler wrapped in try/catch
       try {
-        await handleEgress(tool, req, res, { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, authorityRegistry: deps.authorityRegistry, matterClassifications, log, maxUploadBytes });
+        await handleEgress(
+          tool,
+          req,
+          res,
+          { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, authorityRegistry: deps.authorityRegistry, matterClassifications, log, maxUploadBytes, paperclipReadiness: deps.paperclipReadiness ?? null, instanceId, companyId, policyDigest },
+          authenticatedAgentId,
+          authorization,
+        );
       } catch (outerErr) {
         // Best-effort: try to append an error receipt; if the chain itself is
         // corrupt, log a no-payload line and continue — process stays alive.
@@ -1079,6 +1388,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
             decision: null,
             outcome: "error",
             payloadSha256: sha256hex(""),
+            agentId: authenticatedAgentId,
           });
         } catch {
           log(`egress_receipt_failed tool=${tool}`);
@@ -1107,7 +1417,9 @@ async function handleEgress(
   tool: string,
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  deps: Required<GateServerDeps>,
+  deps: Required<Omit<GateServerDeps, "startupSecret" | "inboundAuth" | "authorization">>,
+  authenticatedAgentId?: string,
+  authorization: Readonly<GateAuthorizationPolicy> = DEFAULT_GATE_AUTHORIZATION,
 ): Promise<void> {
   const { policy, receipts, client, performers, localModelAvailable, citationRegistry, authorityRegistry, matterClassifications, log } = deps;
 
@@ -1131,6 +1443,7 @@ async function handleEgress(
       decision: null,
       outcome: "error",
       payloadSha256: sha256hex(""),
+      agentId: authenticatedAgentId,
     });
     sendJson(res, 413, { error: "request_too_large" });
     return;
@@ -1149,6 +1462,7 @@ async function handleEgress(
       decision: null,
       outcome: "error",
       payloadSha256,
+      agentId: authenticatedAgentId,
     });
     sendJson(res, 400, { error: "invalid_json: request body is not valid JSON" });
     return;
@@ -1166,12 +1480,13 @@ async function handleEgress(
       decision: null,
       outcome: "error",
       payloadSha256,
+      agentId: authenticatedAgentId,
     });
     sendJson(res, 400, { error: "invalid_payload: 'payload' field must be an object" });
     return;
   }
 
-  const payload = rawPayload as Record<string, unknown>;
+  let payload = rawPayload as Record<string, unknown>;
 
   // minor: meta must be a plain object when present → else 400 + error receipt
   const rawMeta = bodyObj["meta"];
@@ -1185,13 +1500,35 @@ async function handleEgress(
         decision: null,
         outcome: "error",
         payloadSha256,
+        agentId: authenticatedAgentId,
       });
       sendJson(res, 400, { error: "invalid_meta: 'meta' field must be an object" });
       return;
     }
   }
 
-  const meta = (rawMeta as EgressMeta | undefined) ?? {};
+  const callerMeta = (rawMeta as EgressMeta | undefined) ?? {};
+  if (
+    authenticatedAgentId !== undefined &&
+    callerMeta.agentId !== undefined &&
+    callerMeta.agentId !== authenticatedAgentId
+  ) {
+    receipts.append({
+      kind: "egress",
+      tool,
+      boundary: null,
+      decision: null,
+      outcome: "error",
+      payloadSha256: sha256hex(rawBody),
+      agentId: authenticatedAgentId,
+      meta: { error: "agent_identity_mismatch" },
+    });
+    sendJson(res, 403, { error: "agent_identity_mismatch" });
+    return;
+  }
+  const meta: EgressMeta = authenticatedAgentId === undefined
+    ? callerMeta
+    : { ...callerMeta, agentId: authenticatedAgentId };
 
   // I1 (a): validate agent-supplied IDs against safe pattern
   if (!isValidId(meta.issueId)) {
@@ -1203,6 +1540,7 @@ async function handleEgress(
       decision: null,
       outcome: "error",
       payloadSha256,
+      agentId: meta.agentId,
     });
     sendJson(res, 400, { error: "invalid_meta: meta.issueId contains invalid characters" });
     return;
@@ -1216,6 +1554,7 @@ async function handleEgress(
       decision: null,
       outcome: "error",
       payloadSha256,
+      agentId: meta.agentId,
     });
     sendJson(res, 400, { error: "invalid_meta: meta.approvalId contains invalid characters" });
     return;
@@ -1229,6 +1568,7 @@ async function handleEgress(
       decision: null,
       outcome: "error",
       payloadSha256,
+      agentId: authenticatedAgentId,
     });
     sendJson(res, 400, { error: "invalid_meta: meta.agentId contains invalid characters" });
     return;
@@ -1246,6 +1586,7 @@ async function handleEgress(
         decision: null,
         outcome: "error",
         payloadSha256,
+        agentId: meta.agentId,
       });
       sendJson(res, 400, { error: `invalid_meta: meta.entities exceeds maximum of ${MAX_ENTITIES} entries` });
       return;
@@ -1260,11 +1601,80 @@ async function handleEgress(
           decision: null,
           outcome: "error",
           payloadSha256,
+          agentId: meta.agentId,
         });
         sendJson(res, 400, { error: `invalid_meta: entity exceeds maximum length of ${MAX_ENTITY_LENGTH} characters` });
         return;
       }
     }
+  }
+
+  // Production upload custody uses a caller-facing destination alias that is
+  // resolved here to a company-bound, principal-authorized vendor tuple. Raw
+  // provider selectors are never merged with trusted values. The resolved
+  // tuple is in `payload` before any approval or operation hash is computed.
+  let trustedFirmWorkspace = false;
+  let trustedDestinationReceiptMeta: Record<string, unknown> = {};
+  if (authenticatedAgentId !== undefined && tool === "upload_document") {
+    const destinationId = payload["destinationId"];
+    const trustedDestinationId = typeof destinationId === "string" ? destinationId : null;
+    const callerSelectorKeys = [
+      "destination",
+      "folderId",
+      "driveId",
+      "parentItemId",
+      "parentPageId",
+      "trusted",
+    ];
+    const suppliedRawSelector = callerSelectorKeys.some((key) => payload[key] !== undefined);
+    const destination =
+      trustedDestinationId !== null
+        ? resolveTrustedDestination(authorization, authenticatedAgentId, trustedDestinationId)
+        : null;
+    if (suppliedRawSelector || destination === null) {
+      try {
+        receipts.append({
+          kind: "authorization",
+          tool: "egress:upload_document",
+          boundary: null,
+          decision: "block",
+          outcome: "blocked",
+          payloadSha256: sha256hex(rawBody),
+          agentId: authenticatedAgentId,
+          issueId: meta.issueId,
+          meta: {
+            reason: "destination_not_allowed",
+            enforcementDigest: deps.policyDigest,
+            ...(trustedDestinationId !== null
+              ? { destinationRefSha256: sha256hex(trustedDestinationId) }
+              : {}),
+          },
+        });
+      } catch {
+        sendJson(res, 503, { error: "receipts_unavailable" });
+        return;
+      }
+      sendJson(res, 403, { error: "forbidden" });
+      return;
+    }
+    const normalized: Record<string, unknown> = { ...payload };
+    delete normalized["destinationId"];
+    for (const key of callerSelectorKeys) delete normalized[key];
+    if (destination.provider === "gdrive") {
+      normalized["destination"] = "gdrive";
+      normalized["folderId"] = destination.folderId;
+    } else {
+      normalized["destination"] = "onedrive";
+      normalized["driveId"] = destination.driveId;
+      normalized["parentItemId"] = destination.parentItemId;
+    }
+    payload = normalized;
+    trustedFirmWorkspace = true;
+    trustedDestinationReceiptMeta = {
+      trustedFirmWorkspace: true,
+      destinationRefSha256: sha256hex(trustedDestinationId as string),
+      destinationTargetSha256: sha256hex(canonicalJson(destination)),
+    };
   }
 
   // 2b. Task 4.1 — binary upload contract (upload_document + contentBase64).
@@ -1433,7 +1843,7 @@ async function handleEgress(
   }
 
   // 5. Decide
-  const decision = decide(boundary, policy);
+  const decision = trustedFirmWorkspace ? "allow" : decide(boundary, policy);
 
   // Authority-provenance signal computed in the citation gate (5b) and threaded
   // onto whatever egress receipt the dispatch (step 6) ultimately writes, so the
@@ -1527,7 +1937,12 @@ async function handleEgress(
   // Extra non-payload audit meta that rides on the dispatched receipt:
   // binary upload facts (Task 4.1) + authority/provenance signals (5b–5d) +
   // confidentiality enforcement audit (Task H: effective tier + floor marker).
-  const extraReceiptMeta: Record<string, unknown> = { ...binaryReceiptMeta, ...authorityReceiptMeta, ...confidentialityAudit };
+  const extraReceiptMeta: Record<string, unknown> = {
+    ...binaryReceiptMeta,
+    ...authorityReceiptMeta,
+    ...confidentialityAudit,
+    ...trustedDestinationReceiptMeta,
+  };
 
   // 6. Dispatch by decision
   switch (decision) {
@@ -1692,7 +2107,37 @@ async function handleEgress(
       }
 
       let gateResult: Awaited<ReturnType<typeof humanGate>>;
+      const humanOperationId = meta.approvalId === undefined
+        ? dispatchOperationId({
+            target: "paperclip_approval",
+            tool,
+            payloadSha256,
+            issueId: meta.issueId,
+          })
+        : undefined;
       try {
+        // Every Paperclip request first proves the receipt store is usable. A
+        // first-call approval mutates Paperclip, so reserve that intent before
+        // humanGate can create/link/comment.
+        receipts.assertAppendable();
+        if (meta.approvalId === undefined) {
+          if (hasUnresolvedDispatch(receipts, humanOperationId!)) {
+            sendJson(res, 409, { error: "indeterminate_dispatch", operationId: humanOperationId });
+            return;
+          }
+          receipts.append({
+            kind: "egress",
+            tool,
+            boundary,
+            decision,
+            outcome: "reserved",
+            payloadSha256,
+            agentId: meta.agentId,
+            issueId: meta.issueId,
+            operationId: humanOperationId,
+            meta: { dispatchReservation: true, target: "paperclip_approval", claimedConfidentiality },
+          });
+        }
         // Bind the approval to humanGateSha256 (full payload), not the receipt
         // sha — see the humanGateSha256 computation above.
         gateResult = await humanGate(client, egressReq, boundary!, humanGateSha256);
@@ -1709,7 +2154,13 @@ async function handleEgress(
           agentId: meta.agentId,
           issueId: meta.issueId,
           approvalId: meta.approvalId,
-          meta: { error: msg, claimedConfidentiality, ...confidentialityAudit },
+          operationId: humanOperationId,
+          meta: {
+            error: msg,
+            claimedConfidentiality,
+            dispatchIndeterminate: humanOperationId !== undefined,
+            ...confidentialityAudit,
+          },
         });
         sendJson(res, 502, { error: msg });
         return;
@@ -1727,6 +2178,7 @@ async function handleEgress(
             agentId: meta.agentId,
             issueId: meta.issueId,
             approvalId: gateResult.approvalId,
+            operationId: humanOperationId,
             meta: { claimedConfidentiality, ...extraReceiptMeta },
           });
           sendJson(res, 202, {

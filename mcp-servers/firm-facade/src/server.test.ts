@@ -472,6 +472,14 @@ describe("buildDepsFromEnv", () => {
     );
   });
 
+  it("forwards PAPERCLIP_API_KEY to the gate receipt writer", () => {
+    const deps = buildDepsFromEnv(baseEnv);
+    assert.strictEqual(
+      (deps.receipts as unknown as Record<string, string>)["apiKey"],
+      "tok_fake_key",
+    );
+  });
+
   it("PAPERCLIP_API_KEY is optional — succeeds when absent (defaults to empty string)", () => {
     const { PAPERCLIP_API_KEY: _omit, ...envNoKey } = baseEnv;
     assert.doesNotThrow(() => buildDepsFromEnv(envNoKey));

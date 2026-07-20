@@ -148,6 +148,35 @@ test("(b) POST without X-Firm-Overview header -> 403", async () => {
   await overview.close();
 });
 
+test("SECURITY rejects a DNS-rebinding Host before serving the board", async () => {
+  const overview = await startOverview((token) => new PaperclipClient({ baseUrl: "http://127.0.0.1:1", token }));
+
+  try {
+    const target = new URL(overview.baseUrl);
+    const result = await new Promise<{ status: number; body: unknown }>((resolve, reject) => {
+      const req = http.request({
+        hostname: target.hostname,
+        port: target.port,
+        path: "/api/board",
+        headers: { Host: "attacker.example" },
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => resolve({
+          status: res.statusCode ?? 0,
+          body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown,
+        }));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(result.status, 403);
+    assert.deepEqual(result.body, { error: "host_not_allowed" });
+  } finally {
+    await overview.close();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // (c) POST with cross-origin Origin -> 403
 // ---------------------------------------------------------------------------

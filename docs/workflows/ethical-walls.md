@@ -74,6 +74,13 @@ precise error naming the conflicting company, and creates nothing:
 prefix collision: CON already used by company "Conflicted Client, LLC"
 ```
 
+This preflight is fail-closed: if any returned company lacks a valid
+`issuePrefix`, the launcher refuses to create the wall. The credential-free
+`bin/verify` suite also checks the pinned Paperclip source contract that
+membership filters `GET /api/companies`, exposes `issuePrefix`, and derives
+it from the company name. A Paperclip pin change therefore fails loudly
+instead of silently disabling the collision control.
+
 A collision on the **same** client name means "already walled" — the command
 deliberately creates nothing and does not re-wire the existing wall. A dead
 wall gate proxy comes back on the next successful relaunch (see "Restart
@@ -89,13 +96,14 @@ A successful run creates, in order:
 2. **A dedicated gate proxy** for that company only — never the firm's own
    proxy. Port is allocated upward from `--gate-port-base` (default: the same
    default as `--gate-port`); receipts land at
-   `~/.possiblaw/gate-receipts/<data-dir-basename>-<PREFIX>/receipts.jsonl` —
-   a separate hash-chained file, preserving the single-writer invariant per
-   proxy.
+   `~/.possiblaw/gate-receipts/<data-dir-basename>-<custody-id>-wall/<company-id>/receipts.jsonl`
+   — a separate hash-chained file, preserving the single-writer invariant per
+   proxy. Its key, PID, and log files are likewise named with the immutable
+   Paperclip company ID, not the three-letter display prefix.
 3. **A per-wall facade config** — only with `--firm-facade` —
-   `<data-dir>/firm-facade-mcp-<PREFIX>.json` (mode 600), named by prefix so
-   it can never collide with the firm's own `firm-facade-mcp.json` or another
-   wall's config.
+   `<data-dir>/firm-facade-mcp-<company-id>.json` (mode 600), named by
+   immutable company ID so it cannot collide with the firm's own
+   `firm-facade-mcp.json` or another wall's config.
 4. **Routines** — `matter-intake-sweep` is provisioned for the new company
    the same way it is for the main company, unless you pass `--no-routines`.
 5. **A registry entry** in `<data-dir>/walls.json`: `name`, `companyId`,
@@ -124,7 +132,7 @@ authenticated mode (below).
 |---|---|
 | `2` | Bad input: missing `--variant`, an unknown `--variant`/`--demo`, or a client name with fewer than three A–Z letters. |
 | `3` | Issue-prefix collision — including re-running `--add-wall` for a wall that already exists. |
-| `4` | No running instance found at `--port` (health check failed); or an attach/API failure after the health check passed — a non-200 from `GET /api/companies` (401/403 on an authenticated instance hints at `--api-key`), the import itself failing, no company id in the import response, or the `walls.json` registry write failing. In the later cases the wall may be **partially live** — see "Repairing a half-wired wall" below. |
+| `4` | No running instance found at `--port` (health check failed); or an attach/API failure after the health check passed — a non-200 from `GET /api/companies` (401/403 on an authenticated instance hints at `PAPERCLIP_API_KEY` / `--api-key-file`), the import itself failing, no company id in the import response, or the `walls.json` registry write failing. In the later cases the wall may be **partially live** — see "Repairing a half-wired wall" below. |
 
 ### Repairing a half-wired wall
 
@@ -149,21 +157,29 @@ incomplete. What actually repairs each piece:
   Paperclip UI/API (see `--firm-facade` in `docs/operator-walkthrough.md`
   and the routines section of `docs/workflows/matter-intake.md`).
 
-### Against an authenticated instance: `--api-key`
+### Against an authenticated instance: private board-key input
 
 If your firm runs in `--auth-mode authenticated` (see below), `--add-wall`
 needs a bearer token to call the running instance's API:
 
 ```bash
 ./bin/possiblaw --add-wall "Conflicted Client Inc" --variant codex \
-  --api-key pcp_board_<your-token>
+  --api-key-file "$HOME/.possiblaw/board-api-key"
 ```
 
-A missing or invalid key on an authenticated instance surfaces as exit `4`
-with an explicit hint: `authenticated instance? pass --api-key <pcp_board_…>
-(minted via the CLI-auth flow)`. Mint one the same way a lawyer connects the
-Firm Overview (see "Firm Overview" below) or via
-`pnpm -C paperclip paperclipai auth login`.
+The key file must be a regular file owned by the current user, mode `0600`,
+with exactly one link and no final-component symlink. The launcher also
+accepts `PAPERCLIP_API_KEY`; choose one source, not both. Literal
+`--api-key <token>` is rejected because command arguments are visible in
+process listings on many shared hosts. A missing or invalid key on an
+authenticated instance surfaces as exit `4` with an explicit credential
+hint. Mint a board token via `pnpm -C paperclip paperclipai auth login`, then
+store it with an editor or password-manager workflow that does not put the
+token on a command line. Finally, enforce its permissions:
+
+```bash
+chmod 600 "$HOME/.possiblaw/board-api-key"
+```
 
 ### What a wall does not do
 
@@ -186,11 +202,11 @@ way it skips the firm's own proxy. A wall whose `walls.json` entry has
 `status` other than `active` is left alone, and a malformed entry is skipped
 with a warning — a bad registry row never aborts the launch.
 
-**The guarantee is conditional: walls are restored only when the relaunch's
-import succeeds.** The launcher's main path always re-imports the package,
-and the wall-restore step runs downstream of that import — on import failure
-the launcher stops the server it just booted and exits before ever reaching
-it. The two most obvious relaunch patterns fail exactly there:
+**The guarantee is conditional: the launcher must reach the restore stage.**
+When it attaches to an already healthy non-production server with existing
+companies, it reuses the existing company and skips import. When it starts a
+new server process, it imports before restoring walls, so an import failure
+still stops before the restore stage. Two cases need particular care:
 
 - **Same data dir + the same (or default) `--org-name`** → import fails
   HTTP 500: the server derives the same issue prefix from the same org name
@@ -206,18 +222,11 @@ it. The two most obvious relaunch patterns fail exactly there:
     --org-name "Acme Legal (restarted)"
   ```
 
-- **`--auth-mode authenticated` relaunch** → import fails HTTP 403 (`Board
-  access required`): the main launch path's import POST is unauthenticated,
-  and at this writing `--api-key` is honored only by `--add-wall`, not by
-  the main launch path — so an authenticated relaunch cannot get past the
-  import (and therefore cannot restore walls) even after you have claimed
-  the board and hold a `pcp_board_…` key. See "Authenticated mode" below
-  for the interim manual server boot.
-
-A **reattach-without-reimport** launcher mode — relaunching against an
-existing data dir without re-importing at all, which would make wall
-restoration unconditional and unblock authenticated relaunches — is a named
-follow-up, not shipped yet.
+- **Authenticated launch without a board credential** → company discovery or
+  import fails with 401/403. Supply `PAPERCLIP_API_KEY` or
+  `--api-key-file <0600-path>`; the main import path and `--add-wall` use the
+  same private curl configuration. Production deliberately refuses
+  reattachment to an unattested pre-existing process.
 
 ## Authenticated mode: `--auth-mode authenticated`
 
@@ -248,17 +257,15 @@ and even a `--dry-run` combined with `--auth-mode authenticated` writes the
 persistent secret file (the secret is generated before the server boots,
 upstream of the dry-run exit).
 
-### The launch stops at import — interim manual boot
+### First migration boot before a board token exists
 
-An authenticated boot gets you three things — the persisted secret, a
-healthy server in authenticated mode, and (on a migration boot) the
-board-claim milestone — and then the launcher's own import step fails HTTP
-403 (`Board access required`) and the launcher exits, stopping the server it
-booted: the main path's import POST is unauthenticated, and `--api-key` is
-honored only by `--add-wall` at this writing. Until the
-reattach-without-reimport follow-up lands, run the server manually for an
-authenticated working session, reusing the persisted secret (this mirrors
-the launcher's own server invocation):
+An authenticated boot gets you the persisted secret, a healthy server in
+authenticated mode, and (on a migration boot) the board-claim milestone.
+Before the first real board user claims the instance, no board token exists
+to authorize company discovery/import, so that first launcher run can still
+stop with HTTP 403. Run the server manually long enough to claim/bootstrap
+the board and mint a token, reusing the persisted secret (this mirrors the
+launcher's own server invocation):
 
 ```bash
 env PAPERCLIP_DEPLOYMENT_MODE=authenticated \
@@ -272,10 +279,12 @@ membership and visibility work (claims, invites, the overview) that is
 enough; do not run agent egress against a manually-booted instance without
 also starting the gate proxies.
 
-The practical order of operations is therefore: **launch and import on
+The practical migration order is therefore: **launch and import on
 `local_trusted` first** (create walls there too — `--add-wall` needs no key
-on `local_trusted`), then relaunch `--auth-mode authenticated` to mint the
-secret and surface the claim URL, then boot manually, claim, and invite.
+on `local_trusted`), run one authenticated boot to mint the secret and
+surface the claim URL, boot manually, claim and mint a board token, then
+invoke the launcher with `--api-key-file` while that non-production server
+is healthy so it reattaches without re-importing and restores the gates.
 
 ### Fresh authenticated data dir: bootstrap the first admin
 
@@ -287,10 +296,9 @@ pnpm -C paperclip paperclipai auth bootstrap-ceo
 ```
 
 This mints a one-time `bootstrap_ceo` invite; the person who accepts it
-becomes the instance's first admin. (The same import limitation above
-applies to fresh authenticated dirs — the launcher cannot import into them —
-so the `local_trusted`-first sequence is the practical path for a firm that
-wants the package imported.)
+becomes the instance's first admin. After acceptance, mint a board token and
+run the launcher with `PAPERCLIP_API_KEY` or `--api-key-file`; authenticated
+company discovery and import then carry that credential.
 
 ### Migrating an existing `local_trusted` data dir
 

@@ -78,6 +78,7 @@ Upload operations go through the proxy — never the iManage upload API directly
 
 ```sh
 curl -sS -X POST \
+  -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
   -H "Content-Type: application/json" \
   --data "$(jq -n \
     --arg op "checkin_document" \

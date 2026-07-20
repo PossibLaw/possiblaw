@@ -1,0 +1,153 @@
+{
+  "schema": "possiblaw/config/v1",
+  "identity": {
+    "slug": "example-firm",
+    "displayName": "Example Law Firm",
+    "persona": "firm"
+  },
+  "deployment": {
+    "mode": "single-tenant-container",
+    "environment": "production",
+    "region": "us-central",
+    "dataDirRef": { "env": "POSSIBLAW_DATA_DIR" }
+  },
+  "teams": [
+    {
+      "id": "corporate-team",
+      "enabled": true,
+      "agents": [
+        "corporate-lead",
+        "corporate-diligence-extractor",
+        "corporate-governance-reviewer"
+      ],
+      "skills": [
+        "corporate-diligence-intake-checklist",
+        "corporate-governance-review-checklist"
+      ],
+      "agentOverrides": [
+        {
+          "agent": "corporate-diligence-extractor",
+          "modelLane": "extractive",
+          "budgetMonthlyCents": 40000,
+          "allowedTools": ["legal-data.search_opinions"]
+        }
+      ]
+    },
+    {
+      "id": "litigation-team",
+      "enabled": true,
+      "agents": [
+        "litigation-lead",
+        "deadline-calculator",
+        "legal-citation-checker",
+        "correspondence-clerk",
+        "deliverables-courier"
+      ],
+      "skills": [
+        "legal-deadline-calculation",
+        "citation-verification-checklist",
+        "output-delivery-playbook"
+      ]
+    }
+  ],
+  "workflowPacks": [
+    { "id": "firm-corporate", "enabled": true },
+    { "id": "firm-litigation", "enabled": true },
+    { "id": "firm-employment", "enabled": true },
+    { "id": "firm-ip", "enabled": true }
+  ],
+  "models": {
+    "variant": "codex-api",
+    "secretRefs": {
+      "apiKey": { "env": "OPENAI_API_KEY" }
+    },
+    "lanes": {
+      "review": { "timeoutSeconds": 900, "maxTurns": 80 },
+      "extractive": { "timeoutSeconds": 600, "maxTurns": 40 }
+    }
+  },
+  "capabilities": {
+    "allowedTools": [
+      "send_email",
+      "upload_document",
+      "legal-data.search_opinions",
+      "legal-data.get_opinion"
+    ],
+    "connectors": [
+      {
+        "id": "connector-google-drive",
+        "enabled": true,
+        "secretRefs": {
+          "clientId": { "env": "GDRIVE_CLIENT_ID" },
+          "clientSecret": { "env": "GDRIVE_CLIENT_SECRET" },
+          "refreshToken": { "env": "GDRIVE_REFRESH_TOKEN" }
+        }
+      },
+      {
+        "id": "connector-gmail",
+        "enabled": true,
+        "secretRefs": {
+          "clientId": { "env": "GMAIL_CLIENT_ID" },
+          "clientSecret": { "env": "GMAIL_CLIENT_SECRET" },
+          "refreshToken": { "env": "GMAIL_REFRESH_TOKEN" }
+        }
+      },
+      { "id": "connector-courtlistener", "enabled": true },
+      { "id": "connector-docusign", "enabled": false }
+    ]
+  },
+  "gate": {
+    "policyRef": "companies/legal-operations/gate-policy.yaml",
+    "boundaries": {
+      "THIRD_PARTY_EGRESS": "human",
+      "CONFIDENTIAL_TO_CLOUD": "anonymize",
+      "COURT_FILING": "human",
+      "SIGNATURE": "human",
+      "MONEY_MOVEMENT": "human",
+      "IRREVERSIBLE_EXTERNAL_OP": "human"
+    },
+    "citationGate": {
+      "boundaries": ["COURT_FILING", "THIRD_PARTY_EGRESS"],
+      "requireAuthorityProvenance": false
+    },
+    "firmFacade": { "allowWorkProductText": false }
+  },
+  "trustedDestinations": [
+    {
+      "id": "firm-review-google",
+      "provider": "gdrive",
+      "enabled": true,
+      "folderIdRef": { "env": "POSSIBLAW_GDRIVE_REVIEW_FOLDER_ID" }
+    }
+  ],
+  "routines": [
+    {
+      "id": "delivery-sweep",
+      "enabled": true,
+      "schedule": { "cron": "0 18 * * 1-5", "timezone": "America/Chicago" },
+      "concurrencyPolicy": "coalesce_if_active"
+    },
+    {
+      "id": "nightly-conflicts-check",
+      "enabled": true,
+      "schedule": { "cron": "0 2 * * *", "timezone": "America/Chicago" },
+      "concurrencyPolicy": "coalesce_if_active"
+    }
+  ],
+  "budgets": {
+    "costMode": "metered",
+    "companyMonthlyCents": 250000,
+    "variantMonthlyCents": { "codex-api": 200000 },
+    "agentMonthlyCents": {
+      "corporate-diligence-extractor": 40000,
+      "litigation-lead": 50000
+    }
+  },
+  "capacity": {
+    "heartbeatConcurrency": 4,
+    "maxConcurrentRuns": 4,
+    "adapterTimeoutSeconds": 900,
+    "maxTurns": 80,
+    "laneMaxTurns": { "routing": 30, "drafting": 80, "review": 80, "extractive": 40 }
+  }
+}

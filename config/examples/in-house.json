@@ -1,0 +1,109 @@
+{
+  "schema": "possiblaw/config/v1",
+  "identity": {
+    "slug": "example-legal-department",
+    "displayName": "Example In-House Legal",
+    "persona": "in-house"
+  },
+  "deployment": {
+    "mode": "single-tenant-container",
+    "environment": "production",
+    "region": "eu-west",
+    "dataDirRef": { "env": "POSSIBLAW_DATA_DIR" }
+  },
+  "teams": [
+    {
+      "id": "commercial-privacy-team",
+      "enabled": true,
+      "agents": [
+        "commercial-lead",
+        "contract-reviewer",
+        "privacy-lead",
+        "privacy-dpa-drafter",
+        "deliverables-courier"
+      ],
+      "skills": ["legal-saas-msa-review", "dpia-checklist", "output-delivery-playbook"]
+    },
+    {
+      "id": "product-regulatory-team",
+      "enabled": true,
+      "agents": ["advertising-lead", "ad-claims-reviewer", "ai-governance-lead"],
+      "skills": ["ad-claims-checklist", "ai-policy-playbook"]
+    }
+  ],
+  "workflowPacks": [
+    { "id": "inhouse-commercial", "enabled": true },
+    { "id": "inhouse-privacy", "enabled": true },
+    { "id": "inhouse-product", "enabled": true },
+    { "id": "inhouse-ai-regulatory", "enabled": true }
+  ],
+  "models": {
+    "variant": "claude-api",
+    "secretRefs": { "apiKey": { "env": "ANTHROPIC_API_KEY" } },
+    "lanes": {
+      "routing": { "maxTurns": 30 },
+      "drafting": { "timeoutSeconds": 900, "maxTurns": 70 }
+    }
+  },
+  "capabilities": {
+    "allowedTools": ["upload_document"],
+    "connectors": [
+      {
+        "id": "connector-onedrive",
+        "enabled": true,
+        "secretRefs": {
+          "clientId": { "env": "MS_CLIENT_ID" },
+          "clientSecret": { "env": "MS_CLIENT_SECRET" },
+          "tenantId": { "env": "MS_TENANT_ID" }
+        }
+      },
+      { "id": "connector-outlook", "enabled": true }
+    ]
+  },
+  "gate": {
+    "policyRef": "companies/legal-operations/gate-policy.yaml",
+    "boundaries": {
+      "THIRD_PARTY_EGRESS": "human",
+      "CONFIDENTIAL_TO_CLOUD": "anonymize",
+      "COURT_FILING": "human",
+      "SIGNATURE": "human",
+      "MONEY_MOVEMENT": "human",
+      "IRREVERSIBLE_EXTERNAL_OP": "human"
+    },
+    "citationGate": {
+      "boundaries": ["COURT_FILING", "THIRD_PARTY_EGRESS"],
+      "requireAuthorityProvenance": false
+    },
+    "firmFacade": { "allowWorkProductText": false }
+  },
+  "trustedDestinations": [
+    {
+      "id": "firm-review-onedrive",
+      "provider": "onedrive",
+      "enabled": true,
+      "driveIdRef": { "env": "POSSIBLAW_ONEDRIVE_REVIEW_DRIVE_ID" },
+      "parentItemIdRef": { "env": "POSSIBLAW_ONEDRIVE_REVIEW_PARENT_ITEM_ID" }
+    }
+  ],
+  "routines": [
+    {
+      "id": "matter-intake-sweep",
+      "enabled": true,
+      "schedule": { "cron": "*/15 8-18 * * 1-5", "timezone": "Europe/Dublin" },
+      "concurrencyPolicy": "coalesce_if_active"
+    }
+  ],
+  "budgets": {
+    "costMode": "metered",
+    "companyMonthlyCents": 150000,
+    "variantMonthlyCents": { "claude-api": 125000 },
+    "agentMonthlyCents": { "contract-reviewer": 30000 }
+  },
+  "capacity": {
+    "heartbeatConcurrency": 3,
+    "maxConcurrentRuns": 3,
+    "adapterTimeoutSeconds": 900,
+    "maxTurns": 70,
+    "laneMaxTurns": { "routing": 30, "drafting": 70, "review": 70 }
+  }
+}

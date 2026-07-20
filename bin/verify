@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+PACKAGES=(
+  deadline-engine
+  eval-harness
+  firm-overview
+  gate-proxy
+  learning-loop
+  mcp-servers/firm-facade
+  mcp-servers/legal-data
+  orchestration-eval
+)
+
+HELPERS=(
+  bin/_possiblaw_agents.py
+  bin/_possiblaw_auth_secret.py
+  bin/_possiblaw_authorization.py
+  bin/_possiblaw_eval_coverage.py
+  bin/_possiblaw_gate_ready.py
+  bin/_possiblaw_health.py
+  bin/_possiblaw_import_safety.py
+  bin/_possiblaw_inline_source.py
+  bin/_possiblaw_mcp.py
+  bin/_possiblaw_paperclip_contract.py
+  bin/_possiblaw_private_file.py
+  bin/_possiblaw_theme.py
+  bin/_possiblaw_variants.py
+  bin/_possiblaw_vendor_skill.py
+  bin/_possiblaw_walls.py
+)
+
+usage() {
+  cat <<'EOF'
+Usage: bin/verify [--list]
+
+Run every credential-free PossibLaw validation check. This command does not
+start Paperclip or call model/connector providers. Operator-gated and live
+checks are listed as explicit skips.
+EOF
+}
+
+print_plan() {
+  local package helper
+  printf '%s\n' \
+    "node version matches .nvmrc" \
+    "PossibLaw package.json engines match .nvmrc"
+  for package in "${PACKAGES[@]}"; do
+    printf 'pnpm -C %s test\n' "$package"
+    printf 'pnpm -C %s typecheck\n' "$package"
+  done
+  printf '%s\n' \
+    "bash -n bin/possiblaw" \
+    "bash -n bin/eval" \
+    "bash -n bin/verify" \
+    "bash -n bin/test-possiblaw-production-safety.sh" \
+    "bash -n tests/verify.test.sh" \
+    "python3 -m unittest discover -s config/tests -v" \
+    "deployments/firm-single-tenant/tests/run.sh"
+  for helper in "${HELPERS[@]}"; do
+    printf 'python3 %s --self-test\n' "$helper"
+  done
+  printf '%s\n' \
+    "bash bin/test-possiblaw-production-safety.sh" \
+    "printf '[]' | python3 bin/_possiblaw_review_print.py" \
+    "python3 bin/_possiblaw_inline_source.py --package-root companies/legal-operations (credential-free package dry-run)" \
+    "parse and validate the package, variant, MCP, and gate-policy YAML manifests" \
+    "python3 bin/_possiblaw_eval_coverage.py --check" \
+    "bin/possiblaw --list-variants" \
+    "SKIP [server/live] bin/possiblaw --dry-run (the current launcher starts Paperclip)" \
+    "SKIP [operator/live] authenticated two-lawyer wall test" \
+    "SKIP [provider/live] connector delivery and Tier-2 readback tests"
+}
+
+check_runtime_contract() {
+  local pinned current package engine expected_engine discovered expected
+  pinned="$(tr -d '[:space:]' <"$REPO_ROOT/.nvmrc")"
+  current="$(node --version)"
+  current="${current#v}"
+  if [[ "$current" != "$pinned" ]]; then
+    printf 'expected Node %s from .nvmrc, found %s\n' "$pinned" "$current" >&2
+    return 1
+  fi
+
+  expected_engine=">=$pinned <25"
+  for package in "${PACKAGES[@]}"; do
+    engine="$(node -e 'const p=require(process.argv[1]); process.stdout.write(p.engines?.node || "")' "$REPO_ROOT/$package/package.json")"
+    if [[ "$engine" != "$expected_engine" ]]; then
+      printf '%s/package.json: expected engines.node %q, found %q\n' \
+        "$package" "$expected_engine" "$engine" >&2
+      return 1
+    fi
+  done
+
+  discovered="$(find "$REPO_ROOT" -maxdepth 3 -name package.json \
+    -not -path "$REPO_ROOT/paperclip/*" \
+    -not -path "$REPO_ROOT/harvey-lab/*" \
+    -not -path '*/node_modules/*' \
+    -print | sed "s|^$REPO_ROOT/||" | sort)"
+  expected="$(printf '%s/package.json\n' "${PACKAGES[@]}" | sort)"
+  if [[ "$discovered" != "$expected" ]]; then
+    printf 'PossibLaw Node package inventory differs from bin/verify\n' >&2
+    diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$discovered") >&2 || true
+    return 1
+  fi
+}
+
+credential_free() {
+  env -i \
+    HOME="$CLEAN_HOME" \
+    PATH="$PATH" \
+    CI=1 \
+    NO_COLOR=1 \
+    TERM="${TERM:-dumb}" \
+    TMPDIR="${TMPDIR:-/tmp}" \
+    LANG=C \
+    LC_ALL=C \
+    "$@"
+}
+
+if [[ "${1:-}" == "--internal-runtime-contract" ]]; then
+  check_runtime_contract
+  exit $?
+fi
+
+case "${1:-}" in
+  "") ;;
+  --list)
+    print_plan
+    exit 0
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    printf 'unknown argument: %s\n' "$1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+# The contract test copies this script to a synthetic repository and supplies a
+# driver there. Refuse the hook in a real checkout so it cannot bypass CI.
+TEST_DRIVER="${POSSIBLAW_VERIFY_TEST_DRIVER:-}"
+if [[ -n "$TEST_DRIVER" && -e "$REPO_ROOT/.git" ]]; then
+  printf 'POSSIBLAW_VERIFY_TEST_DRIVER is only allowed in a synthetic checkout\n' >&2
+  exit 2
+fi
+
+CLEAN_HOME="$(mktemp -d "${TMPDIR:-/tmp}/possiblaw-verify-home.XXXXXX")"
+trap 'rm -rf "$CLEAN_HOME"' EXIT
+
+passed=0
+failed=0
+
+run_check() {
+  local id="$1" output_file
+  shift
+  output_file="$(mktemp "${TMPDIR:-/tmp}/possiblaw-verify-output.XXXXXX")"
+  printf 'CHECK %-42s ' "$id"
+  if [[ -n "$TEST_DRIVER" ]]; then
+    if "$TEST_DRIVER" "$id" >"$output_file" 2>&1; then
+      printf 'PASS\n'
+      passed=$((passed + 1))
+    else
+      printf 'FAIL\n'
+      sed 's/^/      /' "$output_file" >&2
+      printf 'FAIL  %s\n' "$id" >&2
+      failed=$((failed + 1))
+    fi
+  elif (cd "$REPO_ROOT" && credential_free "$@") >"$output_file" 2>&1; then
+    printf 'PASS\n'
+    passed=$((passed + 1))
+  else
+    printf 'FAIL\n'
+    sed 's/^/      /' "$output_file" >&2
+    printf 'FAIL  %s\n' "$id" >&2
+    failed=$((failed + 1))
+  fi
+  rm -f "$output_file"
+}
+
+run_check runtime:contract "$REPO_ROOT/bin/verify" --internal-runtime-contract
+
+for package in "${PACKAGES[@]}"; do
+  run_check "node:$package:test" pnpm -C "$REPO_ROOT/$package" test
+  run_check "node:$package:typecheck" pnpm -C "$REPO_ROOT/$package" typecheck
+done
+
+run_check shell:possiblaw bash -n "$REPO_ROOT/bin/possiblaw"
+run_check shell:eval bash -n "$REPO_ROOT/bin/eval"
+run_check shell:verify bash -n "$REPO_ROOT/bin/verify"
+run_check shell:production-safety-test bash -n "$REPO_ROOT/bin/test-possiblaw-production-safety.sh"
+run_check shell:verify-test bash -n "$REPO_ROOT/tests/verify.test.sh"
+run_check launcher:production-safety bash "$REPO_ROOT/bin/test-possiblaw-production-safety.sh"
+run_check config:v1 python3 -m unittest discover -s "$REPO_ROOT/config/tests" -v
+run_check deployment:firm-single-tenant "$REPO_ROOT/deployments/firm-single-tenant/tests/run.sh"
+
+for helper in "${HELPERS[@]}"; do
+  run_check "helper:$(basename "$helper" .py)" python3 "$REPO_ROOT/$helper" --self-test
+done
+
+run_check helper:_possiblaw_review_print bash -c \
+  "printf '[]' | python3 '$REPO_ROOT/bin/_possiblaw_review_print.py'"
+
+run_check manifest:package-render python3 "$REPO_ROOT/bin/_possiblaw_inline_source.py" \
+  --package-root "$REPO_ROOT/companies/legal-operations"
+run_check manifest:yaml-shape pnpm -C "$REPO_ROOT/gate-proxy" exec node -e '
+  const fs = require("node:fs");
+  const yaml = require("js-yaml");
+  const [paperclipPath, variantsPath, mcpPath, policyPath] = process.argv.slice(1);
+  const load = (path) => yaml.load(fs.readFileSync(path, "utf8"));
+  const paperclip = load(paperclipPath);
+  const variants = load(variantsPath);
+  const mcp = load(mcpPath);
+  const policy = load(policyPath);
+  if (paperclip?.schema !== "paperclip/v1" || !paperclip.agents || typeof paperclip.agents !== "object") throw new Error("invalid .paperclip.yaml shape");
+  if (variants?.schema !== "possiblaw/variants/v1" || !variants.variants || typeof variants.variants !== "object") throw new Error("invalid variants.yaml shape");
+  if (!Array.isArray(mcp?.mcpServers)) throw new Error("invalid mcp-servers.yaml shape");
+  const names = mcp.mcpServers.map((server) => server?.name);
+  if (names.some((name) => typeof name !== "string" || !name) || new Set(names).size !== names.length) throw new Error("MCP server names must be present and unique");
+  if (policy?.version !== 1 || !policy.boundaries || typeof policy.boundaries !== "object") throw new Error("invalid gate-policy.yaml shape");
+' \
+  "$REPO_ROOT/companies/legal-operations/.paperclip.yaml" \
+  "$REPO_ROOT/companies/legal-operations/variants.yaml" \
+  "$REPO_ROOT/companies/legal-operations/mcp-servers.yaml" \
+  "$REPO_ROOT/companies/legal-operations/gate-policy.yaml"
+run_check manifest:eval-coverage python3 "$REPO_ROOT/bin/_possiblaw_eval_coverage.py" --check
+run_check contract:paperclip-isolation python3 "$REPO_ROOT/bin/_possiblaw_paperclip_contract.py" \
+  --repo-root "$REPO_ROOT"
+run_check manifest:variants "$REPO_ROOT/bin/possiblaw" --list-variants
+
+printf '%s\n' \
+  "SKIP  server/live launcher preview (bin/possiblaw --dry-run starts Paperclip)" \
+  "SKIP  operator/live authenticated two-lawyer wall test" \
+  "SKIP  provider/live connector delivery and Tier-2 readback tests"
+
+if (( failed > 0 )); then
+  printf 'FAIL: PossibLaw credential-free validation (%d passed, %d failed)\n' "$passed" "$failed" >&2
+  exit 1
+fi
+
+printf 'PASS: PossibLaw credential-free validation (%d checks)\n' "$passed"

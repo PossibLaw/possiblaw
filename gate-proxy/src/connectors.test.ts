@@ -1052,6 +1052,48 @@ describe("action-package performers", () => {
       assert.deepEqual(pkgContent.meta, { agentId: "a1", issueId: "i1" });
     });
   }
+
+  it("uses collision-safe UUID filenames for action packages created at the same time", async () => {
+    const { fetchImpl } = makeFakeFetch(200, {});
+    const pkgDir = path.join(tmpDir, "ap-collision-safe");
+    const performers = buildPerformers(
+      { GATE_ACTION_PACKAGE_DIR: pkgDir },
+      fetchImpl,
+    );
+    const originalDate = Date;
+    const fixedTime = "2026-07-15T12:00:00.000Z";
+
+    globalThis.Date = class extends originalDate {
+      constructor(value?: string | number | Date) {
+        super(value ?? fixedTime);
+      }
+
+      static override now(): number {
+        return originalDate.parse(fixedTime);
+      }
+    } as DateConstructor;
+
+    try {
+      const request = {
+        tool: "sign_document" as const,
+        payload: { documentId: "doc-123" },
+        meta: { agentId: "agent-1", issueId: "issue-1" },
+      };
+      const first = await performers.sign_document(request, {});
+      const second = await performers.sign_document(request, {});
+      const firstPath = first["actionPackage"] as string;
+      const secondPath = second["actionPackage"] as string;
+      const uuidV4ActionPackage =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-sign_document\.json$/;
+
+      assert.notEqual(firstPath, secondPath, "concurrent packages must never share a path");
+      assert.match(path.basename(firstPath), uuidV4ActionPackage);
+      assert.match(path.basename(secondPath), uuidV4ActionPackage);
+      assert.equal(fs.readdirSync(pkgDir).length, 2, "both packages must remain on disk");
+    } finally {
+      globalThis.Date = originalDate;
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

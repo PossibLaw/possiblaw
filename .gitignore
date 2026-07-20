@@ -3,6 +3,8 @@ __pycache__/
 dist/
 .env
 .env.local
+# Security audit reports map unfixed vulnerabilities — never commit/publish while findings are open.
+SECURITY-AUDIT-*.md
 *.log
 .DS_Store
 coverage/

@@ -60,10 +60,14 @@ schema-agnostic passthrough.
 
 For **every** proxied tool call (`adapter.proxyToolCall`):
 
-1. **`sanitizeArgs(args, tier)`** — strips client identifiers (legal-entity
-   names, emails, SSNs, EINs, phones) from query/search-like string args for
-   `confidential` / `privileged` matters, **before** anything is forwarded
-   upstream. Standard tier is a pass-through. (`src/sanitize.ts`.)
+1. **`sanitizeArgs(args, tier)`** — applies best-effort defense-in-depth
+   redaction to query/search/citation string args for `confidential` /
+   `privileged` matters, **before** anything is forwarded upstream. Detectors
+   cover common legal-entity names, person-name captions, role-labeled person
+   names, docket/matter numbers, emails, SSNs, EINs, and phones. Standard tier
+   is a pass-through. Neutral legal terms remain the primary control because
+   deterministic redaction cannot prove a query contains no privileged fact.
+   (`src/sanitize.ts`.)
 2. **forward** — calls the injected `UpstreamCaller` (the default token-REST
    upstream, or the optional OAuth MCP) with the sanitized args.
 3. **`wrapWithProvenance(result, { now })`** — wraps the upstream result in a
@@ -161,10 +165,12 @@ outbound **court filing / third-party egress** is inspected, the gate runs
 ## Privacy (`sanitizeQuery` / `sanitizeArgs`)
 
 A search is a read to a third party; the query string itself can carry
-privileged facts (client names, matter captions). For matters whose privacy tier
-is `confidential` or `privileged`, query/search-like args are stripped of client
-identifiers **before** the call leaves the boundary, leaving neutral legal terms.
-This mirrors the neutral-terms rule in `docs/connectors-inventory.md` and the
+privileged facts (client names, person-name captions, docket numbers, strategy).
+Agents and operators must use neutral legal terms and must not send privileged
+identifiers. For matters whose privacy tier is `confidential` or `privileged`,
+query/search/citation-like args also receive best-effort redaction **before** the
+call leaves the boundary. This is defense in depth, not proof that a query is
+safe. It mirrors the neutral-terms rule in `docs/connectors-inventory.md` and the
 `privacy-encoder` skill's detection rules. Set the tier via env
 `POSSIBLAW_MATTER_PRIVACY_TIER`.
 
@@ -193,7 +199,7 @@ by the test suite (no OAuth credentials in CI).
 
 ```sh
 pnpm -C mcp-servers/legal-data install     # install deps
-pnpm -C mcp-servers/legal-data test        # node:test suite (26 tests, zero network)
+pnpm -C mcp-servers/legal-data test        # node:test suite (30 tests, zero network)
 pnpm -C mcp-servers/legal-data typecheck   # tsc --noEmit
 pnpm -C mcp-servers/legal-data start        # run the stdio MCP proxy (default: headless REST)
 ```
