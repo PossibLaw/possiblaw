@@ -31,7 +31,11 @@ assert_not_contains() {
 
 assert_file_mode() {
     local path="$1" expected="$2" actual
-    actual="$(stat -f '%Lp' "$path" 2>/dev/null || stat -c '%a' "$path")"
+    actual="$(python3 - "$path" <<'PY'
+import os, stat, sys
+print(f"{stat.S_IMODE(os.stat(sys.argv[1], follow_symlinks=False).st_mode):03o}")
+PY
+)"
     [ "$actual" = "$expected" ] || fail "expected $path mode $expected, got $actual"
 }
 
@@ -377,16 +381,14 @@ ensure_gate_api_key company-1 "$1" "$2" firm ""
 [ "$GATE_RUNTIME_AGENT_ID" = "agent-1" ]
 [ "$(cat "$2")" = "gate-test-key" ]
 [ "$(cat "$2.agent-id")" = "agent-1" ]
-mode="$(stat -f '%Lp' "$2" 2>/dev/null || stat -c '%a' "$2")"
-[ "$mode" = 600 ]
-agent_mode="$(stat -f '%Lp' "$2.agent-id" 2>/dev/null || stat -c '%a' "$2.agent-id")"
-[ "$agent_mode" = 600 ]
 SH
 chmod +x "$KEY_HARNESS"
 KEY_OUT="$KEY_ROOT/key.out"
 run_expect_status 0 "$KEY_OUT" env PATH="$KEY_STUB_BIN:$PATH" \
     "$KEY_HARNESS" "$KEY_ROOT/import.json" "$KEY_ROOT/gate.api-key"
 assert_not_contains "$(cat "$KEY_OUT")" "gate-test-key"
+assert_file_mode "$KEY_ROOT/gate.api-key" 600
+assert_file_mode "$KEY_ROOT/gate.api-key.agent-id" 600
 
 # The firm facade receives a key minted only on its service identity. A
 # chief-of-staff entry cannot be used as a fallback when that identity is

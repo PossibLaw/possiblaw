@@ -532,7 +532,11 @@ if [ "$PRODUCTION" = "true" ]; then
         exit 2
     fi
     if [ -d "$DATA_DIR" ]; then
-        DATA_OWNER="$(stat -f '%u' "$DATA_DIR" 2>/dev/null || stat -c '%u' "$DATA_DIR")"
+        DATA_OWNER="$(python3 - "$DATA_DIR" <<'PY'
+import os, sys
+print(os.stat(sys.argv[1], follow_symlinks=False).st_uid)
+PY
+)"
         if [ "$DATA_OWNER" != "$(id -u)" ]; then
             err "production data dir must be owned by uid $(id -u): $DATA_DIR"
             exit 2
