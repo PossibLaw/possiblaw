@@ -1,0 +1,391 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://possiblaw.org/schema/config/v1",
+  "title": "PossibLaw business configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "identity",
+    "deployment",
+    "teams",
+    "workflowPacks",
+    "models",
+    "capabilities",
+    "gate",
+    "trustedDestinations",
+    "routines",
+    "budgets",
+    "capacity"
+  ],
+  "properties": {
+    "schema": { "const": "possiblaw/config/v1" },
+    "identity": { "$ref": "#/$defs/identity" },
+    "deployment": { "$ref": "#/$defs/deployment" },
+    "teams": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/team" },
+      "maxItems": 64
+    },
+    "workflowPacks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/workflowPack" },
+      "maxItems": 64
+    },
+    "models": { "$ref": "#/$defs/models" },
+    "capabilities": { "$ref": "#/$defs/capabilities" },
+    "gate": { "$ref": "#/$defs/gate" },
+    "trustedDestinations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/trustedDestination" },
+      "maxItems": 64
+    },
+    "routines": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/routine" },
+      "maxItems": 64
+    },
+    "budgets": { "$ref": "#/$defs/budgets" },
+    "capacity": { "$ref": "#/$defs/capacity" }
+  },
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+    },
+    "envRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["env"],
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+        }
+      }
+    },
+    "secretRefs": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[A-Za-z][A-Za-z0-9_-]{0,63}$": { "$ref": "#/$defs/envRef" }
+      },
+      "maxProperties": 64
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "displayName", "persona"],
+      "properties": {
+        "slug": { "$ref": "#/$defs/slug" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "persona": { "enum": ["firm", "in-house", "hybrid"] }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "environment", "region"],
+      "properties": {
+        "mode": {
+          "enum": ["local", "single-tenant-container", "managed-sandbox"]
+        },
+        "environment": { "enum": ["development", "staging", "production"] },
+        "region": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "dataDirRef": { "$ref": "#/$defs/envRef" }
+      }
+    },
+    "agentOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent"],
+      "properties": {
+        "agent": { "$ref": "#/$defs/slug" },
+        "enabled": { "type": "boolean", "default": true },
+        "modelLane": { "$ref": "#/$defs/slug" },
+        "budgetMonthlyCents": { "type": "integer", "minimum": 0 },
+        "allowedTools": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "uniqueItems": true,
+          "maxItems": 64
+        }
+      }
+    },
+    "team": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "enabled", "agents", "skills"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "enabled": { "type": "boolean" },
+        "agents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/slug" },
+          "uniqueItems": true,
+          "maxItems": 256
+        },
+        "skills": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/slug" },
+          "uniqueItems": true,
+          "maxItems": 256
+        },
+        "agentOverrides": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/agentOverride" },
+          "maxItems": 256,
+          "default": []
+        }
+      }
+    },
+    "workflowPack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "enabled"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "modelLane": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "variant": { "$ref": "#/$defs/slug" },
+        "model": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "maxTurns": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variant", "lanes"],
+      "properties": {
+        "variant": { "$ref": "#/$defs/slug" },
+        "secretRefs": { "$ref": "#/$defs/secretRefs" },
+        "lanes": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z][a-z0-9-]{0,62}$": { "$ref": "#/$defs/modelLane" }
+          },
+          "maxProperties": 32
+        }
+      }
+    },
+    "connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "enabled"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "enabled": { "type": "boolean" },
+        "secretRefs": { "$ref": "#/$defs/secretRefs" }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedTools", "connectors"],
+      "properties": {
+        "allowedTools": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "uniqueItems": true,
+          "maxItems": 128
+        },
+        "connectors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/connector" },
+          "maxItems": 64
+        }
+      }
+    },
+    "boundaryDecision": {
+      "enum": ["allow", "anonymize", "human", "block"]
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policyRef", "boundaries", "citationGate", "firmFacade"],
+      "properties": {
+        "policyRef": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+\\.ya?ml$",
+          "maxLength": 240
+        },
+        "boundaries": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "THIRD_PARTY_EGRESS",
+            "CONFIDENTIAL_TO_CLOUD",
+            "COURT_FILING",
+            "SIGNATURE",
+            "MONEY_MOVEMENT",
+            "IRREVERSIBLE_EXTERNAL_OP"
+          ],
+          "properties": {
+            "THIRD_PARTY_EGRESS": { "$ref": "#/$defs/boundaryDecision" },
+            "CONFIDENTIAL_TO_CLOUD": { "$ref": "#/$defs/boundaryDecision" },
+            "COURT_FILING": { "$ref": "#/$defs/boundaryDecision" },
+            "SIGNATURE": { "$ref": "#/$defs/boundaryDecision" },
+            "MONEY_MOVEMENT": { "$ref": "#/$defs/boundaryDecision" },
+            "IRREVERSIBLE_EXTERNAL_OP": { "$ref": "#/$defs/boundaryDecision" }
+          }
+        },
+        "citationGate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["boundaries", "requireAuthorityProvenance"],
+          "properties": {
+            "boundaries": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "THIRD_PARTY_EGRESS",
+                  "CONFIDENTIAL_TO_CLOUD",
+                  "COURT_FILING",
+                  "SIGNATURE",
+                  "MONEY_MOVEMENT",
+                  "IRREVERSIBLE_EXTERNAL_OP"
+                ]
+              },
+              "uniqueItems": true,
+              "maxItems": 6
+            },
+            "requireAuthorityProvenance": { "type": "boolean" }
+          }
+        },
+        "firmFacade": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["allowWorkProductText"],
+          "properties": {
+            "allowWorkProductText": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "disabledDestination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "provider", "enabled"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "provider": { "enum": ["gdrive", "onedrive"] },
+        "enabled": { "const": false }
+      }
+    },
+    "gdriveDestination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "provider", "enabled", "folderIdRef"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "provider": { "const": "gdrive" },
+        "enabled": { "const": true },
+        "folderIdRef": { "$ref": "#/$defs/envRef" }
+      }
+    },
+    "onedriveDestination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "provider", "enabled", "driveIdRef", "parentItemIdRef"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "provider": { "const": "onedrive" },
+        "enabled": { "const": true },
+        "driveIdRef": { "$ref": "#/$defs/envRef" },
+        "parentItemIdRef": { "$ref": "#/$defs/envRef" }
+      }
+    },
+    "trustedDestination": {
+      "oneOf": [
+        { "$ref": "#/$defs/disabledDestination" },
+        { "$ref": "#/$defs/gdriveDestination" },
+        { "$ref": "#/$defs/onedriveDestination" }
+      ]
+    },
+    "routine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "enabled", "schedule", "concurrencyPolicy"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "enabled": { "type": "boolean" },
+        "schedule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cron", "timezone"],
+          "properties": {
+            "cron": { "type": "string", "minLength": 9, "maxLength": 100 },
+            "timezone": { "type": "string", "minLength": 1, "maxLength": 80 }
+          }
+        },
+        "concurrencyPolicy": {
+          "enum": ["coalesce_if_active", "allow_overlap", "skip_if_active"]
+        }
+      }
+    },
+    "budgetByReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9-]{0,62}$": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000000000
+        }
+      },
+      "maxProperties": 256
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["costMode", "companyMonthlyCents", "variantMonthlyCents", "agentMonthlyCents"],
+      "properties": {
+        "costMode": { "enum": ["metered", "subscription", "mixed"] },
+        "companyMonthlyCents": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000000000
+        },
+        "variantMonthlyCents": { "$ref": "#/$defs/budgetByReference" },
+        "agentMonthlyCents": { "$ref": "#/$defs/budgetByReference" }
+      }
+    },
+    "laneCapacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9-]{0,62}$": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      },
+      "maxProperties": 32
+    },
+    "capacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "heartbeatConcurrency",
+        "maxConcurrentRuns",
+        "adapterTimeoutSeconds",
+        "maxTurns",
+        "laneMaxTurns"
+      ],
+      "properties": {
+        "heartbeatConcurrency": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "maxConcurrentRuns": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "adapterTimeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "maxTurns": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "laneMaxTurns": { "$ref": "#/$defs/laneCapacity" }
+      }
+    }
+  }
+}

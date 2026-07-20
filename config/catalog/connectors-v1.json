@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "connectors": {
+    "connector-courtlistener": {
+      "gateTools": [],
+      "directToolPrefixes": ["legal-data."],
+      "destinationProviders": [],
+      "gateCredentialAlternatives": []
+    },
+    "connector-gmail": {
+      "gateTools": ["send_email"],
+      "directToolPrefixes": [],
+      "destinationProviders": [],
+      "gateCredentialAlternatives": [
+        ["accessToken"],
+        ["clientId", "clientSecret", "refreshToken"]
+      ]
+    },
+    "connector-google-drive": {
+      "gateTools": ["upload_document"],
+      "directToolPrefixes": [],
+      "destinationProviders": ["gdrive"],
+      "gateCredentialAlternatives": [
+        ["accessToken"],
+        ["clientId", "clientSecret", "refreshToken"]
+      ]
+    },
+    "connector-onedrive": {
+      "gateTools": ["upload_document"],
+      "directToolPrefixes": [],
+      "destinationProviders": ["onedrive"],
+      "gateCredentialAlternatives": [
+        ["accessToken"],
+        ["tenantId", "clientId", "clientSecret"]
+      ]
+    },
+    "connector-outlook": {
+      "gateTools": [],
+      "directToolPrefixes": [],
+      "destinationProviders": [],
+      "gateCredentialAlternatives": []
+    }
+  }
+}
