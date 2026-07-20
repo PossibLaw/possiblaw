@@ -12,9 +12,9 @@ All egress writes go through the Gate Proxy (`POST $GATE_PROXY_URL/egress/<tool>
 |---|---|---|---|
 | `connector-gmail` | `send_email` | `to` / `subject` / `body` | Human-gated or receipted per `THIRD_PARTY_EGRESS` policy |
 | `connector-outlook` | `send_email` | `to` / `subject` / `body` | Human-gated or receipted per `THIRD_PARTY_EGRESS` policy |
-| `connector-google-drive` | `upload_document` | `destination: "gdrive"`, `folderId` | Receipted; 202 on pending approval; text or `.docx` binary |
-| `connector-onedrive` | `upload_document` | `destination: "onedrive"`, `driveId`, `parentItemId` | Receipted; 202 on pending approval; text or `.docx` binary |
-| `connector-notion` | `upload_document` | `destination: "notion"`, `parentPageId` | Receipted; 202 on pending approval; text-only (binary refused) |
+| `connector-google-drive` | `upload_document` | operator-defined `destinationId` alias | Receipted; an authorized firm review root may auto-file; text or `.docx` binary |
+| `connector-onedrive` | `upload_document` | operator-defined `destinationId` alias | Receipted; an authorized firm review root may auto-file; text or `.docx` binary |
+| `connector-notion` | human handoff | operator selects the workspace/page | Shipped production template performs no automatic Notion writes |
 | `connector-docusign` | `sign_document` | action package (v1: human executes) | `SIGNATURE: human` in policy |
 | `connector-no-op-signature` | `sign_document` | action package (v1: local stub) | `SIGNATURE: human` in policy |
 | `connector-stripe` | `send_payment` | action package (v1: human executes) | `MONEY_MOVEMENT: human` in policy |
@@ -25,7 +25,7 @@ All egress writes go through the Gate Proxy (`POST $GATE_PROXY_URL/egress/<tool>
 | `connector-imanage` | `share_external` | v1: `not_implemented` — writes visibly blocked | Future gate work |
 | `connector-netdocuments` | `share_external` | v1: `not_implemented` — writes visibly blocked | Future gate work |
 
-**Note on `upload_document` binary (.docx) support:** `upload_document` accepts either a text body (`content`) or a binary file body (`contentBase64` plus a REQUIRED `documentText` plain-text field the citation gate reads; `mimeType` is inferred from the `name` extension — `.docx` → the OOXML MIME — and only needs to be passed to override). `gdrive` (`folderId`) and `onedrive` (`driveId` + `parentItemId`) accept both paths; `notion` accepts the TEXT path only — a `contentBase64` payload to notion is refused with a `502` whose `error` names `unsupported_binary_destination`, and its text body is chunked into the page. `folderId` / `parentItemId` are the firm-pre-created destination folders (get a Drive `folderId` from the folder URL, after `/folders/`). The courier chooses text-vs-docx from the delivery policy's per-destination `format` field (`md` default | `docx`); see `output-delivery-playbook`.
+**Note on `upload_document` binary (.docx) support:** `upload_document` accepts either a text body (`content`) or a binary file body (`contentBase64` plus a REQUIRED `documentText` plain-text field the citation gate reads; `mimeType` is inferred from the `name` extension — `.docx` → the OOXML MIME — and only needs to be passed to override). Google Drive and OneDrive accept both paths through an operator-defined `destinationId`. The gate resolves that alias to the exact provider root server-side; agents must never send raw `destination`, `folderId`, `driveId`, or `parentItemId` selectors. Notion writes are a documented human action in the shipped production template. The courier chooses text-vs-docx from the delivery policy's per-destination `format` field (`md` default | `docx`); see `output-delivery-playbook`.
 
 **Note on `share_external` connectors:** The gate returns `502 not_implemented` for all `share_external` calls in v1. This is a deliberate posture — writes are visibly refused rather than silently credentialed. Operator must execute writes manually until gate v2 adds per-vendor support.
 

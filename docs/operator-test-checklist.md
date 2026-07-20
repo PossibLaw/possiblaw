@@ -153,12 +153,11 @@ real lawyer logins and a browser, which nothing in this repo's automated
 battery drives. Full command reference: `docs/workflows/ethical-walls.md`.
 Use a **disposable** instance (never port 3100 or your real data dir).
 
-> Order matters: launch and wall on `local_trusted` FIRST. The launcher's
-> import is unauthenticated (`--api-key` is honored only by `--add-wall`),
-> so an `--auth-mode authenticated` launch stops at import (HTTP 403) after
-> persisting the secret and surfacing the claim URL — see the runbook's
-> "The launch stops at import" section. A relaunch on the same data dir also
-> needs a distinct `--org-name` (same name → import 500 prefix collision).
+> Order matters on the first migration: launch and wall on `local_trusted`
+> first. No real board token exists until an admin claims the authenticated
+> instance, so the first authenticated boot stops at company discovery/import
+> after persisting the secret and surfacing the claim URL. Later authenticated
+> launcher calls accept `PAPERCLIP_API_KEY` or `--api-key-file <0600-path>`.
 
 ### Prerequisites
 
@@ -174,18 +173,20 @@ export DATA_DIR="$(mktemp -d)"
   --data-dir "$DATA_DIR" \
   --non-interactive --yes --mission "walls smoke test"
 
-# 1b. Wall the client (no --api-key needed on local_trusted):
+# 1b. Wall the client (no board key needed on local_trusted):
 ./bin/possiblaw --add-wall "Conflicted Client Inc" --variant codex \
   --port 3199 --data-dir "$DATA_DIR" --gate-port-base 3899
+WALL_COMPANY_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[-1]["companyId"])' \
+  "$DATA_DIR/walls.json")"
 
 # 1c. Stop the server and both gate proxies:
 kill "$(cat "$DATA_DIR/possiblaw.pid")"        2>/dev/null || true
 kill "$(cat "$DATA_DIR/gate-proxy.pid")"       2>/dev/null || true
-kill "$(cat "$DATA_DIR/gate-proxy-CON.pid")"   2>/dev/null || true
+kill "$(cat "$DATA_DIR/gate-proxy-$WALL_COMPANY_ID.pid")" 2>/dev/null || true
 
-# 1d. Authenticated relaunch — EXPECT it to persist better-auth.secret,
-#     surface the BOARD CLAIM milestone, then exit 1 at import (HTTP 403,
-#     known limitation). The server it booted stops with it.
+# 1d. First authenticated boot — EXPECT it to persist better-auth.secret,
+#     surface the BOARD CLAIM milestone, then exit 1 with HTTP 403 because
+#     no real board token can exist until the claim. The server stops too.
 ./bin/possiblaw --variant codex --port 3199 --gate-port 3899 \
   --data-dir "$DATA_DIR" --auth-mode authenticated \
   --non-interactive --yes --mission "walls smoke test"
@@ -249,7 +250,7 @@ foreground), then:
 # belt-and-braces: kill anything a pid file still points at
 kill "$(cat "$DATA_DIR/possiblaw.pid")"        2>/dev/null || true
 kill "$(cat "$DATA_DIR/gate-proxy.pid")"       2>/dev/null || true
-kill "$(cat "$DATA_DIR/gate-proxy-CON.pid")"   2>/dev/null || true
+kill "$(cat "$DATA_DIR/gate-proxy-$WALL_COMPANY_ID.pid")" 2>/dev/null || true
 rm -rf "$DATA_DIR"
 rm -rf ~/.possiblaw/gate-receipts/"$(basename "$DATA_DIR")"*   # per-run receipts chains
 ```

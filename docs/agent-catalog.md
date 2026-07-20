@@ -1,8 +1,12 @@
 # PossibLaw Agent Catalog
 
-179 agents · 178 skills · 34 teams under two executives. Derived from `companies/legal-operations/` (agent frontmatter + `.paperclip.yaml` lanes); regenerate after package changes.
+180 agents (179 working + 1 service principal) · 178 skills · 34 teams under two executives. Derived from `companies/legal-operations/` (agent frontmatter + `.paperclip.yaml` lanes); regenerate after package changes.
 
 The catalog is the menu — import what your firm practices. `./bin/possiblaw --teams <names>` (e.g. `litigation,commercial`, or presets `boutique` / `inhouse`) imports just those teams plus the executives, meta-reviewers, capability builder, and the skills they reference. See the operator walkthrough.
+
+The always-included `firm-facade-recorder` is not a working team member. It is
+a wake-disabled Paperclip service identity whose only gate capability is
+`receipts:facade`; the facade never borrows a chief or specialist key.
 
 ## Lane rubric
 
@@ -26,6 +30,12 @@ Every agent works inside paperclip issues, never sends/files/serves anything ext
 |---|---|---|
 | `chief-of-staff` | primary | Intake, domain routing, delegation, notifications, and operator escalation. |
 | `chief-counsel` | primary | Legal practice-area classification and legal-team delegation. |
+
+### Service principal — 1 non-working identity
+
+| Agent | Lane | What it does |
+|---|---|---|
+| `firm-facade-recorder` | routing (never woken) | Authenticates the outside firm-facade process and may append only facade receipts; accepts no issues and has no working-agent capabilities. |
 
 ### Chief Counsel direct reports (meta-review) — 3 specialists
 
