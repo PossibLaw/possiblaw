@@ -55,6 +55,7 @@ To request a signature, call the gate proxy — never the DocuSign envelope API 
 
 ```sh
 curl -sS -X POST \
+  -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
   -H "Content-Type: application/json" \
   --data "$(jq -n \
     --arg docPath "$DOC_PATH" \

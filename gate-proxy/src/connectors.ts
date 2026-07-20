@@ -557,8 +557,7 @@ function makeActionPackagePerformer(env: PerformerEnv): Performer {
     fs.mkdirSync(pkgDir, { recursive: true, mode: 0o700 });
 
     const createdAt = new Date().toISOString();
-    const safeTs = createdAt.replace(/[:.]/g, "-");
-    const fileName = `${safeTs}-${req.tool}.json`;
+    const fileName = `${crypto.randomUUID()}-${req.tool}.json`;
     const filePath = path.join(pkgDir, fileName);
 
     // Intentional data minimization: approvalId, confidentiality, and entities are
@@ -571,7 +570,11 @@ function makeActionPackagePerformer(env: PerformerEnv): Performer {
       createdAt,
     };
     // minor: write with restricted permissions (0o600)
-    fs.writeFileSync(filePath, JSON.stringify(pkg, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.writeFileSync(filePath, JSON.stringify(pkg, null, 2), {
+      encoding: "utf8",
+      mode: 0o600,
+      flag: "wx",
+    });
 
     return {
       actionPackage: filePath,

@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   ReceiptChain,
   ReceiptChainCorruptError,
+  ReceiptStoreUnavailableError,
   canonicalJson,
   sha256hex,
   GENESIS,
@@ -38,6 +39,61 @@ function tmpDir(): string {
 // ---------------------------------------------------------------------------
 
 describe("receipts", () => {
+  it("persists the configured companyId on every newly appended receipt", () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "receipts.jsonl");
+    const chain = new ReceiptChain(filePath, "company-custody-123");
+
+    chain.append(mkBody({ outcome: "reserved" }));
+    chain.append(mkBody({ outcome: "performed" }));
+
+    assert.deepEqual(
+      chain.entries().map((entry) => entry.body.companyId),
+      ["company-custody-123", "company-custody-123"],
+    );
+    assert.equal(chain.verify().ok, true);
+  });
+
+  it("rejects a ledger or append bound to a different company", () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "receipts.jsonl");
+    new ReceiptChain(filePath, "company-a").append(mkBody());
+
+    const companyB = new ReceiptChain(filePath, "company-b");
+    const verification = companyB.verify();
+    assert.equal(verification.ok, false);
+    assert.throws(() => companyB.assertAppendable(), ReceiptChainCorruptError);
+    assert.throws(
+      () => new ReceiptChain(path.join(dir, "fresh.jsonl"), "company-b")
+        .append({ ...mkBody(), companyId: "company-a" }),
+      ReceiptChainCorruptError,
+    );
+  });
+
+  it("fails closed on non-ENOENT receipt read errors across read and append paths", () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, "receipts.jsonl");
+    const chain = new ReceiptChain(filePath);
+    const originalReadFileSync = fs.readFileSync;
+    const readFailure = Object.assign(new Error("simulated unreadable receipt store"), { code: "EACCES" });
+    fs.readFileSync = ((target: fs.PathOrFileDescriptor, options?: unknown) => {
+      if (target === filePath) throw readFailure;
+      return originalReadFileSync(target, options as never);
+    }) as typeof fs.readFileSync;
+
+    try {
+      assert.throws(() => chain.verify(), ReceiptStoreUnavailableError);
+      assert.throws(() => chain.head(), ReceiptStoreUnavailableError);
+      assert.throws(() => chain.entries(), ReceiptStoreUnavailableError);
+      assert.throws(() => chain.anchorText(), ReceiptStoreUnavailableError);
+      assert.throws(() => chain.assertAppendable(), ReceiptStoreUnavailableError);
+      assert.throws(() => chain.append(mkBody()), ReceiptStoreUnavailableError);
+      assert.equal(fs.existsSync(filePath), false, "read failure must never be treated as an empty genesis chain");
+    } finally {
+      fs.readFileSync = originalReadFileSync;
+    }
+  });
+
   // 1. Append 5 → verify ok, length 5, head matches last entry
   it("appends 5 entries and verifies the chain", () => {
     const dir = tmpDir();

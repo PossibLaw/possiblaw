@@ -85,6 +85,7 @@ The `meta` object must carry exactly six keys — `deadline`, `rule`, `jurisdict
 # Only run when GATE_PROXY_URL is set and computation was successful
 if [ -n "$GATE_PROXY_URL" ]; then
   curl -s -X POST "$GATE_PROXY_URL/receipts/deadline" \
+    -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
     -H "Content-Type: application/json" \
     -d '{
       "matterId": "<MATTER_ID>",

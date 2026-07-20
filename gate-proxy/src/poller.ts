@@ -16,6 +16,7 @@
 import type { ReceiptChain, ReceiptBody } from "./receipts.ts";
 import { sha256hex } from "./receipts.ts";
 import type { PaperclipClient } from "./paperclip-client.ts";
+import { dispatchOperationId, hasUnresolvedDispatch } from "./operations.ts";
 
 // ---------------------------------------------------------------------------
 // findUnresolvedApprovals
@@ -37,7 +38,11 @@ export function findUnresolvedApprovals(receipts: ReceiptChain): UnresolvedAppro
   // Collect all approvalIds that appear in a non-pending outcome (performed, blocked, etc.)
   const resolvedIds = new Set<string>();
   for (const entry of entries) {
-    if (entry.body.approvalId && entry.body.outcome !== "pending") {
+    if (
+      entry.body.approvalId &&
+      entry.body.outcome !== "pending" &&
+      entry.body.outcome !== "reserved"
+    ) {
       resolvedIds.add(entry.body.approvalId);
     }
   }
@@ -88,11 +93,42 @@ export async function pollOnce(receipts: ReceiptChain, client: PaperclipClient):
 
     for (const { approvalId, issueId, tool } of unresolved) {
       try {
+        // Even the status read is gated on a usable receipt store so a later
+        // mutation can never start from an unauditable process state.
+        receipts.assertAppendable();
         const record = await client.getApproval(approvalId);
 
         if (record.status === "rejected" || record.status === "revision_requested") {
+          const payloadSha256 = sha256hex(`poller:${approvalId}`);
+          const commentOperationId = issueId
+            ? dispatchOperationId({
+                target: "paperclip_comment",
+                tool,
+                payloadSha256,
+                issueId,
+                approvalId,
+              })
+            : undefined;
           // Post comment on issue if we have one — NO payload text
           if (issueId) {
+            if (hasUnresolvedDispatch(receipts, commentOperationId!)) {
+              // A prior process may have posted the comment and died before it
+              // could persist completion. Leave the approval unresolved for
+              // explicit operator reconciliation; never post it again here.
+              continue;
+            }
+            receipts.append({
+              kind: "egress",
+              tool,
+              boundary: null,
+              decision: "human",
+              outcome: "reserved",
+              payloadSha256,
+              approvalId,
+              issueId,
+              operationId: commentOperationId,
+              meta: { dispatchReservation: true, target: "paperclip_comment" },
+            });
             await client.postIssueComment(
               issueId,
               `Egress approval resolved by poller. tool=${tool} approvalId=${approvalId} decision=${record.status}. ` +
@@ -107,9 +143,10 @@ export async function pollOnce(receipts: ReceiptChain, client: PaperclipClient):
             boundary: null,
             decision: "human",
             outcome: "blocked",
-            payloadSha256: sha256hex(`poller:${approvalId}`),
+            payloadSha256,
             approvalId,
             issueId,
+            operationId: commentOperationId,
             meta: {
               resolvedBy: "poller",
               approvalStatus: record.status,

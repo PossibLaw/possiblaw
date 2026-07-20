@@ -141,11 +141,12 @@ describe("gate server", () => {
     assert.deepEqual((json as Record<string, unknown>)["result"], { id: "msg-1" });
     assert.equal(callCount, 1);
 
-    // Last receipt
+    // Durable reservation precedes the completion receipt.
     const v = receipts.verify();
     assert.equal(v.ok, true);
-    if (v.ok) assert.equal(v.length, 1);
+    if (v.ok) assert.equal(v.length, 2);
     const entries = receipts.entries();
+    assert.equal(entries[0].body.outcome, "reserved");
     const last = entries[entries.length - 1];
     assert.equal(last.body.outcome, "performed");
     assert.equal(last.body.payloadSha256, payloadSha(payload));
@@ -189,6 +190,12 @@ describe("gate server", () => {
     const last = entries[entries.length - 1];
     assert.equal(last.body.outcome, "pending");
     assert.equal(last.body.approvalId, j["approvalId"] as string);
+    const reservation = entries.find(
+      (entry) => entry.body.outcome === "reserved" &&
+        entry.body.meta?.["target"] === "paperclip_approval",
+    );
+    assert.match(reservation?.body.operationId ?? "", /^[0-9a-f]{64}$/);
+    assert.equal(last.body.operationId, reservation?.body.operationId);
 
     await close();
   });
@@ -545,7 +552,7 @@ describe("gate server", () => {
     const performers: PerformerRegistry = { send_email: fakePerformer };
 
     const blockPolicy: Policy = {
-      version: 1,
+      ...DEFAULT_POLICY,
       boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "block" },
       citationGate: { boundaries: [...DEFAULT_POLICY.citationGate.boundaries], requireAuthorityProvenance: false },
       unspecifiedConfidentialityDefault: DEFAULT_POLICY.unspecifiedConfidentialityDefault,
@@ -691,6 +698,11 @@ describe("gate server", () => {
     const last = entries[entries.length - 1];
     assert.equal(last.body.kind, "anchor");
     assert.equal(last.body.outcome, "performed");
+    const reservation = entries.find(
+      (entry) => entry.body.kind === "anchor" && entry.body.outcome === "reserved",
+    );
+    assert.match(reservation?.body.operationId ?? "", /^[0-9a-f]{64}$/);
+    assert.equal(last.body.operationId, reservation?.body.operationId);
 
     await close();
   });
@@ -832,7 +844,7 @@ describe("gate server", () => {
     // Force an invalid decision via type cast — this bypasses TS exhaustiveness.
     // Use empty citationGate so the gate does not intercept before the unhandled-decision path.
     const badPolicy: Policy = {
-      version: 1,
+      ...DEFAULT_POLICY,
       boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "bogus_decision" as unknown as "allow" },
       citationGate: { boundaries: [], requireAuthorityProvenance: false },
       unspecifiedConfidentialityDefault: DEFAULT_POLICY.unspecifiedConfidentialityDefault,
@@ -1120,9 +1132,9 @@ describe("gate server", () => {
   });
 
   // -------------------------------------------------------------------------
-  // C2 regression — corrupt receipts file + POST /egress → 500 response received, process alive
+  // C2 regression — corrupt receipts file + POST /egress → fail closed, process alive
   // -------------------------------------------------------------------------
-  it("C2: corrupt receipts file tail + POST /egress/send_email → response IS received (500), server still up", async () => {
+  it("C2: corrupt receipts file tail + POST /egress/send_email → 503, no performer, server still up", async () => {
     const dir = tmpDir();
     const filePath = path.join(dir, "r.jsonl");
     // Write a valid entry then corrupt the tail
@@ -1130,7 +1142,8 @@ describe("gate server", () => {
     // Corrupt the file so append() will throw ReceiptChainCorruptError
     fs.writeFileSync(filePath, '{"seq":1,"ts":"x","prevHash":"GENESIS","hash":"badhash","body":{}}\nNOT_JSON_TAIL\n', "utf8");
 
-    const fakePerformer: Performer = async () => ({ id: "ok" });
+    let performerCalls = 0;
+    const fakePerformer: Performer = async () => { performerCalls++; return { id: "ok" }; };
     const { baseUrl, close } = await startServer({
       policy: DEFAULT_POLICY,
       receipts,
@@ -1139,17 +1152,15 @@ describe("gate server", () => {
       localModelAvailable: false,
     });
 
-    // POST should receive a response (500) — not a connection crash
+    // POST must fail before dispatch — not merely avoid a connection crash.
     const res = await fetch(`${baseUrl}/egress/send_email`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ payload: { to: "a@b.com", subject: "Hi", body: "ok" } }),
     });
 
-    assert.ok(
-      res.status === 500 || res.status === 400 || res.status === 502,
-      `expected an HTTP response (not a crash), got ${res.status}`,
-    );
+    assert.equal(res.status, 503);
+    assert.equal(performerCalls, 0);
 
     // Server still up — can serve another request
     const healthRes = await fetch(`${baseUrl}/health`);
@@ -1896,7 +1907,7 @@ describe("gate server", () => {
     const performers: PerformerRegistry = { upload_document: fakeUpload };
 
     const blockPolicy: Policy = {
-      version: 1,
+      ...DEFAULT_POLICY,
       boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "block" },
       citationGate: { boundaries: [], requireAuthorityProvenance: false },
       unspecifiedConfidentialityDefault: DEFAULT_POLICY.unspecifiedConfidentialityDefault,

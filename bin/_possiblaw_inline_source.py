@@ -79,7 +79,8 @@ EXTRA_ROOT_BASENAMES = {"PROJECT.md", "TASK.md"}
 # meta-review trio routed across teams):
 CHIEF_SLUGS = ("chief-of-staff", "chief-counsel")
 ALWAYS_INCLUDE_SLUGS = CHIEF_SLUGS + (
-    "capability-builder", "risk-spotter", "debate-judge", "reconciler",
+    "firm-facade-recorder", "capability-builder", "risk-spotter",
+    "debate-judge", "reconciler",
 )
 LEAD_SUFFIX = "-lead"
 
@@ -453,6 +454,7 @@ def _self_test_teams() -> None:
         # two teams (alpha, beta) with one specialist each.
         _write_agent(root, "chief-of-staff", None, ["skill-base-attach"])
         _write_agent(root, "chief-counsel", "chief-of-staff", [])
+        _write_agent(root, "firm-facade-recorder", "chief-of-staff", [])
         _write_agent(root, "risk-spotter", "chief-counsel", ["skill-meta"])
         _write_agent(root, "capability-builder", "chief-of-staff", [])
         _write_agent(root, "alpha-lead", "chief-counsel", ["skill-alpha-lead"])
@@ -475,7 +477,8 @@ def _self_test_teams() -> None:
         ] + [
             f"  {slug}:\n    role: r\n    adapter:\n      type: codex_local"
             for slug in (
-                "chief-of-staff", "chief-counsel", "risk-spotter", "capability-builder",
+                "chief-of-staff", "chief-counsel", "firm-facade-recorder",
+                "risk-spotter", "capability-builder",
                 "alpha-lead", "alpha-drafter", "beta-lead", "beta-runner",
             )
         ] + [
@@ -483,6 +486,7 @@ def _self_test_teams() -> None:
             "  agents:",
             "    - chief-of-staff",
             "    - chief-counsel",
+            "    - firm-facade-recorder",
             "    - risk-spotter",
             "    - capability-builder",
             "    - alpha-lead",
@@ -506,7 +510,8 @@ def _self_test_teams() -> None:
         files = out["source"]["files"]
         agent_dirs = {k.split("/")[1] for k in files if k.startswith("agents/")}
         assert agent_dirs == {
-            "chief-of-staff", "chief-counsel", "risk-spotter", "capability-builder",
+            "chief-of-staff", "chief-counsel", "firm-facade-recorder",
+            "risk-spotter", "capability-builder",
             "alpha-lead", "alpha-drafter",
         }, agent_dirs
 

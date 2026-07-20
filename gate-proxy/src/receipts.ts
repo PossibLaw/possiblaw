@@ -14,6 +14,7 @@ export type { BoundaryType, Decision };
 // ---------------------------------------------------------------------------
 
 export type ReceiptOutcome =
+  | "reserved"
   | "performed"
   | "anonymized_performed"
   | "pending"
@@ -21,7 +22,8 @@ export type ReceiptOutcome =
   | "error";
 
 export interface ReceiptBody {
-  kind: "egress" | "anchor" | "quality" | "firm_facade" | "deadline";
+  kind: "egress" | "anchor" | "quality" | "firm_facade" | "deadline" | "authorization";
+  companyId?: string;
   tool: string;
   boundary: BoundaryType | null;
   decision: Decision | null;
@@ -29,6 +31,8 @@ export interface ReceiptBody {
   agentId?: string;
   issueId?: string;
   approvalId?: string;
+  /** Stable digest correlating a dispatch reservation with its terminal receipt. */
+  operationId?: string;
   payloadSha256: string;
   /**
    * Caller-supplied audit metadata. Receipts persist meta verbatim via
@@ -67,6 +71,14 @@ export class ReceiptChainCorruptError extends Error {
   }
 }
 
+/** The receipt ledger could not be opened or synchronously flushed. */
+export class ReceiptStoreUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReceiptStoreUnavailableError";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // canonicalJson: deterministic JSON with sorted keys (recursive); arrays keep order
 // ---------------------------------------------------------------------------
@@ -98,26 +110,28 @@ export function sha256hex(s: string): string {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** Read the last non-empty line from a file. Returns null if file is absent or empty. */
-function readLastLine(filePath: string): string | null {
-  let raw: string;
+/** Read the ledger, treating only ENOENT as a new/empty chain. */
+function readLedgerIfPresent(filePath: string): string | null {
   try {
-    raw = fs.readFileSync(filePath, "utf8");
-  } catch {
-    return null;
+    return fs.readFileSync(filePath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new ReceiptStoreUnavailableError("Receipt store read failed");
   }
+}
+
+/** Read the last non-empty line. Returns null only for ENOENT or an empty file. */
+function readLastLine(filePath: string): string | null {
+  const raw = readLedgerIfPresent(filePath);
+  if (raw === null) return null;
   const lines = raw.split("\n").filter((l) => l.trim() !== "");
   return lines.length > 0 ? lines[lines.length - 1] : null;
 }
 
-/** Read all non-empty lines from a file. Returns [] if absent or empty. */
+/** Read all non-empty lines. Returns [] only for ENOENT or an empty file. */
 function readAllLines(filePath: string): string[] {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(filePath, "utf8");
-  } catch {
-    return [];
-  }
+  const raw = readLedgerIfPresent(filePath);
+  if (raw === null) return [];
   return raw.split("\n").filter((l) => l.trim() !== "");
 }
 
@@ -169,14 +183,14 @@ function computeHash(prevHash: string, seq: number, ts: string, normalizedBody: 
 /**
  * Append-only, hash-linked receipt chain persisted to a JSONL file.
  *
- * Single-writer assumption: only one gate-proxy process may write to a given
- * receipts file at a time. There is no cross-process locking; running two
- * processes against the same file will corrupt the chain.
+ * The gate-proxy process acquires an atomic single-writer lease for this file
+ * before serving traffic. ReceiptChain callers outside that process must obey
+ * the same one-writer contract by acquiring the corresponding lease.
  */
 export class ReceiptChain {
   private readonly filePath: string;
 
-  constructor(filePath: string) {
+  constructor(filePath: string, private readonly defaultCompanyId?: string) {
     this.filePath = filePath;
     // Eagerly create parent directories; file itself is created lazily on first append
     const dir = path.dirname(filePath);
@@ -192,8 +206,10 @@ export class ReceiptChain {
    * persisted. This means append() followed by verify() is always consistent.
    *
    * Throws ReceiptChainCorruptError if the last line is unparseable or has an
-   * invalid shape (e.g. crash mid-write). Recovery: inspect the file, truncate
-   * the corrupt tail line, and re-anchor from the last valid entry.
+   * invalid shape (e.g. crash mid-write), and ReceiptStoreUnavailableError for
+   * any read/open/write/sync failure other than an ENOENT ledger. Recovery:
+   * inspect the file, truncate the corrupt tail line, and re-anchor from the
+   * last valid entry.
    *
    * v1: re-reads file per append; fine at gate volumes.
    */
@@ -226,18 +242,70 @@ export class ReceiptChain {
     // JSON-round-trip normalizes Date→ISO, drops undefined fields.
     // Use this normalized body for BOTH the hash and the persisted entry
     // so the two are always identical — one source of truth.
-    const normalizedBody = JSON.parse(JSON.stringify(body)) as ReceiptBody;
+    if (
+      this.defaultCompanyId !== undefined &&
+      body.companyId !== undefined &&
+      body.companyId !== this.defaultCompanyId
+    ) {
+      throw new ReceiptChainCorruptError("Receipt companyId does not match configured custody");
+    }
+    const bodyWithDefaults =
+      this.defaultCompanyId !== undefined && body.companyId === undefined
+        ? { ...body, companyId: this.defaultCompanyId }
+        : body;
+    const normalizedBody = JSON.parse(JSON.stringify(bodyWithDefaults)) as ReceiptBody;
 
     const hash = computeHash(prevHash, seq, ts, normalizedBody);
 
     const entry: ReceiptEntry = { seq, ts, prevHash, hash, body: normalizedBody };
-    fs.appendFileSync(this.filePath, JSON.stringify(entry) + "\n", "utf8");
+    // A receipt is a safety boundary, not a best-effort application log. Keep
+    // the append and fsync in the same file descriptor so returning from this
+    // method means the reservation/result reached the configured store.
+    let fd: number | undefined;
+    try {
+      fd = fs.openSync(this.filePath, "a");
+      fs.writeSync(fd, JSON.stringify(entry) + "\n", undefined, "utf8");
+      fs.fsyncSync(fd);
+    } catch {
+      throw new ReceiptStoreUnavailableError("Receipt store append or sync failed");
+    } finally {
+      if (fd !== undefined) {
+        try { fs.closeSync(fd); } catch { /* preserve the append/sync result */ }
+      }
+    }
     return entry;
   }
 
   /**
+   * Verify the complete hash chain and prove the backing file can be opened and
+   * synchronously flushed. The zero-byte probe never adds a receipt or mutates
+   * an existing chain (an empty file may be created for a new chain).
+   */
+  assertAppendable(): void {
+    const verified = this.verify();
+    if (!verified.ok) {
+      throw new ReceiptChainCorruptError(
+        `Receipt chain corrupt: ${verified.reason} at line ${verified.badSeq}`,
+      );
+    }
+
+    let fd: number | undefined;
+    try {
+      fd = fs.openSync(this.filePath, "a");
+      fs.fsyncSync(fd);
+    } catch {
+      throw new ReceiptStoreUnavailableError("Receipt store is not appendable");
+    } finally {
+      if (fd !== undefined) {
+        try { fs.closeSync(fd); } catch { /* readiness already determined */ }
+      }
+    }
+  }
+
+  /**
    * Verify the full chain from genesis.
-   * - Empty / missing file → { ok: true, length: 0, head: GENESIS }
+   * - Empty / ENOENT file → { ok: true, length: 0, head: GENESIS }
+   * - Any other read failure → throws ReceiptStoreUnavailableError
    * - Malformed line → { ok: false, badSeq: lineIndex (1-based), reason: "unparseable" }
    * - Seq not monotonic from 1 → { ok: false, badSeq: lineIndex (1-based), reason: "..." }
    * - Hash mismatch → { ok: false, badSeq: lineIndex (1-based), reason: "hash mismatch" }
@@ -276,6 +344,17 @@ export class ReceiptChain {
         };
       }
 
+      if (
+        this.defaultCompanyId !== undefined &&
+        entry.body?.companyId !== this.defaultCompanyId
+      ) {
+        return {
+          ok: false,
+          badSeq: lineIndex,
+          reason: "companyId does not match configured custody",
+        };
+      }
+
       if (entry.prevHash !== prevHash) {
         return {
           ok: false,
@@ -301,7 +380,8 @@ export class ReceiptChain {
   }
 
   /**
-   * Returns the hash of the last entry, or GENESIS if the chain is empty.
+   * Returns the hash of the last entry, or GENESIS if the chain is empty/ENOENT.
+   * Any other read failure throws ReceiptStoreUnavailableError.
    * Throws ReceiptChainCorruptError if the last line is unparseable or has an
    * invalid shape — corrupt tail must not silently masquerade as GENESIS and
    * feed an incorrect anchor to external systems.
@@ -321,7 +401,6 @@ export class ReceiptChain {
     const entry = validateLastEntry(parsed, this.filePath);
     return entry.hash;
   }
-
   /**
    * Human-readable anchor text for a paperclip comment.
    * Contains: head hash, chain length (as length=<n> token), ts of last entry, file path.

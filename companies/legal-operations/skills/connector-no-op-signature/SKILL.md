@@ -44,6 +44,7 @@ None. The proxy writes a local action package; no external service is contacted.
 
 ```sh
 curl -sS -X POST \
+  -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
   -H "Content-Type: application/json" \
   --data "$(jq -n \
     --arg docPath "${DOC_PATH:?DOC_PATH required}" \

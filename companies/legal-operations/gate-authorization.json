@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "default": "deny",
+  "grants": {
+    "correspondence-clerk": [
+      "egress:send_email"
+    ],
+    "deadline-calculator": [
+      "receipts:deadline"
+    ],
+    "deliverables-courier": [
+      "egress:upload_document"
+    ],
+    "firm-facade-recorder": [
+      "receipts:facade"
+    ],
+    "legal-citation-checker": [
+      "quality:authority",
+      "quality:citation"
+    ]
+  },
+  "destinations": {
+    "firm-review-google": {
+      "provider": "gdrive",
+      "folderIdEnv": "POSSIBLAW_GDRIVE_REVIEW_FOLDER_ID",
+      "required": false
+    },
+    "firm-review-onedrive": {
+      "provider": "onedrive",
+      "driveIdEnv": "POSSIBLAW_ONEDRIVE_REVIEW_DRIVE_ID",
+      "parentItemIdEnv": "POSSIBLAW_ONEDRIVE_REVIEW_PARENT_ITEM_ID",
+      "required": false
+    }
+  },
+  "destinationGrants": {
+    "deliverables-courier": [
+      "firm-review-google",
+      "firm-review-onedrive"
+    ]
+  }
+}

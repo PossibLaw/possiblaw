@@ -60,7 +60,8 @@ When `GATE_PROXY_URL` is set, the gate proxy blocks a court filing or third-part
 3. The `document` field must be the EXACT text that will be sent or filed — the same body the connector skill puts in its egress payload (`body` for email, `content` for an upload, `documentText` for a court filing). Write the JSON to a temp file; never inline draft text in shell history:
 
    ```sh
-   curl -sS -X POST -H "Content-Type: application/json" \
+   curl -sS -X POST -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
+     -H "Content-Type: application/json" \
      --data @/tmp/citation-registration.json \
      "${GATE_PROXY_URL}/quality/citation"
    ```

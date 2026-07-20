@@ -40,6 +40,34 @@ agents:
       possiblaw:
         modelLane: primary
         adapterDecision: codex-local-default-2026-05-22
+  firm-facade-recorder:
+    role: service-principal
+    icon: receipt-text
+    capabilities: Service-only identity for recording firm-facade receipts through the gate proxy.
+    budgetMonthlyCents: 0
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.5
+        modelReasoningEffort: low
+        dangerouslyBypassApprovalsAndSandbox: false
+        timeoutSec: 60
+    runtime:
+      heartbeat:
+        enabled: false
+        intervalSec: 0
+        wakeOnAssignment: false
+        wakeOnDemand: false
+        wakeOnOnDemand: false
+        wakeOnAutomation: false
+    metadata:
+      possiblaw:
+        serviceOnly: true
+        # Reuse a defined lane so every variant renders without an unknown-lane
+        # warning. Runtime wake paths remain disabled; this is not permission
+        # for the service principal to perform agent work.
+        modelLane: routing
+        adapterDecision: service-identity-never-run-2026-07-15
   chief-counsel:
     role: legal-router
     icon: scale
@@ -4528,6 +4556,7 @@ agents:
 sidebar:
   agents:
     - chief-of-staff
+    - firm-facade-recorder
     - chief-counsel
     - commercial-lead
     - nda-drafter

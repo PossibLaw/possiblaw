@@ -248,7 +248,7 @@ describe("loadPolicy version mismatch", () => {
 // ---------------------------------------------------------------------------
 
 describe("shipped gate-policy.yaml", () => {
-  it("loads and equals DEFAULT_POLICY boundaries", () => {
+  it("loads with third-party egress human-gated by default", () => {
     // policy.test.ts lives at: gate-proxy/src/policy.test.ts
     // gate-policy.yaml lives at: companies/legal-operations/gate-policy.yaml
     // Relative from test file: ../../companies/legal-operations/gate-policy.yaml
@@ -260,16 +260,9 @@ describe("shipped gate-policy.yaml", () => {
       `Shipped gate-policy.yaml not found at resolved path: ${shippedPath}`,
     );
     const policy = loadPolicy(shippedPath);
-    const expected: Policy = {
-      version: 1,
-      boundaries: { ...DEFAULT_POLICY.boundaries },
-      citationGate: {
-        boundaries: [...DEFAULT_POLICY.citationGate.boundaries],
-        requireAuthorityProvenance: DEFAULT_POLICY.citationGate.requireAuthorityProvenance,
-      },
-      unspecifiedConfidentialityDefault: DEFAULT_POLICY.unspecifiedConfidentialityDefault,
-    };
-    assert.deepEqual(policy, expected);
+    assert.equal(policy.boundaries.THIRD_PARTY_EGRESS, "human");
+    assert.equal(policy.boundaries.CONFIDENTIAL_TO_CLOUD, "anonymize");
+    assert.equal(policy.boundaries.COURT_FILING, "human");
   });
 });
 

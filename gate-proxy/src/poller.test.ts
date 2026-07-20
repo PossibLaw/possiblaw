@@ -132,6 +132,9 @@ describe("poller", () => {
     const last = entries[entries.length - 1];
     assert.equal(last.body.outcome, "blocked");
     assert.equal(last.body.approvalId, "A1");
+    const reservation = entries.find((entry) => entry.body.outcome === "reserved");
+    assert.match(reservation?.body.operationId ?? "", /^[0-9a-f]{64}$/);
+    assert.equal(last.body.operationId, reservation?.body.operationId);
     const meta = last.body.meta as Record<string, unknown>;
     assert.equal(meta["resolvedBy"], "poller");
     assert.equal(meta["approvalStatus"], "rejected");
@@ -168,6 +171,43 @@ describe("poller", () => {
 
     assert.equal(callCount, callsAfterFirst, "no additional getApproval calls for resolved A1");
     assert.equal(comments.length, 1, "only one comment should have been posted");
+  });
+
+  it("pollOnce: unresolved comment reservation never re-posts the comment", async () => {
+    const dir = tmpDir();
+    const chain = new ReceiptChain(path.join(dir, "r.jsonl"));
+
+    chain.append(mkBody({ outcome: "pending", approvalId: "A1", issueId: "I1" }));
+    chain.append(mkBody({
+      outcome: "reserved",
+      approvalId: "A1",
+      issueId: "I1",
+      operationId: sha256hex(canonicalJson({
+        version: 1,
+        target: "paperclip_comment",
+        tool: "file_court_document",
+        payloadSha256: sha256hex("poller:A1"),
+        issueId: "I1",
+        approvalId: "A1",
+      })),
+      meta: { dispatchReservation: true, target: "paperclip_comment" },
+    }));
+
+    let commentCalls = 0;
+    const approvals = new Map<string, ApprovalRecord>([
+      ["A1", { id: "A1", status: "rejected", payload: {} }],
+    ]);
+    const client: PaperclipClient = {
+      async createApproval(_input: unknown) { return { id: "x" }; },
+      async getApproval(id: string) { return approvals.get(id)!; },
+      async postIssueComment(_issueId: string, _body: string) { commentCalls++; },
+      async linkIssueApproval(_issueId: string, _approvalId: string) {},
+    } as unknown as PaperclipClient;
+
+    await pollOnce(chain, client);
+
+    assert.equal(commentCalls, 0, "indeterminate comment dispatch must not be repeated");
+    assert.equal(chain.entries().at(-1)?.body.outcome, "reserved");
   });
 
   // 15c. revision_requested → also triggers blocked receipt

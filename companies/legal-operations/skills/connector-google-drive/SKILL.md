@@ -1,6 +1,6 @@
 ---
 name: connector-google-drive
-description: List and fetch matter documents in Google Drive via the Drive API v3. Upload deliverables through the gate proxy upload_document tool (destination gdrive) with read-back verification.
+description: List and fetch matter documents in Google Drive via the Drive API v3. Upload deliverables through the gate proxy upload_document tool using a configured destination alias, with read-back verification.
 metadata:
   sources:
     - path: companies/legal-operations/skills/connector-google-drive/SKILL.md
@@ -22,7 +22,7 @@ The service endpoint is `https://www.googleapis.com` with paths under `/drive/v3
 
 ## Required Environment Variables
 
-Read operations use the agent's OAuth token. Writes go through the proxy and need no token in the agent environment.
+Read operations use the agent's OAuth token. Writes go through the proxy and need no token or vendor folder ID in the agent environment.
 
 | Env | Purpose | Default | Source |
 |---|---|---|---|
@@ -31,6 +31,11 @@ Read operations use the agent's OAuth token. Writes go through the proxy and nee
 | `GDRIVE_READ_TOKEN` | OAuth 2.0 bearer token for agent-side read operations; supply a read-only-scoped credential here; it reaches agents and must not carry write scopes; the proxy's write credential (`GDRIVE_ACCESS_TOKEN`) is separate (operator-walkthrough Gate Proxy section) | — | Authorization-code flow per Google OAuth docs |
 | `GDRIVE_REFRESH_TOKEN` | OAuth 2.0 refresh token for refreshing the read token | — | Issued on first exchange when `access_type=offline` was requested |
 | `GDRIVE_MATTER_ROOT_FOLDER_ID` | Drive folder ID under which matter folders live | — | Operator copies the ID from the folder's Drive URL |
+
+The shipped write alias is `firm-review-google`. The operator maps that alias
+to an exact firm-owned folder with `POSSIBLAW_GDRIVE_REVIEW_FOLDER_ID` before
+launch; the launcher compiles the mapping into the gate's private runtime
+authorization file. Agents receive the alias, never the configured folder ID.
 
 Least-privilege scope (verified at https://developers.google.com/workspace/drive/api/guides/api-specific-auth, accessed 2026-06-09): request `https://www.googleapis.com/auth/drive.file` — non-sensitive, per-file access to files the app created or that were shared into the app's scope. Avoid the restricted full `https://www.googleapis.com/auth/drive` scope. Caveat: under `drive.file`, a pre-existing matter folder tree is invisible until the operator shares it into the app's scope (e.g. via the Google Picker) or the app created it — if broader access is genuinely required, the operator must approve the full scope explicitly first.
 
@@ -88,16 +93,23 @@ To upload a deliverable to the matter folder, call the gate proxy — never the 
 
 ```sh
 curl -sS -X POST \
+  -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
   -H "Content-Type: application/json" \
   --data "$(jq -n \
+    --arg destinationId "${DESTINATION_ID:-firm-review-google}" \
     --arg name "$DOC_NAME" \
     --arg content "$(cat "$SRC_FILE")" \
     --arg agent "$PAPERCLIP_AGENT_ID" \
     --arg issue "$ISSUE_ID" \
-    '{payload:{destination:"gdrive",name:$name,content:$content},
+    '{payload:{destinationId:$destinationId,name:$name,content:$content},
       meta:{agentId:$agent,issueId:$issue,confidentiality:"standard",entities:[]}}')" \
   "${GATE_PROXY_URL}/egress/upload_document"
 ```
+
+`DESTINATION_ID` must be an alias the gate grants to this agent. Do not send
+`destination`, `folderId`, or any other provider selector: authenticated
+production rejects raw selectors before calling Google. A request or document
+that supplies a different folder ID cannot redirect the upload.
 
 For `confidential` or `privileged` matter content, set `meta.confidentiality` accordingly — the proxy enforces anonymization or routing per `gate-policy.yaml`.
 
@@ -107,7 +119,9 @@ For `confidential` or `privileged` matter content, set `meta.confidentiality` ac
 
 **403 `{reason:"citation_gate_unverified"}`** — the outbound text carries legal citations with no registered verification. Do NOT remove or trim the citations to get past the gate. Route the draft to `legal-citation-checker` (via `research-lead`); after it registers a passing verification (see `citation-verification-checklist` → "Gate Registration"), re-call this endpoint with the IDENTICAL document text. A `403 {reason:"citation_gate_no_document"}` means the gate found no reviewable text on a citation-gated boundary — include the document text in the payload field this connector sends.
 
-**403 (other reason)** — blocked by policy; post the reason as a comment and mark blocked.
+**403 (other reason)** — blocked by policy or the destination alias is not
+configured/granted; post the reason as a comment and mark blocked. Never retry
+by substituting a raw Google folder ID.
 
 **502 `credential_missing: GDRIVE_ACCESS_TOKEN`** — the proxy lacks the credential; the operator must set `GDRIVE_ACCESS_TOKEN` in the launcher environment (never agent env).
 
@@ -128,10 +142,18 @@ Failure modes:
 
 ## Output Convention
 
-After a verified upload, post a Paperclip comment with the Drive file `id`, name, and the matter folder it landed in; also mirror the file into the local deliverables tree per `output-storage-config` so the matter file is complete offline. For listings, summarize count and the first 10 file names + IDs.
+After a verified upload, post a Paperclip comment with the Drive file `id`,
+name, and trusted destination alias; do not expose the gate's private folder
+mapping. Also mirror the file into the local deliverables tree per
+`output-storage-config` so the matter file is complete offline. For listings,
+summarize count and the first 10 file names + IDs.
 
 ## Given / When / Then
 
-- **Happy path** — Token valid with `drive.file`; folder listing returns the matter documents; proxy upload returns 200 with file `id`; read-back GET confirms the file exists; agent posts the ID, name, and folder to Paperclip.
+- **Happy path** — Token valid with `drive.file`; folder listing returns the matter documents; proxy upload with `destinationId: "firm-review-google"` returns 200 with file `id`; read-back GET confirms the file exists; agent posts the ID, name, and alias to Paperclip.
 - **Edge** — Fetched file is a Google-native Doc: `alt=media` cannot return binary content; agent flags the MIME type, skips the silent failure, and either exports (after verifying `files.export`) or asks the operator for a preferred format.
-- **Failure / security** — `credential_missing: GDRIVE_ACCESS_TOKEN` from the proxy or the matter is flagged privileged with an upload target outside the matter root: agent posts `[CONNECTOR:GDRIVE_UNCONFIGURED]` (or refuses the out-of-tree write), makes no call, and never logs token bytes or client-identifying file names.
+- **Failure / security** — `credential_missing: GDRIVE_ACCESS_TOKEN`, an
+  unconfigured alias, or a request containing a raw `folderId`: the agent posts
+  `[CONNECTOR:GDRIVE_UNCONFIGURED]` (or the gate's safe denial reason), makes no
+  direct Drive write, and never logs token bytes, the private folder mapping,
+  or client-identifying file names.

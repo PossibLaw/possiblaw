@@ -113,6 +113,7 @@ export function resolveEffectiveConfidentiality(
 export interface RegisterClassificationInput {
   issueId: string;
   tier: Confidentiality;
+  agentId?: string;
 }
 
 export interface RegisterClassificationResult {
@@ -221,6 +222,7 @@ export class MatterClassificationRegistry {
       decision: null,
       outcome: "performed",
       payloadSha256: sha256hex(canonicalJson({ issueId: input.issueId, tier: input.tier })),
+      agentId: input.agentId,
       issueId: input.issueId,
       meta: { tier: input.tier, effectiveTier },
     });

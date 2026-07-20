@@ -53,6 +53,8 @@ export interface FacadeReceiptInput {
 export interface FacadeReceiptWriterOptions {
   /** Base URL of the running gate-proxy (e.g. "http://localhost:9000"). */
   gateProxyUrl: string;
+  /** Paperclip agent key used by a production-authenticated gate. */
+  apiKey?: string;
   /**
    * Injectable fetch implementation. Defaults to global `fetch`.
    * Inject a fake in tests to avoid network I/O.
@@ -66,10 +68,12 @@ export interface FacadeReceiptWriterOptions {
 
 export class FacadeReceiptWriter {
   private readonly gateProxyUrl: string;
+  private readonly apiKey: string;
   private readonly fetchImpl: typeof fetch;
 
   constructor(opts: FacadeReceiptWriterOptions) {
     this.gateProxyUrl = opts.gateProxyUrl;
+    this.apiKey = opts.apiKey ?? "";
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
@@ -95,9 +99,11 @@ export class FacadeReceiptWriter {
     const endpoint = `${this.gateProxyUrl}/receipts/facade`;
 
     // fetch itself may throw (network error, ECONNREFUSED) — let it propagate
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (this.apiKey !== "") headers["authorization"] = `Bearer ${this.apiKey}`;
     const res = await this.fetchImpl(endpoint, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify(body),
     });
 

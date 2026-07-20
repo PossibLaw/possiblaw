@@ -29,6 +29,7 @@ export interface RegisterAuthorityInput {
   source: string;
   sourceUrl?: string;
   retrievedAt?: string;
+  agentId?: string;
   // FIX 3 (S2): meta/reporterMeta removed — caller-supplied meta was stored
   // verbatim in the hash-chained ledger (up to ~1MB of arbitrary JSON) and is
   // never read back by verifyDocument or the sign-off bundle. Drop it entirely;
@@ -148,6 +149,7 @@ export class AuthorityRegistry {
       // would hash over the authority body) — binds the registration to a
       // specific retrieved document.
       payloadSha256: input.sha256,
+      agentId: input.agentId,
       meta,
     });
     for (const f of indexForms) this.retrieved.add(f);

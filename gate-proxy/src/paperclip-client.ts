@@ -24,6 +24,7 @@ export interface PaperclipClientConfig {
   baseUrl: string;       // e.g. http://127.0.0.1:3100
   companyId: string;
   apiKey?: string;       // optional: local_trusted mode needs none
+  expectedAgentId?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -31,6 +32,32 @@ export interface ApprovalRecord {
   id: string;
   status: "pending" | "approved" | "rejected" | "revision_requested";
   payload: Record<string, unknown>;
+}
+
+/**
+ * Readiness-only authenticated company access probe. Kept off the
+ * PaperclipClient prototype so the gate's four-method integrity boundary stays
+ * unchanged. No response body is surfaced or logged.
+ */
+export async function probePaperclipCompanyAccess(cfg: PaperclipClientConfig): Promise<void> {
+  const baseUrl = cfg.baseUrl.replace(/\/$/, "");
+  const urlPath = "/api/agents/me";
+  if (!cfg.apiKey) {
+    throw new Error("authenticated Paperclip readiness requires an API key");
+  }
+  const agent = await doRequest<Record<string, unknown>>(
+    cfg.fetchImpl ?? globalThis.fetch,
+    baseUrl,
+    cfg.apiKey,
+    "GET",
+    urlPath,
+  );
+  if (agent["companyId"] !== cfg.companyId) {
+    throw new Error("authenticated Paperclip agent is not bound to the configured company");
+  }
+  if (cfg.expectedAgentId !== undefined && agent["id"] !== cfg.expectedAgentId) {
+    throw new Error("authenticated Paperclip agent is not the configured gate agent");
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -112,6 +112,7 @@ To send an email, call the gate proxy — never the Gmail API directly:
 
 ```sh
 curl -sS -X POST \
+  -H "Authorization: Bearer ${PAPERCLIP_API_KEY}" \
   -H "Content-Type: application/json" \
   --data "$(jq -n \
     --arg to "$RECIPIENT" \
