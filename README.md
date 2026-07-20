@@ -69,14 +69,36 @@ PossibLaw-owned packages are pinned to Node `24.18.0` (`.nvmrc`) and CI uses pnp
 
 The command runs all owned package tests/typechecks, launcher and helper safety tests, package rendering, manifest checks, variants, and eval coverage. It explicitly reports authenticated two-lawyer, live launcher, and provider round-trip checks as `SKIP`; those are operator-gated and are never reported as passing without receipts. CI runs the same entrypoint in [`.github/workflows/verify.yml`](.github/workflows/verify.yml).
 
-## The 5-minute path: clone → launch → see the receipt
+## Deployment and setup
+
+Choose the path that matches the operator and the data involved:
+
+| Path | Intended use | Security posture |
+|---|---|---|
+| **Local launcher** | One operator evaluating or developing PossibLaw on their own workstation | Loopback-only `local_trusted`; not a shared or remote production deployment |
+| **Docker Compose** | The reference deployment for one firm or one in-house legal department | Authenticated control plane, distinct non-root workers, scoped networks/credentials, persistent volumes; live isolation and the release gates below are still required |
+| **Azure tenant** | A firm or legal department deploying the Docker reference inside its own Azure tenant | Can add Entra/RBAC, private networking, Bastion, Key Vault, encrypted disks, monitoring, and immutable backups; those controls must be configured and attested |
+| **Hostinger VPS** | A small firm or legal department operating the Docker reference on a dedicated VPS | Self-managed VPS controls plus the PossibLaw Compose topology; Hostinger's Paperclip one-click template installs upstream Paperclip, not PossibLaw |
+
+Never publish Paperclip's port `3100` directly to the internet. The reference Compose file binds it to host loopback. Use a firm VPN or SSH tunnel for bootstrap, then a reviewed TLS reverse proxy/private ingress for users.
+
+### Local: clone → launch → see the receipt
+
+Use this path for a single operator on a trusted workstation. Install Git, Python 3, `curl`, Node `24.18.0`, and pnpm `9.15.4`, then verify the versions:
+
+```bash
+node --version   # v24.18.0
+pnpm --version   # 9.15.4
+python3 --version
+```
 
 **Step 1 — clone and launch (2 min)**
 
 ```bash
-git clone https://github.com/PossibLaw/possiblaw && cd possiblaw
+git clone https://github.com/PossibLaw/possiblaw
+cd possiblaw
 git submodule update --init --recursive
-pnpm -C paperclip install
+pnpm -C paperclip install --frozen-lockfile
 ./bin/possiblaw
 # answer three prompts (org name, mission, variant)
 # → browser opens to your paperclip dashboard, agents loaded, gate proxy running
@@ -90,7 +112,7 @@ Add `--variant <slug>` to skip the interactive prompt, `--list-variants` to see 
 # simulate an agent attempting a court filing:
 curl -s -X POST http://127.0.0.1:3801/egress/file_court_document \
   -H 'content-type: application/json' \
-  -d '{"payload":{"caption":"Acme v. Globex","court":"D. Del."},"meta":{"confidentiality":"standard"}}'
+  -d '{"payload":{"caption":"Acme v. Globex","court":"D. Del.","documentText":"The parties request a scheduling conference."},"meta":{"confidentiality":"standard"}}'
 # → 202 pending_approval + an approval in the paperclip dashboard. Approve it
 #   there, then re-run the same curl with "approvalId":"<id>" added to meta
 #   → 200, action package written to ~/.possiblaw/action-packages/ for a
@@ -100,7 +122,134 @@ curl -s http://127.0.0.1:3801/receipts/verify
 # → {"ok":true,"length":N,"head":"..."} — the tamper-evident trail
 ```
 
+Stop with `Ctrl-C`. Re-running the launcher reattaches to a healthy server on the selected port instead of starting a duplicate. Use `--port <port>` and `--gate-port <port>` for alternate loopback ports; use a different `--data-dir` for a separate disposable instance.
+
 Full walkthrough: [docs/operator-walkthrough.md](docs/operator-walkthrough.md); package layout: [docs/paperclip-package.md](docs/paperclip-package.md); sharp edges: [docs/known-limitations.md](docs/known-limitations.md).
+
+### Docker Compose: authenticated single-tenant reference
+
+Use a dedicated, patched Linux host with Docker Engine and Compose v2. The bundled stack is intentionally fail-closed: its placeholder model gateways return `503` until the operator replaces them with reviewed, authenticated gateways.
+
+1. Clone the complete repository and verify the container runtime:
+
+   ```bash
+   git clone https://github.com/PossibLaw/possiblaw
+   cd possiblaw
+   git submodule update --init --recursive
+   docker version
+   docker compose version
+   ```
+
+2. Create ignored deployment configuration and owner-only bootstrap material:
+
+   ```bash
+   cd deployments/firm-single-tenant
+   cp .env.example .env
+   ./scripts/init-secrets.sh
+   ```
+
+   Do not put board, model-provider, Drive, or OneDrive tokens in `.env`. The script creates private file-backed bootstrap secrets and deliberately leaves Gate keys unusable until identity provisioning succeeds.
+
+3. Run the credential-free topology and staging checks:
+
+   ```bash
+   python3 -m venv /tmp/possiblaw-deploy-venv
+   . /tmp/possiblaw-deploy-venv/bin/activate
+   python -m pip install -r requirements-test.txt
+   ./tests/run.sh
+   deactivate
+   ```
+
+4. Start only PostgreSQL and authenticated Paperclip:
+
+   ```bash
+   docker compose up -d db paperclip
+   docker compose ps
+   ```
+
+5. Open `http://127.0.0.1:3100` on the host, complete the board-claim/login flow, and keep the board token in an owner-only file or the operator shell—never in an argument, tracked file, or chat transcript.
+
+6. Complete the [bootstrap sequence](deployments/firm-single-tenant/README.md#bootstrap-sequence): preview and import the PossibLaw company, persist immutable principal bindings, put the resulting non-secret company/agent IDs in `.env`, provision the two workers, then start the Gate and its relays.
+
+7. Run the sacrificial isolation eval before enabling agent heartbeats:
+
+   ```bash
+   ./scripts/run-isolation-eval.sh
+   ```
+
+   Every boolean must be `true`; every string must be a lowercase 64-character SHA-256 value. A missing or false result is a deployment failure.
+
+8. Confirm restart persistence without deleting named volumes:
+
+   ```bash
+   docker compose restart
+   docker compose ps
+   ```
+
+   `docker compose down` preserves named volumes; `docker compose down --volumes` deletes deployment data and is intentionally not part of this setup guide.
+
+The full topology, exact provisioning commands, threat boundaries, workspace staging rules, and release gates are in [`deployments/firm-single-tenant/README.md`](deployments/firm-single-tenant/README.md).
+
+### Azure: deploy inside the firm's tenant
+
+Azure is an infrastructure host for the same Docker Compose reference; PossibLaw does not yet ship an ARM/Bicep template or a **Deploy to Azure** button.
+
+1. Have the firm's Azure administrator create a dedicated resource group, VNet/subnet, and Ubuntu 24.04 LTS VM in the firm's tenant. Use Trusted Launch with Secure Boot and vTPM, a system-assigned managed identity, encrypted OS/data disks, and organization-approved RBAC.
+2. Give the VM no public IP. Apply an NSG that denies unsolicited inbound traffic and use Azure Bastion, the firm's VPN, or another approved private access path. Restrict outbound provider traffic with the firm's firewall or authenticated egress proxy; an NSG alone is not a domain-aware egress control.
+3. Configure Key Vault for operator/provider secrets and a Recovery Services vault for VM backups. The current Compose reference consumes file-backed secrets, so any Key Vault-to-host retrieval procedure must write only owner-readable files on encrypted storage and must not place values in `.env`, cloud-init output, or process arguments.
+4. Connect to the private VM through the approved administrative path. If that path provides SSH, add a local forward while bootstrapping:
+
+   ```bash
+   ssh -L 3100:127.0.0.1:3100 <approved-azure-vm-ssh-target>
+   ```
+
+5. Install Docker Engine with Compose v2 from Docker's [official Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/), then follow the Docker Compose steps above on the VM.
+6. Keep Paperclip private. For staff access, place a reviewed TLS reverse proxy/private ingress in front of loopback Paperclip and integrate it with the firm's identity, Conditional Access, logging, and incident-response standards.
+7. Run the isolation eval on the exact VM, enable backup immutability only after a restore test, and record the image digests, firewall policy, backup receipt, and deployment results.
+
+Azure can supply the infrastructure controls the design requires, but tenancy alone is not an attestation. The deployment is not production-approved until the PossibLaw release gates and the firm's legal, security, privacy, retention, and provider reviews pass. Official references checked **2026-07-20**: [Azure VM Zero Trust](https://learn.microsoft.com/en-us/security/zero-trust/azure-infrastructure-virtual-machines), [Azure Bastion](https://learn.microsoft.com/en-us/azure/bastion/bastion-overview), [Key Vault](https://learn.microsoft.com/en-us/azure/key-vault/general/overview), [VM Backup](https://learn.microsoft.com/en-us/azure/backup/backup-azure-vms-introduction), and [immutable backup vaults](https://learn.microsoft.com/en-us/azure/backup/backup-azure-immutable-vault-concept).
+
+### Hostinger: deploy the custom stack on a VPS
+
+Hostinger's [Paperclip application](https://www.hostinger.com/applications/paperclip) is a convenient one-click deployment of upstream Paperclip. It does **not** include PossibLaw's company package, Gate Proxy, capability map, isolated workers, receipt custody, or pinned layer. Do not select it when the intended result is a PossibLaw deployment.
+
+1. Create a dedicated Hostinger VPS using its Ubuntu 24.04 Docker template. Choose capacity for the control plane, PostgreSQL, Gate, two workers, model gateways, builds, backups, and expected concurrency; do not select a size from this README without measuring the firm's workload.
+2. In hPanel, restrict the VPS firewall to the firm's approved administrative sources and required TLS ingress. Do not open port `3100` publicly.
+3. Connect with SSH and verify Compose v2:
+
+   ```bash
+   ssh <admin-user>@<vps-ip>
+   docker version
+   docker compose version
+   ```
+
+4. Clone the full repository on the VPS and follow the Docker Compose steps above. The current build uses repository-relative Docker contexts and private generated files, so pasting only `compose.yaml` into Docker Manager is not a complete PossibLaw install.
+5. From the operator workstation, create an SSH tunnel for the board claim and bootstrap:
+
+   ```bash
+   ssh -L 3100:127.0.0.1:3100 <admin-user>@<vps-ip>
+   ```
+
+   Then open `http://127.0.0.1:3100` locally.
+
+6. Configure a reviewed TLS reverse proxy/private access layer, encrypted off-host backups, monitoring, patching, and explicit provider egress restrictions. Hostinger infrastructure features do not replace the Compose isolation eval or the application release gates.
+7. Run `./scripts/run-isolation-eval.sh`, test a restart, and perform a restore drill before using real matter data.
+
+Hostinger Docker Manager supports custom Compose projects and a **Deploy on Hostinger** button, but PossibLaw does not yet publish the self-contained images, bootstrap automation, or Compose artifact that a truthful one-click button requires. One-click deployment remains future work. Official Hostinger references checked **2026-07-20**: [Docker VPS template](https://www.hostinger.com/support/8306612-how-to-use-the-docker-vps-template-at-hostinger/), [Docker Manager](https://www.hostinger.com/support/12040789-hostinger-docker-manager-for-vps-simplify-your-container-deployments/), [custom Compose deployment](https://www.hostinger.com/support/12040815-how-to-deploy-your-first-container-with-hostinger-docker-manager/), and [Paperclip application guide](https://www.hostinger.com/support/how-to-get-started-with-the-paperclip-at-hostinger/).
+
+### Release gates for any shared or hosted deployment
+
+Do not use real client data or call a shared/hosted deployment production-ready until all applicable gates are recorded:
+
+- The exact target host passes `docker compose config`, image builds, health checks, saved SSH-environment probes, and `run-isolation-eval.sh`.
+- The blocked placeholder AI gateways are replaced with reviewed, authenticated, scoped gateways; provider egress is restricted outside Compose.
+- TLS/private ingress, secret management, image digest pinning/scanning, SBOMs, monitoring, patching, incident response, backups, and a successful restore drill are in place.
+- The authenticated two-lawyer/ethical-wall test passes on the target deployment.
+- Drive or OneDrive upload, exact-version readback, approval, and delivery pass with disposable targets.
+- Receipt heads are anchored outside the deployment's host/admin trust domain; retention and legal-hold requirements are configured.
+- The pinned Paperclip failed-request secret-logging risk and invite-page query-shape defect are fixed, isolated, or explicitly accepted by the operator.
+
+The canonical status is [docs/known-limitations.md](docs/known-limitations.md), the manual test sequence is [docs/operator-test-checklist.md](docs/operator-test-checklist.md), and the complete deployment gate is [deployments/firm-single-tenant/README.md#release-gates](deployments/firm-single-tenant/README.md#release-gates).
 
 ## The catalog (the interchangeable parts)
 
