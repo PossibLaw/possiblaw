@@ -577,7 +577,22 @@ export async function requestApproval(
   deps: HandlerDeps,
 ): Promise<RequestApprovalResult> {
   const { matterId, action, summary } = args;
-  const { client, receipts, publicBaseUrl, companyPrefix } = deps;
+  const { client, receipts, publicBaseUrl, companyPrefix, companyId } = deps;
+
+  // Scope the caller-supplied matter before attaching it to an approval. The
+  // guard receipt hashes identifiers only; privileged action/summary text
+  // remains confined to the human-visible Paperclip approval payload.
+  const scopePayloadSha256 = sha256hex(
+    canonicalArgs({ tool: "request_approval", matterId }),
+  );
+  await guardCompanyScope(
+    client,
+    receipts,
+    "request_approval",
+    matterId,
+    scopePayloadSha256,
+    companyId,
+  );
 
   // Create approval request. action/summary go to the dashboard payload so the
   // human reviewer can see what is being approved — they do NOT go into the receipt.

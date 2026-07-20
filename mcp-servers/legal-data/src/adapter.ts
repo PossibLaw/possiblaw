@@ -47,6 +47,7 @@ const QUERY_LIKE_KEYS = new Set([
   "terms",
   "keyword",
   "keywords",
+  "cite",
 ]);
 
 /**
@@ -309,14 +310,20 @@ export async function proxyToolCall(
  * must succeed even when the gate is unreachable. `gateUrl` defaults to
  * GATE_PROXY_URL; if neither is set the reporter is a no-op.
  */
-export function createGateProvenanceReporter(gateUrl?: string): ProvenanceReporter {
+export function createGateProvenanceReporter(
+  gateUrl?: string,
+  apiKey: string = process.env["PAPERCLIP_API_KEY"] ?? "",
+  fetchImpl: typeof fetch = fetch,
+): ProvenanceReporter {
   const base = (gateUrl ?? process.env["GATE_PROXY_URL"] ?? "").replace(/\/+$/, "");
   return async (authority) => {
     if (base === "") return; // env unset → no-op, never blocks retrieval
     try {
-      await fetch(`${base}/quality/authority`, {
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (apiKey !== "") headers["authorization"] = `Bearer ${apiKey}`;
+      await fetchImpl(`${base}/quality/authority`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify({
           citation: authority.citation,
           sha256: authority.sha256,

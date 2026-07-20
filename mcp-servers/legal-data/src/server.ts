@@ -108,7 +108,7 @@ const REST_TOOLS: {
 
 const PROVENANCE_NOTE =
   " — wrapped in a PossibLaw provenance envelope (sha256 aligned with the citation gate); " +
-  "client identifiers are stripped from query args for confidential/privileged matters.";
+  "confidential/privileged query identifiers receive best-effort redaction; use neutral legal terms.";
 
 /**
  * Load the host-provided OAuthClientProvider for OAuth-MCP mode. Resolved from

@@ -1,9 +1,9 @@
 // mcp-servers/legal-data/src/sanitize.ts
 //
-// Outbound-query privacy. A CourtListener search is a read to a third party;
-// the query string itself can carry privileged facts (client names, matter
-// captions). For confidential/privileged matters we strip client identifiers
-// BEFORE the search so only neutral legal terms leave the boundary.
+// Outbound-query privacy defense in depth. A CourtListener search is a read to
+// a third party; the query itself can carry privileged facts. Callers MUST use
+// neutral legal terms as the primary control. These deterministic heuristics
+// remove common identifiers before egress but cannot prove a query is safe.
 //
 // This mirrors the neutral-terms rule in docs/connectors-inventory.md:40 and the
 // detection rules in the `privacy-encoder` skill (companies/legal-operations/
@@ -37,6 +37,23 @@ const STRUCTURED: { type: string; re: RegExp }[] = [
   { type: "PHONE", re: /(?:\+?1[\s\-.]?)?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}/g },
 ];
 
+const PERSON_NAME = "[A-Z][A-Za-z'’.-]*";
+const PERSON_CAPTION_RE = new RegExp(
+  `\\b${PERSON_NAME}(?:\\s+${PERSON_NAME}){0,3}\\s+v(?:s\\.?|ersus|\\.)?\\s+` +
+    `${PERSON_NAME}(?:\\s+${PERSON_NAME}){0,3}\\b`,
+  "g",
+);
+const LABELED_PERSON_RE = new RegExp(
+  "\\b(?:client|Client|party|Party|plaintiff|Plaintiff|defendant|Defendant|" +
+    "petitioner|Petitioner|respondent|Respondent|witness|Witness)" +
+    `\\s*(?:[:=-]\\s*)?${PERSON_NAME}(?:\\s+${PERSON_NAME}){1,3}\\b`,
+  "g",
+);
+const LABELED_MATTER_RE =
+  /\b(?:docket|matter|case|file)\s*(?:no\.?|number|#)?\s*[:#-]?\s*[A-Z0-9][A-Z0-9._/-]{3,}\b/gi;
+const BARE_MATTER_NUMBER_RE =
+  /\b(?:[12]\d{3}-[A-Z]{1,8}-\d{2,12}|[A-Z]{2,10}-\d{2,4}-\d{2,12})\b/g;
+
 /**
  * Strip client identifiers from an outbound search query for confidential /
  * privileged matters. Standard-tier queries pass through unchanged.
@@ -49,7 +66,26 @@ export function sanitizeQuery(query: string, tier: PrivacyTier = "standard"): Sa
   const redactions: { type: string; value: string }[] = [];
   let out = query;
 
-  // Entity names first (longest-precedence, mirrors encoder rule order).
+  // Captions first so both sides are removed before entity/person sub-rules
+  // can leave the opposing party behind.
+  out = out.replace(PERSON_CAPTION_RE, (m) => {
+    redactions.push({ type: "PERSON_CAPTION", value: m.trim() });
+    return " ";
+  });
+  out = out.replace(LABELED_PERSON_RE, (m) => {
+    redactions.push({ type: "PERSON", value: m.trim() });
+    return " ";
+  });
+  out = out.replace(LABELED_MATTER_RE, (m) => {
+    redactions.push({ type: "MATTER_NUMBER", value: m.trim() });
+    return " ";
+  });
+  out = out.replace(BARE_MATTER_NUMBER_RE, (m) => {
+    redactions.push({ type: "MATTER_NUMBER", value: m.trim() });
+    return " ";
+  });
+
+  // Entity names after caption/person handling.
   out = out.replace(ENTITY_RE, (m) => {
     redactions.push({ type: "PARTY", value: m.trim() });
     return " ";

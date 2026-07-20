@@ -115,6 +115,18 @@ function csrfOk(req: http.IncomingMessage): boolean {
   return origin.startsWith("http://127.0.0.1:") || origin.startsWith("http://localhost:");
 }
 
+/**
+ * Reject DNS-rebinding requests before any route, including read-only GETs.
+ * The server is bound to IPv4 loopback, so only the two operator-facing
+ * loopback hostnames at the actual listener port are valid.
+ */
+function hostOk(req: http.IncomingMessage): boolean {
+  const host = req.headers.host?.toLowerCase();
+  const port = req.socket.localPort;
+  if (host === undefined || port === undefined) return false;
+  return host === `127.0.0.1:${port}` || host === `localhost:${port}`;
+}
+
 function isUnauthorized(reason: unknown): boolean {
   return reason instanceof PaperclipHttpError && reason.status === 401;
 }
@@ -289,6 +301,11 @@ export function createOverviewServer(opts: OverviewServerOpts): http.Server {
       try {
         const method = req.method ?? "GET";
         const pathname = (req.url ?? "/").split("?")[0] ?? "/";
+
+        if (!hostOk(req)) {
+          sendJson(res, 403, { error: "host_not_allowed" });
+          return;
+        }
 
         if (method === "GET" && pathname === "/") {
           sendHtml(res, renderPage());

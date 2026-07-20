@@ -12,6 +12,7 @@ import {
   sanitizeArgs,
   wrapWithProvenance,
   fingerprintText,
+  createGateProvenanceReporter,
 } from "./adapter.ts";
 import { documentSha256 } from "./hash.ts";
 import type { ProvenanceEnvelope, UpstreamCaller } from "./types.ts";
@@ -222,6 +223,23 @@ test("SECURITY a confidential query is NEVER forwarded containing the raw client
   assert.ok(!isEnvelope(res));
 });
 
+test("SECURITY cite arguments receive the same privileged identifier sanitization as search queries", async () => {
+  const { upstream, calls } = stubUpstream(fixture("upstream-opinion-like.json"));
+
+  await proxyToolCall(upstream, {
+    toolName: "get_citation",
+    args: { cite: "Smith v. Jones docket 2024-CV-01234 standing" },
+    tier: "privileged",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(calls.length, 1);
+  const forwarded = String(calls[0].args["cite"]);
+  assert.ok(!/Smith|Jones/.test(forwarded), `person caption leaked: ${forwarded}`);
+  assert.ok(!/2024-CV-01234/.test(forwarded), `docket leaked: ${forwarded}`);
+  assert.match(forwarded, /standing/);
+});
+
 // ---------------------------------------------------------------------------
 // PROVENANCE REPORTING: best-effort registration of retrieved authorities
 // ---------------------------------------------------------------------------
@@ -293,4 +311,27 @@ test("PROVENANCE no reporter injected → tool call behaves exactly as before", 
     now: FIXED_NOW,
   });
   assert.ok(isEnvelope(res));
+});
+
+test("gate provenance reporter forwards the Paperclip agent key", async () => {
+  const calls: Array<{ url: string; authorization: string | null }> = [];
+  const fakeFetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const headers = new Headers(init?.headers);
+    calls.push({ url: String(input), authorization: headers.get("authorization") });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  const report = createGateProvenanceReporter(
+    "http://gate:3801",
+    "agent-secret",
+    fakeFetch as typeof fetch,
+  );
+  await report({
+    citation: "410 U.S. 113",
+    sha256: "a".repeat(64),
+    source: "courtlistener",
+  });
+  assert.deepEqual(calls, [{
+    url: "http://gate:3801/quality/authority",
+    authorization: "Bearer agent-secret",
+  }]);
 });
