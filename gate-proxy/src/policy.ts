@@ -71,6 +71,10 @@ const VALID_DECISIONS: ReadonlySet<string> = new Set<Decision>([
  * process reads it via its own loadFirmFacadePolicy() in src/policy.ts.
  * Listing it here prevents the gate proxy from throwing on a shared gate-policy.yaml
  * that also carries the firmFacade section (additive; gate proxy behavior unchanged).
+ *
+ * `trace` is likewise allowed and ignored — the trace store reads it via its own
+ * loadTraceConfig() in trace-store/src/config.ts. Both are fail-closed on their
+ * own terms, so an unreadable section never widens what this proxy permits.
  */
 const VALID_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set([
   "version",
@@ -78,6 +82,7 @@ const VALID_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set([
   "citationGate",
   "unspecifiedConfidentialityDefault",
   "firmFacade", // read by firm-facade MCP; gate proxy ignores it
+  "trace", // read by trace-store; gate proxy ignores it
 ]);
 
 // ---------------------------------------------------------------------------

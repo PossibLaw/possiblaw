@@ -46,6 +46,7 @@ jobs:
             mcp-servers/firm-facade
             mcp-servers/legal-data
             orchestration-eval
+            trace-store
           )
           for package in "${packages[@]}"; do
             pnpm -C "$package" install --frozen-lockfile
