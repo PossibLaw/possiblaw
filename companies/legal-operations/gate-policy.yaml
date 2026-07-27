@@ -92,6 +92,52 @@ firmFacade:
   allowWorkProductText: false
 
 # ---------------------------------------------------------------------------
+# Execution trace spine
+# ---------------------------------------------------------------------------
+#
+# The receipt chain above records what LEFT the firm. The trace store records
+# how the decision to send it was reached: which model ran, when, what prompt
+# went in, what context and connectors were pulled, what came out.
+#
+# Traces are the content-bearing half of a deliberate split. Receipts stay
+# hash-only and shareable; trace content never leaves the firm perimeter, is
+# partitioned per matter, and is read only by the roles named below.
+#
+# Default CLOSED. Every malformed value below — a string "true", an
+# unrecognised capture mode, an unknown role, a typo'd key — closes the store
+# entirely rather than taking a default. Nothing is recorded until an operator
+# opts in deliberately.
+#
+#   capture: hashes-only   Record the decision (model, lane, timing, context
+#                          refs, cost) plus a SHA-256 of the prompt/output.
+#                          Proves exactly which prompt ran without storing it.
+#                          Safe default for a managed-service posture.
+#
+#   capture: full          Additionally retain prompt, system prompt and model
+#                          output. Appropriate on a firm's OWN tenant, where
+#                          prompt access is the point of the feature. Requires
+#                          at least one entry in contentRoles — capturing text
+#                          no one may read is liability without benefit, so
+#                          that combination is rejected.
+#
+# contentRoles: who may read captured content. One or more of:
+#   admin, supervising-lawyer, auditor, agent
+# Any role not listed sees the full audit row with the content stripped —
+# denial is not an error, it is a redaction.
+#
+# retentionDays: how long content is kept (default 90). A retention purge
+# removes the privileged text ONLY; the record, its hash, and any receipt bound
+# to it survive, so attestation over the matter stays verifiable for its life.
+#
+# trace:
+#   enabled: true
+#   capture: full
+#   contentRoles: [admin, supervising-lawyer]
+#   retentionDays: 90
+trace:
+  enabled: false
+
+# ---------------------------------------------------------------------------
 # Documented unreceipted-egress exceptions (v1) — a decision, not an accident
 # ---------------------------------------------------------------------------
 #
