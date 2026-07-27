@@ -61,6 +61,19 @@ export interface TraceRecord {
   issueId?: string;
   agentId: string;
   agentSlug?: string;
+  /**
+   * The human principal the agent was acting for.
+   *
+   * Without this the trace answers "agent X did Y"; with it, "agent X did Y on
+   * behalf of Z" — which is the record a supervising lawyer is accountable for
+   * under Model Rules 5.1 / 5.3. It is also the join key for the planned
+   * user→matter access registry (C3): an entitlement decision is only
+   * reconstructable if the trace names whose entitlement was in play.
+   *
+   * Optional because scheduled and system-initiated runs have no requester;
+   * absent means "no human principal", never "unknown human".
+   */
+  requestedBy?: string;
   step?: number;
 
   // ---- the decision -------------------------------------------------------

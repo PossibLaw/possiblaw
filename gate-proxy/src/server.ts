@@ -12,6 +12,8 @@
 
 import http from "node:http";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { Policy } from "./policy.ts";
 import type { ReceiptChain, ReceiptBody, ReceiptOutcome } from "./receipts.ts";
 import { ReceiptChainCorruptError, sha256hex, canonicalJson } from "./receipts.ts";
@@ -38,6 +40,7 @@ import { buildProvenance } from "./provenance/provenance.ts";
 import { DEFAULT_MAX_UPLOAD_BYTES, decodeBase64Strict, isValidMimeType, resolveUploadMimeType } from "./upload.ts";
 import { dispatchOperationId, hasUnresolvedDispatch } from "./operations.ts";
 import { createStartupProof } from "./startup-attestation.ts";
+import { requestTimestamp, TsaError } from "./anchor-tsa.ts";
 import type { InboundAuthenticator } from "./inbound-auth.ts";
 import {
   DEFAULT_GATE_AUTHORIZATION,
@@ -89,6 +92,21 @@ export interface GateServerDeps {
   } | null;
   /** Company-bound immutable agent-ID authorization compiled by the launcher. */
   authorization?: GateAuthorizationPolicy;
+  /**
+   * RFC 3161 Time Stamping Authority for POST /receipts/anchor. When set, an
+   * anchor additionally binds the chain head to a signed time from OUTSIDE
+   * this trust domain — without it the chain detects alteration but not
+   * wholesale regeneration, because every timestamp in it is our own.
+   *
+   * Configured via GATE_TSA_URL. Fail-closed: when a TSA is configured and
+   * unreachable the anchor FAILS rather than silently degrading to a
+   * self-attested one.
+   */
+  tsaUrl?: string | null;
+  /** Directory for persisted timestamp tokens. Defaults beside the receipts file. */
+  anchorTokenDir?: string;
+  /** Injection point for tests. */
+  requestTimestampImpl?: typeof requestTimestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -665,6 +683,54 @@ export function createGateServer(deps: GateServerDeps): http.Server {
           agentId: authenticatedAgentId,
           meta: { dispatchReservation: true },
         });
+
+        // External witness (A1). Obtained BEFORE the paperclip comment so a TSA
+        // failure leaves nothing posted. Fail-closed on purpose: an operator who
+        // configured a TSA and silently received a self-attested anchor instead
+        // would believe they hold external evidence when they do not.
+        let tsaReceiptMeta: Record<string, unknown> = {};
+        if (deps.tsaUrl) {
+          const timestamp = deps.requestTimestampImpl ?? requestTimestamp;
+          try {
+            const digest = new Uint8Array(
+              crypto.createHash("sha256").update(anchorText, "utf8").digest(),
+            );
+            const result = await timestamp(deps.tsaUrl, digest);
+            const tokenDir =
+              deps.anchorTokenDir ?? path.join(path.dirname(receipts.path), "anchors");
+            fs.mkdirSync(tokenDir, { recursive: true });
+            // Named by token hash: content-addressed, collision-free, and the
+            // receipt's tokenSha256 locates the file without a path lookup.
+            const tokenPath = path.join(tokenDir, `${result.tokenSha256}.tsr`);
+            fs.writeFileSync(tokenPath, result.token);
+            fs.writeFileSync(`${tokenPath}.tsq`, result.request);
+            tsaReceiptMeta = {
+              tsa: {
+                url: deps.tsaUrl,
+                status: result.status,
+                tokenSha256: result.tokenSha256,
+                anchorTextSha256: sha256hex(anchorText),
+              },
+            };
+          } catch (err) {
+            const reason = err instanceof TsaError ? err.message : "tsa_failed";
+            receipts.append({
+              kind: "anchor",
+              tool: "anchor",
+              boundary: null,
+              decision: null,
+              outcome: "error",
+              operationId,
+              payloadSha256: sha256hex(anchorText),
+              agentId: authenticatedAgentId,
+              meta: { error: reason, tsaUrl: deps.tsaUrl },
+            });
+            log(`anchor_tsa_failed reason=${reason}`);
+            sendJson(res, 502, { error: "tsa_unavailable", reason });
+            return;
+          }
+        }
+
         await client.postIssueComment(issueId as string, anchorText);
         const anchorReceiptBody: ReceiptBody = {
           kind: "anchor",
@@ -675,9 +741,14 @@ export function createGateServer(deps: GateServerDeps): http.Server {
           operationId,
           payloadSha256: sha256hex(anchorText),
           agentId: authenticatedAgentId,
+          ...(Object.keys(tsaReceiptMeta).length > 0 ? { meta: tsaReceiptMeta } : {}),
         };
         const entry = receipts.append(anchorReceiptBody);
-        sendJson(res, 200, { anchored: true, head: entry.hash });
+        sendJson(res, 200, {
+          anchored: true,
+          head: entry.hash,
+          ...(tsaReceiptMeta["tsa"] !== undefined ? { tsa: tsaReceiptMeta["tsa"] } : {}),
+        });
       } catch {
         // C2 (b): best-effort error response; don't re-throw
         if (!res.headersSent) {
@@ -1417,7 +1488,18 @@ async function handleEgress(
   tool: string,
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  deps: Required<Omit<GateServerDeps, "startupSecret" | "inboundAuth" | "authorization">>,
+  deps: Required<
+    Omit<
+      GateServerDeps,
+      | "startupSecret"
+      | "inboundAuth"
+      | "authorization"
+      // TSA anchoring is handled in the /receipts/anchor route, not in egress.
+      | "tsaUrl"
+      | "anchorTokenDir"
+      | "requestTimestampImpl"
+    >
+  >,
   authenticatedAgentId?: string,
   authorization: Readonly<GateAuthorizationPolicy> = DEFAULT_GATE_AUTHORIZATION,
 ): Promise<void> {

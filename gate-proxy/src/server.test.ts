@@ -1,6 +1,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +18,7 @@ import type { Policy } from "./policy.ts";
 import type { PaperclipClient, ApprovalRecord } from "./paperclip-client.ts";
 import { PerformerError, buildPerformers, type Performer, type PerformerRegistry } from "./connectors.ts";
 import { createGateServer, type GateServerDeps } from "./server.ts";
+import { TsaError } from "./anchor-tsa.ts";
 import { CitationRegistry } from "./quality/citation-registry.ts";
 import { AuthorityRegistry } from "./quality/authority-registry.ts";
 
@@ -647,6 +649,107 @@ describe("gate server", () => {
     // Direct verify
     const result = receipts.verify();
     assert.equal(result.ok, true);
+
+    await close();
+  });
+
+  // 14b. A1 — external anchoring. A configured TSA must witness the head, and a
+  // TSA failure must NOT silently degrade to a self-attested anchor.
+  it("/receipts/anchor with a TSA → witnesses the head and records the token", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const comments: Array<{ issueId: string; body: string }> = [];
+    const client = makeFakeClient(new Map(), comments);
+    const tokenDir = path.join(dir, "anchors");
+
+    let seenDigest = "";
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client,
+      performers: {},
+      localModelAvailable: false,
+      tsaUrl: "https://tsa.example/tsr",
+      anchorTokenDir: tokenDir,
+      requestTimestampImpl: (async (_url: string, digest: Uint8Array) => {
+        seenDigest = Buffer.from(digest).toString("hex");
+        const token = Uint8Array.from([0x30, 0x03, 0x02, 0x01, 0x2a]);
+        return {
+          token,
+          tokenSha256: crypto.createHash("sha256").update(token).digest("hex"),
+          status: 0,
+          request: Uint8Array.from([0x30, 0x00]),
+        };
+      }) as never,
+    });
+
+    const res = await fetch(`${baseUrl}/receipts/anchor`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ issueId: "issue-tsa-1" }),
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body["anchored"], true);
+
+    // The TSA signed the digest of the anchor text, not something else.
+    const tsa = body["tsa"] as Record<string, unknown>;
+    assert.ok(tsa, "response carries the tsa block");
+    assert.equal(seenDigest, tsa["anchorTextSha256"]);
+
+    // The token is on disk, content-addressed by its own hash.
+    const tokenPath = path.join(tokenDir, `${String(tsa["tokenSha256"])}.tsr`);
+    assert.ok(fs.existsSync(tokenPath), "token persisted");
+    assert.ok(fs.existsSync(`${tokenPath}.tsq`), "request persisted for openssl -queryfile");
+
+    // And the receipt records the witness.
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.kind, "anchor");
+    assert.equal(last.body.outcome, "performed");
+    const meta = last.body.meta as Record<string, unknown>;
+    assert.equal((meta["tsa"] as Record<string, unknown>)["tokenSha256"], tsa["tokenSha256"]);
+
+    await close();
+  });
+
+  it("/receipts/anchor fails closed when a configured TSA is unreachable", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const comments: Array<{ issueId: string; body: string }> = [];
+    const client = makeFakeClient(new Map(), comments);
+
+    const { baseUrl, close } = await startServer({
+      policy: DEFAULT_POLICY,
+      receipts,
+      client,
+      performers: {},
+      localModelAvailable: false,
+      tsaUrl: "https://tsa.example/tsr",
+      anchorTokenDir: path.join(dir, "anchors"),
+      requestTimestampImpl: (async () => {
+        throw new TsaError("tsa_unreachable: AbortError");
+      }) as never,
+    });
+
+    const res = await fetch(`${baseUrl}/receipts/anchor`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ issueId: "issue-tsa-2" }),
+    });
+
+    assert.equal(res.status, 502, "must not report success");
+    assert.equal((await res.json() as Record<string, unknown>)["error"], "tsa_unavailable");
+
+    // Nothing was posted — the operator does not get a half-anchored matter.
+    assert.equal(comments.length, 0, "no comment posted when the witness failed");
+
+    // The failure is itself receipted, so the gap is visible in the chain.
+    const entries = receipts.entries();
+    const last = entries[entries.length - 1];
+    assert.equal(last.body.kind, "anchor");
+    assert.equal(last.body.outcome, "error");
+    assert.ok(String((last.body.meta as Record<string, unknown>)["error"]).includes("tsa_unreachable"));
 
     await close();
   });

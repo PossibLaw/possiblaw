@@ -20,6 +20,7 @@ import { CitationRegistry } from "./quality/citation-registry.ts";
 import { AuthorityRegistry } from "./quality/authority-registry.ts";
 import { MatterClassificationRegistry } from "./matter-classification.ts";
 import { resolveStartupAttestationEnvironment } from "./startup-attestation.ts";
+import { resolveTsaUrl } from "./anchor-tsa.ts";
 import { createPaperclipInboundAuthenticator, resolveInboundAuthEnvironment } from "./inbound-auth.ts";
 import {
   resolveFetchMaxResponseBytes,
@@ -95,6 +96,9 @@ const policySource = POLICY_PATH ? `file:${POLICY_PATH}` : "defaults";
 const startupAttestation = resolveStartupAttestationEnvironment(process.env);
 const instanceId = startupAttestation.instanceId;
 const policyDigest = sha256hex(canonicalJson({ policy, authorization }));
+// A1: optional RFC 3161 external witness for POST /receipts/anchor. A malformed
+// GATE_TSA_URL throws here, at startup, rather than at the first anchor.
+const tsaUrl = resolveTsaUrl(process.env);
 
 const receipts = new ReceiptChain(RECEIPTS_PATH, PAPERCLIP_COMPANY_ID);
 
@@ -170,6 +174,7 @@ const server = createGateServer({
   instanceId,
   companyId: PAPERCLIP_COMPANY_ID ?? null,
   policyDigest,
+  tsaUrl,
   ...(startupAttestation.startupSecret !== undefined
     ? { startupSecret: startupAttestation.startupSecret }
     : {}),

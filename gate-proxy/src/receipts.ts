@@ -190,6 +190,11 @@ function computeHash(prevHash: string, seq: number, ts: string, normalizedBody: 
 export class ReceiptChain {
   private readonly filePath: string;
 
+  /** Ledger location. Read-only; used to site sibling artifacts such as anchor tokens. */
+  get path(): string {
+    return this.filePath;
+  }
+
   constructor(filePath: string, private readonly defaultCompanyId?: string) {
     this.filePath = filePath;
     // Eagerly create parent directories; file itself is created lazily on first append
