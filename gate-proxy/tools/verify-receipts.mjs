@@ -59,11 +59,12 @@ function computeHash(prevHash, seq, ts, body) {
 
 export function verifyChain(text, opts = {}) {
   const lines = text.split("\n").filter((l) => l.trim() !== "");
-  if (lines.length === 0) return { ok: true, length: 0, head: GENESIS, anchors: [] };
+  if (lines.length === 0) return { ok: true, length: 0, head: GENESIS, anchors: [], traceBound: 0 };
 
   let prevHash = GENESIS;
   let expectedSeq = 1;
   const anchors = [];
+  let traceBound = 0;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = i + 1;
@@ -109,6 +110,8 @@ export function verifyChain(text, opts = {}) {
       };
     }
 
+    if (typeof entry.body?.traceId === "string" && entry.body.traceId !== "") traceBound += 1;
+
     // Surface external timestamps so the operator knows what else to check.
     if (entry.body?.kind === "anchor" && entry.body?.meta?.tsa) {
       anchors.push({ seq: entry.seq, ts: entry.ts, ...entry.body.meta.tsa });
@@ -118,7 +121,7 @@ export function verifyChain(text, opts = {}) {
     expectedSeq += 1;
   }
 
-  return { ok: true, length: lines.length, head: prevHash, anchors };
+  return { ok: true, length: lines.length, head: prevHash, anchors, traceBound };
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +169,16 @@ function main(argv) {
   process.stdout.write(
     `OK: ${result.length} receipt(s) verified\nhead: ${result.head}\n`,
   );
+
+  if (result.traceBound > 0) {
+    process.stdout.write(
+      `\n${result.traceBound} receipt(s) reference an execution trace.\n` +
+        "Those traces are NOT in this file — they are content-bearing and stay\n" +
+        "inside the firm. Each traceSha256 here commits to one, so a trace\n" +
+        "produced later can be checked against this chain, but their absence is\n" +
+        "expected and is not a gap in what you were given.\n",
+    );
+  }
 
   if (result.anchors.length > 0) {
     process.stdout.write(

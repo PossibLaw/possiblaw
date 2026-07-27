@@ -33,6 +33,20 @@ export interface ReceiptBody {
   approvalId?: string;
   /** Stable digest correlating a dispatch reservation with its terminal receipt. */
   operationId?: string;
+  /**
+   * M2 — binding to the execution trace for this action.
+   *
+   * `traceId` locates the record in the trace store; `traceSha256` is the hash
+   * of that record's captured content. Together they prove a trace exists and
+   * has not been altered, while the receipt itself carries none of it — the
+   * receipt travels, the privileged text does not.
+   *
+   * The binding survives a retention purge: purging strips the content but
+   * keeps the record and its `contentSha256`, so `traceSha256` still resolves
+   * for the life of the matter.
+   */
+  traceId?: string;
+  traceSha256?: string;
   payloadSha256: string;
   /**
    * Caller-supplied audit metadata. Receipts persist meta verbatim via
@@ -68,6 +82,22 @@ export class ReceiptChainCorruptError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ReceiptChainCorruptError";
+  }
+}
+
+/**
+ * A caller tried to put something payload-shaped into receipt `meta`.
+ *
+ * A2 published docs/receipt-verification.md, which tells third parties that a
+ * receipt carries identifiers, enumerations and hashes only. That promise was
+ * a convention enforced by code comments; this error makes it an invariant.
+ * Receipts are designed to travel, so the cost of a leak here is a privileged
+ * fragment in an artifact handed to opposing counsel.
+ */
+export class ReceiptMetaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReceiptMetaError";
   }
 }
 
@@ -170,6 +200,70 @@ function validateLastEntry(entry: unknown, filePath: string): ReceiptEntry {
   return e as unknown as ReceiptEntry;
 }
 
+// ---------------------------------------------------------------------------
+// Receipt meta validation (A3)
+// ---------------------------------------------------------------------------
+
+/** Matches the facade's existing FACADE_META_MAX_BYTES so one rule governs all receipts. */
+export const META_MAX_BYTES = 4096;
+/**
+ * Longest permitted string value. A SHA-256 hex digest is 64, an agent or
+ * matter id is short, a structured reason code is short. Anything materially
+ * longer is prose, and prose in a receipt is either a payload fragment or an
+ * error message that should have been a code.
+ */
+export const META_MAX_STRING = 512;
+/** Depth bound; receipt meta is flat records of scalars, not documents. */
+export const META_MAX_DEPTH = 8;
+
+/**
+ * Reject payload-shaped values in receipt meta. Structural only — it cannot
+ * tell a client name from an agent id, and does not try. It enforces the
+ * shape the published spec promises: short scalars, bounded nesting, bounded
+ * total size. That defeats the realistic failure (a caller dropping a
+ * document, prompt, or email body into meta) without pretending to classify
+ * content.
+ */
+export function assertMetaSafe(meta: unknown, path = "meta", depth = 0): void {
+  if (depth > META_MAX_DEPTH) {
+    throw new ReceiptMetaError(`receipt meta too deeply nested at ${path} (max ${META_MAX_DEPTH})`);
+  }
+  if (meta === null || meta === undefined) return;
+  if (typeof meta === "string") {
+    if (meta.length > META_MAX_STRING) {
+      throw new ReceiptMetaError(
+        `receipt meta string at ${path} is ${meta.length} chars (max ${META_MAX_STRING}). ` +
+          `Receipts carry ids, enums and hashes — not content. Store a sha256 instead.`,
+      );
+    }
+    return;
+  }
+  if (typeof meta === "number" || typeof meta === "boolean") return;
+  if (Array.isArray(meta)) {
+    meta.forEach((v, i) => assertMetaSafe(v, `${path}[${i}]`, depth + 1));
+    return;
+  }
+  if (typeof meta === "object") {
+    for (const [k, v] of Object.entries(meta as Record<string, unknown>)) {
+      assertMetaSafe(v, `${path}.${k}`, depth + 1);
+    }
+    return;
+  }
+  throw new ReceiptMetaError(`receipt meta at ${path} has unsupported type ${typeof meta}`);
+}
+
+/** Total-size guard, applied after normalization so it measures what is stored. */
+export function assertMetaSize(meta: unknown): void {
+  if (meta === undefined) return;
+  const bytes = Buffer.byteLength(canonicalJson(meta), "utf8");
+  if (bytes > META_MAX_BYTES) {
+    throw new ReceiptMetaError(
+      `receipt meta is ${bytes} bytes (max ${META_MAX_BYTES}). ` +
+        `Receipts are designed to travel; keep them to ids, enums and hashes.`,
+    );
+  }
+}
+
 /** Compute the hash for a receipt entry over the JSON-normalized body. */
 function computeHash(prevHash: string, seq: number, ts: string, normalizedBody: ReceiptBody): string {
   const content = canonicalJson({ seq, ts, body: normalizedBody });
@@ -259,6 +353,11 @@ export class ReceiptChain {
         ? { ...body, companyId: this.defaultCompanyId }
         : body;
     const normalizedBody = JSON.parse(JSON.stringify(bodyWithDefaults)) as ReceiptBody;
+
+    // A3: enforce the published "ids, enums and hashes only" promise. Checked
+    // AFTER normalization so it measures exactly the bytes that get stored.
+    assertMetaSafe(normalizedBody.meta);
+    assertMetaSize(normalizedBody.meta);
 
     const hash = computeHash(prevHash, seq, ts, normalizedBody);
 

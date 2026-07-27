@@ -4,14 +4,17 @@
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "engines": { "node": ">=24.18.0 <25" },
+  "engines": {
+    "node": ">=24.18.0 <25"
+  },
   "scripts": {
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "@possiblaw/trace-store": "file:../trace-store"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

@@ -653,6 +653,73 @@ describe("gate server", () => {
     await close();
   });
 
+  // 14a. M2 — the egress receipt carries the execution-trace binding, and a
+  // failing trace store never blocks a lawful egress.
+  it("/egress stamps the trace binding onto the performed receipt", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const performers: PerformerRegistry = { send_email: async () => ({ id: "sent" }) };
+
+    const seen: Array<Record<string, unknown>> = [];
+    const { baseUrl, close } = await startServer({
+      policy: { ...DEFAULT_POLICY, boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "allow" } },
+      receipts,
+      client: null,
+      performers,
+      localModelAvailable: false,
+      traceSink: (input) => {
+        seen.push(input as unknown as Record<string, unknown>);
+        return { traceId: "trace-xyz", traceSha256: "9".repeat(64) };
+      },
+    });
+
+    const res = await postEgress(baseUrl, "send_email", {
+      payload: { to: "a@b.com", subject: "s", body: "b" },
+      meta: { agentId: "agent-1", issueId: "POS-42" },
+    });
+    assert.equal(res.status, 200);
+
+    const performed = receipts.entries().find((e) => e.body.outcome === "performed");
+    assert.ok(performed, "a performed receipt exists");
+    assert.equal(performed.body.traceId, "trace-xyz");
+    assert.equal(performed.body.traceSha256, "9".repeat(64));
+    // The sink saw enough to attribute the action.
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0]?.["agentId"], "agent-1");
+    assert.equal(seen[0]?.["payloadSha256"], performed.body.payloadSha256);
+
+    await close();
+  });
+
+  it("/egress still succeeds when the trace store is broken", async () => {
+    const dir = tmpDir();
+    const receipts = new ReceiptChain(path.join(dir, "r.jsonl"));
+    const performers: PerformerRegistry = { send_email: async () => ({ id: "sent" }) };
+
+    const { baseUrl, close } = await startServer({
+      policy: { ...DEFAULT_POLICY, boundaries: { ...DEFAULT_POLICY.boundaries, THIRD_PARTY_EGRESS: "allow" } },
+      receipts,
+      client: null,
+      performers,
+      localModelAvailable: false,
+      traceSink: () => {
+        throw new Error("trace store unavailable");
+      },
+    });
+
+    const res = await postEgress(baseUrl, "send_email", {
+      payload: { to: "a@b.com", subject: "s", body: "b" },
+      meta: { agentId: "agent-1" },
+    });
+    // Evidence about a control must never become an outage in the control.
+    assert.equal(res.status, 200, "egress proceeds");
+    const performed = receipts.entries().find((e) => e.body.outcome === "performed");
+    assert.ok(performed);
+    assert.equal(performed.body.traceId, undefined, "no binding, and that is visible");
+
+    await close();
+  });
+
   // 14b. A1 — external anchoring. A configured TSA must witness the head, and a
   // TSA failure must NOT silently degrade to a self-attested anchor.
   it("/receipts/anchor with a TSA → witnesses the head and records the token", async () => {
