@@ -1,0 +1,257 @@
+#!/usr/bin/env bash
+#
+# smoke-trace — end-to-end check that the gate proxy actually boots and that an
+# egress produces a receipt bound to a trace.
+#
+# WHY THIS EXISTS. Two integration bugs shipped past a fully green unit suite
+# during the trace-spine work:
+#
+#   1. pnpm `file:` snapshotted trace-store into node_modules at install time,
+#      so the gate died at startup with ERR_MODULE_NOT_FOUND while all 1005
+#      unit tests passed. Nothing that imports modules in-process can catch a
+#      broken module *resolution* in a separate process.
+#   2. `capture: full` silently produced an empty content hash, because no unit
+#      test asserts what a running gate writes to disk.
+#
+# Both were found by hand, once. This makes that automatic.
+#
+# Credential-free and self-contained: it starts a stub model endpoint and the
+# gate proxy on loopback, drives one egress, and asserts the artifacts. No
+# Paperclip, no provider keys, no network.
+#
+# Usage:  bin/smoke-trace [--keep]
+#           --keep   leave the work directory in place for inspection
+#
+# Exit 0 on success, 1 on any failed assertion, 2 on setup failure.
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+KEEP=0
+[[ "${1:-}" == "--keep" ]] && KEEP=1
+
+WORK="$(mktemp -d)"
+STUB_PID=""
+GATE_PID=""
+FAILURES=0
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+
+pass() { printf '  ok    %s\n' "$1"; }
+fail() { printf '  FAIL  %s\n' "$1"; FAILURES=$((FAILURES + 1)); }
+info() { printf '%s\n' "$1"; }
+
+setup_failure() {
+  printf 'smoke-trace: setup failed: %s\n' "$1" >&2
+  [[ -f "$WORK/gate.log" ]] && { printf -- '--- gate log ---\n' >&2; tail -20 "$WORK/gate.log" >&2; }
+  exit 2
+}
+
+# Kill only the PIDs we started. Never pkill by pattern: the pattern reliably
+# matches this script's own command line and kills the shell running it.
+cleanup() {
+  [[ -n "$GATE_PID" ]] && kill "$GATE_PID" 2>/dev/null
+  [[ -n "$STUB_PID" ]] && kill "$STUB_PID" 2>/dev/null
+  wait 2>/dev/null
+  if [[ "$KEEP" == "1" ]]; then
+    printf 'work dir kept: %s\n' "$WORK"
+  else
+    rm -rf "$WORK"
+  fi
+}
+trap cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# Setup
+# ---------------------------------------------------------------------------
+
+command -v node >/dev/null || setup_failure "node not on PATH"
+[[ -d "$REPO_ROOT/gate-proxy/node_modules" ]] ||
+  setup_failure "gate-proxy dependencies missing — run: pnpm -C gate-proxy install"
+[[ -d "$REPO_ROOT/trace-store/node_modules" ]] ||
+  setup_failure "trace-store dependencies missing — run: pnpm -C trace-store install"
+
+# Ask the OS for two free ports rather than guessing, so parallel runs and busy
+# CI machines do not collide.
+read -r STUB_PORT GATE_PORT < <(python3 - <<'PY'
+import socket
+ports = []
+socks = []
+for _ in range(2):
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    ports.append(s.getsockname()[1])
+    socks.append(s)
+for s in socks:
+    s.close()
+print(*ports)
+PY
+) || setup_failure "could not allocate ports"
+
+cat >"$WORK/gate-policy.yaml" <<'YAML'
+version: 1
+boundaries:
+  THIRD_PARTY_EGRESS: allow
+  CONFIDENTIAL_TO_CLOUD: anonymize
+  COURT_FILING: human
+  SIGNATURE: human
+  MONEY_MOVEMENT: human
+  IRREVERSIBLE_EXTERNAL_OP: human
+citationGate:
+  boundaries: []
+trace:
+  enabled: true
+  capture: full
+  contentRoles: [admin, supervising-lawyer]
+  retentionDays: 90
+YAML
+
+# Minimal OpenAI-shaped stub so query_external_model can complete without a key.
+cat >"$WORK/stub.mjs" <<'JS'
+import http from "node:http";
+const port = Number(process.argv[2]);
+http.createServer((req, res) => {
+  req.on("data", () => {});
+  req.on("end", () => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ message: { content: "smoke reply" } }] }));
+  });
+}).listen(port, "127.0.0.1");
+JS
+
+node "$WORK/stub.mjs" "$STUB_PORT" >"$WORK/stub.log" 2>&1 &
+STUB_PID=$!
+
+(
+  cd "$REPO_ROOT/gate-proxy" &&
+  GATE_PROXY_PORT="$GATE_PORT" \
+  GATE_POLICY_PATH="$WORK/gate-policy.yaml" \
+  GATE_RECEIPTS_PATH="$WORK/receipts.jsonl" \
+  EXTERNAL_MODEL_URL="http://127.0.0.1:$STUB_PORT/v1" \
+  EXTERNAL_MODEL_API_KEY="smoke" \
+  exec node --import tsx src/index.ts
+) >"$WORK/gate.log" 2>&1 &
+GATE_PID=$!
+
+# Wait for readiness. A startup crash (the ERR_MODULE_NOT_FOUND class of bug)
+# shows up here as a dead process, which is the whole point of this check.
+READY=0
+for _ in $(seq 1 60); do
+  if ! kill -0 "$GATE_PID" 2>/dev/null; then
+    setup_failure "gate proxy exited during startup"
+  fi
+  if curl -fsS -m 2 "http://127.0.0.1:$GATE_PORT/ready" >"$WORK/ready.json" 2>/dev/null; then
+    READY=1
+    break
+  fi
+  sleep 0.5
+done
+[[ "$READY" == "1" ]] || setup_failure "gate proxy did not become ready within 30s"
+
+info "smoke-trace: gate up on 127.0.0.1:$GATE_PORT"
+
+# ---------------------------------------------------------------------------
+# Drive one egress
+# ---------------------------------------------------------------------------
+
+ISSUE="SMOKE-1"
+curl -fsS -m 20 -X POST "http://127.0.0.1:$GATE_PORT/egress/query_external_model" \
+  -H 'content-type: application/json' \
+  -d "{\"payload\":{\"prompt\":\"smoke\"},\"meta\":{\"agentId\":\"agent-smoke\",\"issueId\":\"$ISSUE\",\"confidentiality\":\"standard\"}}" \
+  >"$WORK/egress.json" 2>"$WORK/egress.err" ||
+  setup_failure "egress request failed: $(cat "$WORK/egress.err")"
+
+grep -q '"decision":"allow"' "$WORK/egress.json" ||
+  setup_failure "egress did not return decision=allow: $(cat "$WORK/egress.json")"
+
+# ---------------------------------------------------------------------------
+# Assertions
+# ---------------------------------------------------------------------------
+
+info "smoke-trace: checking artifacts"
+
+RESULT="$(
+  WORK="$WORK" ISSUE="$ISSUE" python3 - <<'PY'
+import json, os, sys
+
+work = os.environ["WORK"]
+issue = os.environ["ISSUE"]
+out = []
+
+def check(ok, label):
+    out.append(("ok" if ok else "FAIL", label))
+
+# --- receipts -------------------------------------------------------------
+entries = []
+with open(os.path.join(work, "receipts.jsonl")) as fh:
+    for line in fh:
+        line = line.strip()
+        if line:
+            entries.append(json.loads(line))
+
+performed = [e for e in entries if e["body"].get("outcome") == "performed"]
+check(len(performed) == 1, "exactly one performed receipt")
+if not performed:
+    for status, label in out:
+        print(f"{status}\t{label}")
+    sys.exit(0)
+
+body = performed[0]["body"]
+trace_id = body.get("traceId")
+trace_sha = body.get("traceSha256")
+check(bool(trace_id), "performed receipt carries traceId")
+check(bool(trace_sha), "performed receipt carries traceSha256")
+
+# A receipt must never carry payload text — only its hash.
+check("payloadSha256" in body, "receipt carries payloadSha256")
+blob = json.dumps(body)
+check("smoke reply" not in blob, "receipt contains no model output text")
+check("\"prompt\"" not in blob, "receipt contains no prompt field")
+
+# --- trace store ----------------------------------------------------------
+part = os.path.join(work, "traces", f"{issue}.jsonl")
+check(os.path.exists(part), "trace partition written for the matter")
+if os.path.exists(part):
+    records = [json.loads(l) for l in open(part) if l.strip()]
+    check(len(records) == 1, "exactly one trace record")
+    if records:
+        r = records[0]
+        check(r["traceId"] == trace_id, "trace id matches the receipt binding")
+        check(r["contentSha256"] == trace_sha, "content hash matches the receipt binding")
+        check(r.get("agentId") == "agent-smoke", "trace attributes the acting agent")
+        check(r.get("issueId") == issue, "trace attributes the matter")
+
+for status, label in out:
+    print(f"{status}\t{label}")
+PY
+)" || setup_failure "assertion script failed"
+
+while IFS=$'\t' read -r status label; do
+  [[ -z "$label" ]] && continue
+  if [[ "$status" == "ok" ]]; then pass "$label"; else fail "$label"; fi
+done <<<"$RESULT"
+
+# --- the chain verifies with the standalone tool ---------------------------
+if node "$REPO_ROOT/gate-proxy/tools/verify-receipts.mjs" "$WORK/receipts.jsonl" \
+    >"$WORK/verify.out" 2>&1; then
+  pass "standalone verifier accepts the chain"
+else
+  fail "standalone verifier rejected the chain"
+  sed 's/^/        /' "$WORK/verify.out"
+fi
+grep -q "reference an execution trace" "$WORK/verify.out" &&
+  pass "verifier reports the trace binding" ||
+  fail "verifier did not report the trace binding"
+
+# ---------------------------------------------------------------------------
+
+if [[ "$FAILURES" -gt 0 ]]; then
+  printf 'FAIL: smoke-trace (%d assertion(s) failed)\n' "$FAILURES"
+  exit 1
+fi
+printf 'PASS: smoke-trace\n'
+exit 0
