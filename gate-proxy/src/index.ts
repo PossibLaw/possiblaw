@@ -21,6 +21,12 @@ import { AuthorityRegistry } from "./quality/authority-registry.ts";
 import { MatterClassificationRegistry } from "./matter-classification.ts";
 import { resolveStartupAttestationEnvironment } from "./startup-attestation.ts";
 import { resolveTsaUrl } from "./anchor-tsa.ts";
+import type { TraceSink } from "./trace-sink.ts";
+import {
+  appendTrace,
+  loadTraceConfig,
+  makeTraceRecord,
+} from "@possiblaw/trace-store";
 import { createPaperclipInboundAuthenticator, resolveInboundAuthEnvironment } from "./inbound-auth.ts";
 import {
   resolveFetchMaxResponseBytes,
@@ -100,6 +106,49 @@ const policyDigest = sha256hex(canonicalJson({ policy, authorization }));
 // GATE_TSA_URL throws here, at startup, rather than at the first anchor.
 const tsaUrl = resolveTsaUrl(process.env);
 
+// ---------------------------------------------------------------------------
+// M2 — execution-trace sink.
+//
+// Reads the same fail-closed `trace:` section of gate-policy.yaml the trace
+// store owns; a closed config yields a null sink and nothing is recorded or
+// stamped. Traces live beside the receipts ledger but in their own directory:
+// the ledger is hash-only and shareable, traces are content-bearing and stay
+// inside the perimeter.
+//
+// The sink never throws — bindTrace treats a throw as "no binding", but a
+// trace failure must not even look like an egress failure, so errors are
+// swallowed here and surfaced as a missing traceId on the receipt.
+// ---------------------------------------------------------------------------
+const traceConfig = loadTraceConfig(POLICY_PATH);
+const TRACE_DIR = path.join(path.dirname(RECEIPTS_PATH), "traces");
+
+const traceSink: TraceSink | null = traceConfig.enabled
+  ? (input) => {
+      try {
+        const record = makeTraceRecord(
+          {
+            agentId: input.agentId ?? "unknown",
+            outcome: input.outcome === "performed" || input.outcome === "anonymized_performed"
+              ? "ok"
+              : input.outcome === "blocked"
+                ? "blocked"
+                : "error",
+            ...(input.issueId !== undefined ? { issueId: input.issueId } : {}),
+            ...(input.requestedBy !== undefined ? { requestedBy: input.requestedBy } : {}),
+            ...(PAPERCLIP_COMPANY_ID ? { companyId: PAPERCLIP_COMPANY_ID } : {}),
+            contextRefs: [{ kind: "connector", ref: input.tool }],
+          },
+          traceConfig,
+        );
+        if (record === null) return null;
+        appendTrace(TRACE_DIR, record);
+        return { traceId: record.traceId, traceSha256: record.contentSha256 };
+      } catch {
+        return null;
+      }
+    }
+  : null;
+
 const receipts = new ReceiptChain(RECEIPTS_PATH, PAPERCLIP_COMPANY_ID);
 
 // Two required env vars must be set to construct a client (API key is optional); else null
@@ -175,6 +224,7 @@ const server = createGateServer({
   companyId: PAPERCLIP_COMPANY_ID ?? null,
   policyDigest,
   tsaUrl,
+  traceSink,
   ...(startupAttestation.startupSecret !== undefined
     ? { startupSecret: startupAttestation.startupSecret }
     : {}),

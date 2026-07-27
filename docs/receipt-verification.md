@@ -49,6 +49,13 @@ canonically (§2). Order **of lines** is significant.
 hashes only: `payloadSha256` stands in for whatever was sent. That is what lets
 a chain be handed to an outside party without disclosing the underlying matter.
 
+This is enforced at write time, not merely intended. `body.meta` is bounded to
+4096 bytes total, 512 characters per string value, and 8 levels of nesting; an
+append that violates any of those is rejected and no entry is written. A
+verifier does not need to check these bounds — they are a producer-side
+guarantee about what a chain can contain, stated here so a recipient knows what
+they are and are not being handed.
+
 ---
 
 ## 2. Canonical JSON
@@ -168,9 +175,28 @@ localizes the tampering rather than voiding the whole file.
 
 ---
 
-## 5. External timestamps
+## 5. Execution-trace bindings
 
-Steps 1–4 prove **internal consistency**: nothing in the file was altered after
+An entry may carry `body.traceId` and `body.traceSha256`. These bind the action
+to a record in the firm's execution trace store — which model ran, what context
+was drawn on, and (subject to the firm's capture policy) the prompt itself.
+
+**Those traces are deliberately not in this file, and their absence is not a
+gap in what you were given.** The receipt chain is hash-only so it can be handed
+to an outside party; the traces are content-bearing and stay inside the firm.
+`traceSha256` is a commitment: if a trace is later produced — in discovery, to
+an auditor, under a protective order — it can be checked against this chain, and
+a substituted trace will not match.
+
+The binding survives the firm's retention purge. Purging strips a trace's
+content but keeps the record and its hash, so `traceSha256` still resolves for
+the life of the matter.
+
+---
+
+## 6. External timestamps
+
+Sections 1–4 prove **internal consistency**: nothing in the file was altered after
 the fact. They do **not**, on their own, prove *when* the chain was written —
 every `ts` in it is the operator's own assertion. An operator could in
 principle regenerate an entire chain and it would verify perfectly.
@@ -207,7 +233,7 @@ bare "OK".
 
 ---
 
-## 6. What a verified chain does and does not prove
+## 7. What a verified chain does and does not prove
 
 **Does prove.** These receipts were written in this order; none has been
 altered, removed, or reordered since; for each gated action the recorded
@@ -228,7 +254,7 @@ recorded, and a separate control has to make recording unavoidable.
 
 ---
 
-## 7. Recovering `enforcementDigest`
+## 8. Recovering `enforcementDigest`
 
 `meta.enforcementDigest` is `SHA-256(canonicalJson({policy, authorization}))`
 over the effective gate policy and the compiled agent-authorization table. It

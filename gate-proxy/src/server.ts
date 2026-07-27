@@ -41,6 +41,8 @@ import { DEFAULT_MAX_UPLOAD_BYTES, decodeBase64Strict, isValidMimeType, resolveU
 import { dispatchOperationId, hasUnresolvedDispatch } from "./operations.ts";
 import { createStartupProof } from "./startup-attestation.ts";
 import { requestTimestamp, TsaError } from "./anchor-tsa.ts";
+import { META_MAX_STRING } from "./receipts.ts";
+import { bindTrace, type TraceSink } from "./trace-sink.ts";
 import type { InboundAuthenticator } from "./inbound-auth.ts";
 import {
   DEFAULT_GATE_AUTHORIZATION,
@@ -107,6 +109,12 @@ export interface GateServerDeps {
   anchorTokenDir?: string;
   /** Injection point for tests. */
   requestTimestampImpl?: typeof requestTimestamp;
+  /**
+   * M2 — execution-trace sink. When supplied, each terminal egress receipt is
+   * stamped with the trace binding returned here. Fail-soft by contract: see
+   * trace-sink.ts for why this is the one non-fail-closed path in the gate.
+   */
+  traceSink?: TraceSink | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +238,22 @@ function bearerToken(authorization: string | undefined): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// boundedErrorMessage — A3 safety valve.
+//
+// Receipt meta is capped at META_MAX_STRING per string. Caught-exception
+// messages are the one unbounded source in the gate (a vendor SDK or a JSON
+// parser can produce a very long message, sometimes echoing the input). If
+// such a message reached a receipt it would throw ReceiptMetaError from inside
+// an error handler — turning a recoverable failure into an unreceipted one.
+// Truncate instead: a clipped error code is still useful, a lost receipt is not.
+// ---------------------------------------------------------------------------
+
+function boundedErrorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  return raw.length <= META_MAX_STRING ? raw : `${raw.slice(0, META_MAX_STRING - 1)}\u2026`;
+}
+
 // performAndReceipt — shared helper for the four near-identical perform blocks
 // ---------------------------------------------------------------------------
 
@@ -259,13 +283,17 @@ interface PerformAndReceiptInput {
    * here (citation strings are public legal identifiers, not payloads).
    */
   extraReceiptMeta?: Record<string, unknown>;
+  /** M2 — optional execution-trace sink; a null/absent sink stamps nothing. */
+  traceSink?: TraceSink | null;
+  /** The human principal this action was performed for, when known. */
+  requestedBy?: string | undefined;
 }
 
 async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
   const {
     performers, receipts, tool, boundary, decision, payloadSha256,
     meta, approvalId, useLocal, dataTermsTier, egressReq, deanonymizeMap, res,
-    log: _log, responseDecisionLabel, extraReceiptMeta,
+    log: _log, responseDecisionLabel, extraReceiptMeta, traceSink, requestedBy,
   } = opts;
 
   // I5: claimedConfidentiality in every egress receipt meta
@@ -337,21 +365,43 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
       const vendor = egressReq.payload["destination"];
       if (typeof vendor === "string" && isSafeAuthorityString(vendor, 64)) delivery["vendor"] = vendor;
       if (typeof result["id"] === "string" && isSafeAuthorityString(result["id"], 512)) delivery["fileId"] = result["id"];
-      if (typeof result["webUrl"] === "string" && isSafeAuthorityString(result["webUrl"], 2048)) delivery["webUrl"] = result["webUrl"];
+      // Bound matches META_MAX_STRING deliberately: a longer URL is dropped from
+      // delivery metadata (the upload already succeeded), never allowed to reach
+      // the receipt and trip the A3 meta rule mid-append.
+      if (typeof result["webUrl"] === "string" && isSafeAuthorityString(result["webUrl"], META_MAX_STRING)) delivery["webUrl"] = result["webUrl"];
       if (Object.keys(delivery).length > 0) receiptMeta["delivery"] = delivery;
     }
+
+    const outcome = deanonymizeMap ? "anonymized_performed" : "performed";
+    // M2: record how this decision was reached and bind the trace to the
+    // receipt. Never allowed to affect the egress — the action already ran.
+    const traceBinding = bindTrace(
+      traceSink,
+      {
+        issueId: meta.issueId,
+        agentId: meta.agentId,
+        requestedBy,
+        tool,
+        boundary,
+        decision,
+        outcome,
+        payloadSha256,
+      },
+      _log,
+    );
 
     receipts.append({
       kind: "egress",
       tool,
       boundary,
       decision,
-      outcome: deanonymizeMap ? "anonymized_performed" : "performed",
+      outcome,
       payloadSha256,
       agentId: meta.agentId,
       issueId: meta.issueId,
       approvalId: approvalId ?? meta.approvalId,
       operationId,
+      ...traceBinding,
       meta: receiptMeta,
     });
 
@@ -363,7 +413,7 @@ async function performAndReceipt(opts: PerformAndReceiptInput): Promise<void> {
 
     sendJson(res, 200, { decision: responseDecisionLabel, result: finalResult });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = boundedErrorMessage(err);
     const errorReceiptMeta: Record<string, unknown> = {
       error: msg,
       claimedConfidentiality,
@@ -1442,7 +1492,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
           tool,
           req,
           res,
-          { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, authorityRegistry: deps.authorityRegistry, matterClassifications, log, maxUploadBytes, paperclipReadiness: deps.paperclipReadiness ?? null, instanceId, companyId, policyDigest },
+          { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, authorityRegistry: deps.authorityRegistry, matterClassifications, log, maxUploadBytes, paperclipReadiness: deps.paperclipReadiness ?? null, instanceId, companyId, policyDigest, traceSink: deps.traceSink ?? null },
           authenticatedAgentId,
           authorization,
         );
@@ -2050,7 +2100,7 @@ async function handleEgress(
     case "allow": {
       await performAndReceipt({
         performers, receipts, tool, boundary, decision, payloadSha256,
-        meta, useLocal: false, egressReq, res, log,
+        meta, useLocal: false, egressReq, res, log, traceSink: deps.traceSink,
         responseDecisionLabel: "allow",
         extraReceiptMeta,
       });
@@ -2106,7 +2156,7 @@ async function handleEgress(
         await performAndReceipt({
           performers, receipts, tool, boundary, decision, payloadSha256,
           meta, useLocal: tierResult.useLocal, dataTermsTier: tierResult.dataTermsTier,
-          egressReq, res, log,
+          egressReq, res, log, traceSink: deps.traceSink,
           responseDecisionLabel: "allow",
           extraReceiptMeta,
         });
@@ -2161,7 +2211,7 @@ async function handleEgress(
 
       await performAndReceipt({
         performers, receipts, tool, boundary, decision, payloadSha256,
-        meta, useLocal: false, egressReq: maskedReq, res, log,
+        meta, useLocal: false, egressReq: maskedReq, res, log, traceSink: deps.traceSink,
         deanonymizeMap: anonResult.map,
         responseDecisionLabel: "anonymize",
         extraReceiptMeta,
@@ -2275,7 +2325,7 @@ async function handleEgress(
           await performAndReceipt({
             performers, receipts, tool, boundary, decision, payloadSha256,
             meta, approvalId: gateResult.approvalId, useLocal: false,
-            egressReq, res, log,
+            egressReq, res, log, traceSink: deps.traceSink,
             responseDecisionLabel: "human",
             extraReceiptMeta,
           });
