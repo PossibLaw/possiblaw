@@ -13,6 +13,7 @@ PACKAGES=(
   mcp-servers/firm-facade
   mcp-servers/legal-data
   orchestration-eval
+  trace-store
 )
 
 HELPERS=(
