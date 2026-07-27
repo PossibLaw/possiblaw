@@ -98,6 +98,24 @@ test("optional fields are omitted rather than set undefined", () => {
   assert.equal(r.contentSha256, EMPTY_CONTENT_SHA256);
 });
 
+test("requestedBy is carried through when supplied and omitted when not", () => {
+  const withUser = makeTraceRecord({ ...INPUT, requestedBy: "user-partner-z" }, FULL, FIXED);
+  assert.equal(withUser?.requestedBy, "user-partner-z");
+  // A system-initiated run has no requester — the field is absent, not "unknown".
+  const withoutUser = makeTraceRecord(INPUT, FULL, FIXED);
+  assert.ok(withoutUser);
+  assert.ok(!("requestedBy" in withoutUser));
+});
+
+test("requestedBy survives redaction and purge — it is not privileged content", () => {
+  const r = makeTraceRecord({ ...INPUT, requestedBy: "user-partner-z" }, FULL, FIXED);
+  assert.ok(r);
+  const stripped = withoutContent(r, "2026-10-27T00:00:00.000Z");
+  assert.equal(stripped.requestedBy, "user-partner-z");
+  // And it does not perturb the content hash — it is metadata, not content.
+  assert.equal(r.contentSha256, contentSha256(INPUT.content));
+});
+
 test("withoutContent preserves the hash and marks the purge when asked", () => {
   const r = makeTraceRecord(INPUT, FULL, FIXED);
   assert.ok(r);

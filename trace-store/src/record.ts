@@ -96,6 +96,7 @@ export function makeTraceRecord(
   if (input.companyId !== undefined) record.companyId = input.companyId;
   if (input.issueId !== undefined) record.issueId = input.issueId;
   if (input.agentSlug !== undefined) record.agentSlug = input.agentSlug;
+  if (input.requestedBy !== undefined) record.requestedBy = input.requestedBy;
   if (input.step !== undefined) record.step = input.step;
   if (input.modelLane !== undefined) record.modelLane = input.modelLane;
   if (input.variant !== undefined) record.variant = input.variant;
