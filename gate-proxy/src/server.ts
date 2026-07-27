@@ -1916,9 +1916,16 @@ async function handleEgress(
   // separately (enums/booleans only).
   const registeredFloor =
     meta.issueId !== undefined ? matterClassifications.get(meta.issueId) : undefined;
+  // C2: fold in the floors of every OTHER matter the agent declared as context.
+  // Self-references are dropped so a matter cannot be its own contributor, and
+  // ids are shape-checked before touching the registry.
+  const contributingFloors = (meta.contextIssueIds ?? [])
+    .filter((id) => typeof id === "string" && id !== meta.issueId && SAFE_ID_RE.test(id))
+    .map((id) => matterClassifications.get(id));
   const confResolution = resolveEffectiveConfidentiality({
     claimed: meta.confidentiality,
     registeredFloor,
+    contributingFloors,
     // Fail-closed unless the firm explicitly set "standard" (any other value —
     // including a malformed policy object at runtime — keeps the default).
     unspecifiedDefault:
@@ -1937,6 +1944,15 @@ async function handleEgress(
     confidentialityAudit["effectiveConfidentiality"] = effectiveConfidentiality;
   }
   if (confResolution.floorApplied) confidentialityAudit["confidentialityFloorApplied"] = true;
+  // C2: record that a CONTRIBUTING matter set the tier — the contamination
+  // signal. Counts only, never ids of the other matters: a receipt that
+  // travels must not disclose which other client's matter was touched.
+  if (confResolution.provenanceApplied) {
+    confidentialityAudit["confidentialityProvenanceApplied"] = true;
+    confidentialityAudit["contributingMatterCount"] = contributingFloors.filter(
+      (f) => f !== undefined,
+    ).length;
+  }
 
   // Downstream consumers (classify, tier-floor, anonymizer, performers, human
   // gate) see the EFFECTIVE meta. The ORIGINAL `meta` object keeps the claimed

@@ -16,6 +16,16 @@ export interface EgressMeta {
   confidentiality?: Confidentiality;
   entities?: string[];
   approvalId?: string;
+  /**
+   * C1/C2 — other matters whose context contributed to this payload.
+   *
+   * Declared by the calling agent. Declaring MORE can only raise the
+   * confidentiality tier, never lower it, so an honest agent cannot hurt
+   * itself and a dishonest one gains nothing by over-declaring. Omission is
+   * the residual gap, and is what the trace store's contextRefs make
+   * detectable after the fact.
+   */
+  contextIssueIds?: string[];
 }
 
 export interface EgressRequest {

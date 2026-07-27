@@ -88,19 +88,27 @@ What is true today:
   an assertion we add. In authenticated mode the same boundary binds humans.
 - **There is no per-matter boundary inside a wall.** Two matters for two
   different clients in the same workspace are not isolated from each other.
-- **We have no context provenance yet.** The gate checks where an egress is
-  going and how the matter it is filed under is classified. It does not know
-  what went *into* the payload. So if an agent working matter A draws context
-  from matter B, that is neither prevented nor currently visible.
+- **Context provenance now raises the tier, within the limits of what agents
+  declare.** An egress carries the matters that contributed context to it, and
+  the confidentiality floor is the highest across all of them — so work filed
+  under a standard matter that drew on a privileged one is treated as
+  privileged, regardless of what the calling agent claimed. Declaring more can
+  only raise the tier, never lower it. The residual gap is omission: an agent
+  that fails to declare a source matter evades the raise. The trace store
+  records the same references, so an omission is detectable after the fact even
+  though it is not prevented.
 
 **What this means in practice.** If everyone in your organization may see
 everything — a solo practice, a small firm, an in-house department — none of
 the above constrains you. If you run formal screens, use a wall per screened
 client and understand that the granularity is the client, not the matter.
 
-**What we are building.** The C-track below, in order. C2 is the one that
-turns confidentiality from an assertion by the calling agent into a property
-derived from what actually went into the work.
+**What we are building.** C3 — a user→matter access registry checked outside
+the model, so a request for work the requester is not entitled to is refused
+by the gate rather than adjudicated by an agent. That is enforcement at the
+outlet, not the source: it stops content reaching an unentitled person and
+makes every attempt visible, but the agent can still read the underlying
+matter, so a real conflicts screen still needs a wall.
 
 ---
 
@@ -146,7 +154,7 @@ Ordered by cost of deferring, not by size.
 |---|---|---|
 | A1 | External RFC 3161 anchoring | **Shipped** |
 | A2 | Published verification spec + standalone verifier, so checking a chain needs no code of ours | **Shipped** |
-| A3 | Enforce the no-payload-content rule on receipt metadata rather than documenting it | Planned |
+| A3 | Enforce the no-payload-content rule on receipt metadata rather than documenting it | **Shipped** |
 
 ### Trace track
 
@@ -154,7 +162,7 @@ Ordered by cost of deferring, not by size.
 |---|---|---|
 | C0 | Requesting human recorded alongside the acting agent | **Shipped** |
 | M1 | Trace store core | **Shipped** |
-| M2 | Bind traces into the receipt chain | Next |
+| M2 | Bind traces into the receipt chain | **Shipped** |
 | M3 | Static model-lane resolution | Planned |
 | M4 | Run-skeleton reconstruction from the control plane | Planned |
 | M5 | Adapter-level prompt capture, opt-in | Planned |
@@ -163,8 +171,8 @@ Ordered by cost of deferring, not by size.
 
 | | Item | Status |
 |---|---|---|
-| C1 | Context provenance — record the source matter of every context pull | Planned |
-| C2 | Derive the confidentiality floor from provenance, so contamination raises the tier regardless of what the agent claims | Planned |
+| C1 | Context provenance — record the source matter of every context pull | **Shipped** |
+| C2 | Derive the confidentiality floor from provenance, so contamination raises the tier regardless of what the agent claims | **Shipped** |
 | C3 | User→matter access registry, enforced outside the model, with receipted and time-bounded admin override | Planned |
 
 C3 is enforcement at the outlet, not at the source: it stops content reaching

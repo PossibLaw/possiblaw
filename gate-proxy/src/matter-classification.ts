@@ -63,6 +63,25 @@ export interface EffectiveConfidentialityInput {
    * unspecifiedConfidentialityDefault knob is on.
    */
   unspecifiedDefault: Confidentiality | null;
+  /**
+   * C2 — registered floors of every OTHER matter that contributed context to
+   * this payload, from the trace's contextRefs.
+   *
+   * The gate previously reasoned only about the matter an egress was filed
+   * under. That is blind to contamination: an agent working a standard matter
+   * can draw on a privileged one, and the payload inherits the standard floor
+   * while carrying privileged facts. Folding contributing floors into the max
+   * makes confidentiality a property of what went INTO the work rather than an
+   * assertion about where it was filed.
+   *
+   * Honesty limit, stated plainly: this is only as complete as the declared
+   * context. An agent that omits a source matter evades it. What it defeats is
+   * the ordinary case — an agent that correctly reports its context and would
+   * otherwise have had that context silently under-classified. The trace store
+   * records the same refs, so an omission is detectable after the fact even
+   * when it is not preventable.
+   */
+  contributingFloors?: readonly (Confidentiality | undefined)[];
 }
 
 export interface EffectiveConfidentialityResult {
@@ -71,6 +90,28 @@ export interface EffectiveConfidentialityResult {
   floorApplied: boolean;
   /** True when the fail-closed unspecified default supplied the value. */
   defaultApplied: boolean;
+  /**
+   * C2 — true when a CONTRIBUTING matter's floor set the tier above what the
+   * filed matter alone would have produced. This is the contamination signal:
+   * the work is filed under a standard matter but drew on a privileged one.
+   */
+  provenanceApplied: boolean;
+}
+
+/**
+ * Highest tier among the supplied values, ignoring undefined. Returns
+ * undefined when nothing is known — never a default; the caller decides what
+ * "nothing known" means.
+ */
+export function maxConfidentiality(
+  tiers: readonly (Confidentiality | undefined)[],
+): Confidentiality | undefined {
+  let best: Confidentiality | undefined;
+  for (const t of tiers) {
+    if (t === undefined) continue;
+    if (best === undefined || CONFIDENTIALITY_ORDER[t] > CONFIDENTIALITY_ORDER[best]) best = t;
+  }
+  return best;
 }
 
 /**
@@ -84,7 +125,18 @@ export function resolveEffectiveConfidentiality(
   input: EffectiveConfidentialityInput,
 ): EffectiveConfidentialityResult {
   const claimedTier = isConfidentiality(input.claimed) ? input.claimed : undefined;
-  const floor = input.registeredFloor;
+
+  // C2: the operative floor is the highest of the filed matter's floor and the
+  // floor of every matter that contributed context. Raise-only is preserved —
+  // adding contributors can only push the tier up, never down.
+  const provenanceFloor = maxConfidentiality(input.contributingFloors ?? []);
+  const floor = maxConfidentiality([input.registeredFloor, provenanceFloor]);
+
+  // Did provenance push above what the filed matter alone would have given?
+  const provenanceApplied =
+    provenanceFloor !== undefined &&
+    (input.registeredFloor === undefined ||
+      CONFIDENTIALITY_ORDER[provenanceFloor] > CONFIDENTIALITY_ORDER[input.registeredFloor]);
 
   if (floor !== undefined) {
     const effective =
@@ -92,18 +144,24 @@ export function resolveEffectiveConfidentiality(
       CONFIDENTIALITY_ORDER[claimedTier] >= CONFIDENTIALITY_ORDER[floor]
         ? claimedTier
         : floor;
-    return { effective, floorApplied: effective !== claimedTier, defaultApplied: false };
+    return {
+      effective,
+      floorApplied: effective !== claimedTier,
+      defaultApplied: false,
+      // Only report contamination when it actually changed the outcome.
+      provenanceApplied: provenanceApplied && effective === floor,
+    };
   }
 
   if (claimedTier !== undefined) {
-    return { effective: claimedTier, floorApplied: false, defaultApplied: false };
+    return { effective: claimedTier, floorApplied: false, defaultApplied: false, provenanceApplied: false };
   }
 
   if (input.unspecifiedDefault !== null) {
-    return { effective: input.unspecifiedDefault, floorApplied: false, defaultApplied: true };
+    return { effective: input.unspecifiedDefault, floorApplied: false, defaultApplied: true, provenanceApplied: false };
   }
 
-  return { effective: undefined, floorApplied: false, defaultApplied: false };
+  return { effective: undefined, floorApplied: false, defaultApplied: false, provenanceApplied: false };
 }
 
 // ---------------------------------------------------------------------------
