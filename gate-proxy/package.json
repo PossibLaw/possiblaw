@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "js-yaml": "^4.1.0",
-    "@possiblaw/trace-store": "file:../trace-store"
+    "@possiblaw/trace-store": "link:../trace-store"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
