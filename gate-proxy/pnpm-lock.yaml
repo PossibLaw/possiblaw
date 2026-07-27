@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@possiblaw/trace-store':
-        specifier: file:../trace-store
-        version: file:../trace-store
+        specifier: link:../trace-store
+        version: link:../trace-store
       js-yaml:
         specifier: ^4.1.0
         version: 4.2.0
@@ -186,10 +186,6 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@possiblaw/trace-store@file:../trace-store':
-    resolution: {directory: ../trace-store, type: directory}
-    engines: {node: '>=24.18.0 <25'}
-
   '@types/js-yaml@4.0.9':
     resolution: {integrity: sha512-k4MGaQl5TGo/iipqb2UDG2UwjXziSWkh0uysQelTlJpX1qGlpUZYm8PnO4DxG1qBomtJUdYJ6qR6xdIah10JLg==}
 
@@ -305,10 +301,6 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.1':
     optional: true
-
-  '@possiblaw/trace-store@file:../trace-store':
-    dependencies:
-      js-yaml: 4.2.0
 
   '@types/js-yaml@4.0.9': {}
 

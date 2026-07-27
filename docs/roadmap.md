@@ -11,6 +11,23 @@ engineering-level) and `docs/workflows/ethical-walls.md` (isolation mechanics).
 
 ---
 
+## Running the test suites
+
+Every component pins `node >=24.18.0 <25`. On older Node the suites mostly
+pass but a handful of timer- and process-sensitive tests fail spuriously —
+they are testing real behaviour, the runner's event-loop semantics differ.
+
+```bash
+nvm install   # reads .nvmrc → 24.18.0
+nvm use
+pnpm -C gate-proxy install && pnpm -C gate-proxy test
+```
+
+On 24.18.0 the full estate is green: 1005 tests across eight components,
+0 failures.
+
+---
+
 ## Who this fits today
 
 The single biggest determinant of fit is **whether everyone in your
@@ -166,6 +183,13 @@ Ordered by cost of deferring, not by size.
 | M3 | Static model-lane resolution | **Shipped** |
 | M4 | Run-skeleton reconstruction from the control plane | Planned |
 | M5 | Adapter-level prompt capture, opt-in | Planned |
+
+**Note on `capture: full` today.** The gate-side sink records the decision
+(agent, matter, tool, boundary, outcome, timing) but not prompt or model output
+— the gate never sees a prompt in capturable form. So a firm that sets
+`capture: full` today gets a complete decision record with an empty content
+hash, not prompt text. Verbatim prompt capture arrives with M5. The setting is
+honoured, there is simply nothing yet feeding it content.
 
 ### Confidentiality track
 
