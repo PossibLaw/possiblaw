@@ -7,17 +7,24 @@ Audience: the next coding agent or engineer picking this up cold.
 
 ## Where things stand
 
-Nine units shipped: M1 (trace store core), C0 (`requestedBy`), A1 (RFC 3161
-anchoring), A2 (verification spec + standalone verifier), A3 (receipt meta
-bounds), M2 (receipt↔trace binding), M3 (static lane resolution), C1 (context
-provenance), C2 (provenance-derived confidentiality floor).
+**All nine units are merged to `main`.** Nothing from this work is outstanding;
+you are starting from a clean, green baseline, not a half-landed branch.
+
+| PR | Unit(s) | Merge commit |
+|---|---|---|
+| #24 | M1 — trace store core | `b960342` |
+| #25 | A1 anchoring, A2 spec + verifier, C0 `requestedBy` | `a078546` |
+| #26 | A3 receipt meta bounds, M2 receipt↔trace binding | `cdc79c4` |
+| #27 | C1 context provenance, C2 provenance-derived floor | `39ae510` |
+| #28 | M3 static lane resolution | `ef140ef` |
+| #29 | Dev setup + this plan | (this PR) |
 
 **1005 tests across eight components, 0 failures on Node 24.18.0.**
 
-Verified end-to-end against a live gate process: egress performed → receipt
-carried `traceId` + `traceSha256` → trace store held the matching `POS-42`
-partition → the receipt's `traceSha256` equalled the record's `contentSha256`
-→ `tools/verify-receipts.mjs` accepted the chain.
+Verified end-to-end against a live gate process before merge: egress performed
+→ receipt carried `traceId` + `traceSha256` → trace store held the matching
+per-matter partition → the receipt's `traceSha256` equalled the record's
+`contentSha256` → `tools/verify-receipts.mjs` accepted the chain.
 
 Three units remain: **M4**, **M5**, **C3**.
 
@@ -213,6 +220,10 @@ from the trace spine being fully exercised first.
 - `nvm use` before anything. On Node 22 eight tests fail spuriously.
 - `pnpm -C <component> test` per component; there is no root test runner.
 - Do not commit `.agent/*` or `.claude/history.md` — gitignored by contract.
-- Keep PRs small. The work above was landed as six stacked PRs (#24–#29).
+- Keep PRs small. The work above was landed as six stacked PRs (#24–#29),
+  each 1–3 commits, merged bottom-up. Do the same rather than one large branch.
+- Register any NEW package in `bin/verify` PACKAGES *and* the CI workflow's
+  install list. A runtime contract check fails the build otherwise — this cost
+  a full red round across all six PRs when trace-store was added without it.
 - Local continuity lives in `.agent/PLAN.md` and `.agent/HANDOFF.md`; they do
   not travel with a fresh clone, which is why this file is committed.
