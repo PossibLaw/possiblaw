@@ -38,8 +38,8 @@ Verification 2026*, which we did not author and which we think is a fair test.
 |---|---|---|
 | 1 | The check runs before the agent action | **Met**, for the actions we gate (see scope below) |
 | 2 | The verdict is deterministic | **Met.** No model sits anywhere in the enforcement path |
-| 3 | Someone outside the system can verify it | **Met as of A1**, via RFC 3161 external timestamping |
-| 4 | The proof travels | **Met.** Per-matter Matter Trust Report, hashes only |
+| 3 | Someone outside the system can verify it | **Met.** RFC 3161 external timestamping (A1) plus a published spec and standalone verifier (A2) |
+| 4 | The proof travels | **Met.** Per-matter Matter Trust Report, hashes only; checkable with no code or account of ours |
 | 5 | It works without exposing the rules or the data | **Met.** Payload hashes and a policy digest, never contents |
 
 ### What "the actions we gate" means
@@ -113,6 +113,13 @@ derived from what actually went into the work.
 - **External anchoring (A1).** The chain head is timestamped by an RFC 3161
   authority outside our trust domain, so the chain cannot be silently
   regenerated or backdated. Tokens verify with standard `openssl ts -verify`.
+- **Independent verification (A2).** `docs/receipt-verification.md` specifies
+  the format, canonical JSON, and hash construction precisely enough to
+  implement a verifier in any language, with a worked example you can
+  reproduce using nothing but `printf` and `openssl dgst`. A zero-dependency
+  reference verifier ships at `gate-proxy/tools/verify-receipts.mjs` and is
+  cross-checked against the producer in CI. Checking a chain requires no code
+  of ours and no account with us.
 - **Matter Trust Report.** Per-matter evidence bundle, hashes only, rendered
   as Markdown for a client, auditor, or court.
 - **Citation gate.** Filings carrying legal citations are blocked until a
@@ -138,7 +145,7 @@ Ordered by cost of deferring, not by size.
 | | Item | Status |
 |---|---|---|
 | A1 | External RFC 3161 anchoring | **Shipped** |
-| A2 | Published verification spec + standalone verifier, so checking a chain needs no code of ours | Planned |
+| A2 | Published verification spec + standalone verifier, so checking a chain needs no code of ours | **Shipped** |
 | A3 | Enforce the no-payload-content rule on receipt metadata rather than documenting it | Planned |
 
 ### Trace track
