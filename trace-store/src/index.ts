@@ -42,6 +42,19 @@ export type {
   VariantsConfig,
 } from "./lane-resolver.ts";
 
+export { pollMatter } from "./poller.ts";
+export type {
+  MatterSnapshot,
+  PollOptions,
+  PollResult,
+  RunSource,
+  SubIssueSummary,
+  WorkProductSummary,
+} from "./poller.ts";
+
+export { readCursor, writeCursor, cursorPath } from "./cursor.ts";
+export type { PollCursor } from "./cursor.ts";
+
 export {
   appendTrace,
   readTrace,
