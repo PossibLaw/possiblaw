@@ -196,7 +196,7 @@ describe("resolveEffectiveConfidentiality", () => {
       registeredFloor: "privileged",
       unspecifiedDefault: null,
     });
-    assert.deepEqual(r, { effective: "privileged", floorApplied: true, defaultApplied: false });
+    assert.deepEqual(r, { effective: "privileged", floorApplied: true, defaultApplied: false, provenanceApplied: false });
   });
 
   it("edge: claimed privileged on a standard-registered matter → raise allowed, no floor marker", () => {
@@ -205,7 +205,7 @@ describe("resolveEffectiveConfidentiality", () => {
       registeredFloor: "standard",
       unspecifiedDefault: null,
     });
-    assert.deepEqual(r, { effective: "privileged", floorApplied: false, defaultApplied: false });
+    assert.deepEqual(r, { effective: "privileged", floorApplied: false, defaultApplied: false, provenanceApplied: false });
   });
 
   it("claimed equals the floor → no floor marker", () => {
@@ -214,7 +214,7 @@ describe("resolveEffectiveConfidentiality", () => {
       registeredFloor: "confidential",
       unspecifiedDefault: null,
     });
-    assert.deepEqual(r, { effective: "confidential", floorApplied: false, defaultApplied: false });
+    assert.deepEqual(r, { effective: "confidential", floorApplied: false, defaultApplied: false, provenanceApplied: false });
   });
 
   it("claimed absent + registered floor → floor fills it in (floorApplied)", () => {
@@ -223,7 +223,7 @@ describe("resolveEffectiveConfidentiality", () => {
       registeredFloor: "standard",
       unspecifiedDefault: "confidential",
     });
-    assert.deepEqual(r, { effective: "standard", floorApplied: true, defaultApplied: false });
+    assert.deepEqual(r, { effective: "standard", floorApplied: true, defaultApplied: false, provenanceApplied: false });
   });
 
   it("no floor + valid claimed → claimed wins, default not applied", () => {
@@ -232,7 +232,7 @@ describe("resolveEffectiveConfidentiality", () => {
       registeredFloor: undefined,
       unspecifiedDefault: "confidential",
     });
-    assert.deepEqual(r, { effective: "standard", floorApplied: false, defaultApplied: false });
+    assert.deepEqual(r, { effective: "standard", floorApplied: false, defaultApplied: false, provenanceApplied: false });
   });
 
   it("failure/security: no floor + no claimed + default confidential → fail-closed confidential", () => {
@@ -241,7 +241,7 @@ describe("resolveEffectiveConfidentiality", () => {
       registeredFloor: undefined,
       unspecifiedDefault: "confidential",
     });
-    assert.deepEqual(r, { effective: "confidential", floorApplied: false, defaultApplied: true });
+    assert.deepEqual(r, { effective: "confidential", floorApplied: false, defaultApplied: true, provenanceApplied: false });
   });
 
   it("failure/security: an unrecognized claimed value counts as unspecified (fail-closed)", () => {
@@ -250,7 +250,7 @@ describe("resolveEffectiveConfidentiality", () => {
       registeredFloor: undefined,
       unspecifiedDefault: "confidential",
     });
-    assert.deepEqual(r, { effective: "confidential", floorApplied: false, defaultApplied: true });
+    assert.deepEqual(r, { effective: "confidential", floorApplied: false, defaultApplied: true, provenanceApplied: false });
   });
 
   it("back-compat: no floor + no claimed + no default → effective undefined (legacy behavior)", () => {
@@ -259,6 +259,6 @@ describe("resolveEffectiveConfidentiality", () => {
       registeredFloor: undefined,
       unspecifiedDefault: null,
     });
-    assert.deepEqual(r, { effective: undefined, floorApplied: false, defaultApplied: false });
+    assert.deepEqual(r, { effective: undefined, floorApplied: false, defaultApplied: false, provenanceApplied: false });
   });
 });

@@ -43,6 +43,19 @@ export interface ContextRef {
   ref: string;
   /** Hash of the pulled content, when the caller knows it. */
   sha256?: string;
+  /**
+   * C1 — the matter this context came FROM, when it came from one.
+   *
+   * The gate classifies an egress by the matter it is filed under. That is
+   * blind to contamination: an agent working matter A can draw on matter B,
+   * and the resulting payload inherits A's confidentiality floor while
+   * carrying B's facts. Recording the source matter makes that visible, and
+   * is what C2's provenance-derived floor reasons over.
+   *
+   * Absent means "not matter-scoped" (a skill, a public connector), never
+   * "unknown matter".
+   */
+  sourceIssueId?: string;
 }
 
 /** The sensitive half of a trace record. Present only under capture "full". */
