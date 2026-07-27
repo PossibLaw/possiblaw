@@ -163,7 +163,7 @@ Ordered by cost of deferring, not by size.
 | C0 | Requesting human recorded alongside the acting agent | **Shipped** |
 | M1 | Trace store core | **Shipped** |
 | M2 | Bind traces into the receipt chain | **Shipped** |
-| M3 | Static model-lane resolution | Planned |
+| M3 | Static model-lane resolution | **Shipped** |
 | M4 | Run-skeleton reconstruction from the control plane | Planned |
 | M5 | Adapter-level prompt capture, opt-in | Planned |
 

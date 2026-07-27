@@ -28,6 +28,21 @@ export type { MakeTraceOptions } from "./record.ts";
 export { canViewContent, redactForRole, redactManyForRole } from "./visibility.ts";
 
 export {
+  isModelLane,
+  laneTraceFields,
+  loadVariants,
+  parseVariants,
+  resolveLane,
+  LaneResolutionError,
+} from "./lane-resolver.ts";
+export type {
+  ResolvedLane,
+  VariantDataTerms,
+  VariantDefinition,
+  VariantsConfig,
+} from "./lane-resolver.ts";
+
+export {
   appendTrace,
   readTrace,
   readTraces,
