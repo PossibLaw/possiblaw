@@ -13,8 +13,25 @@ pnpm -C eval-harness install       # to run the CUAD benchmark
 pnpm -C learning-loop install      # only if testing the learning loop
 pnpm -C mcp-servers/firm-facade install   # only if testing --firm-facade
 pnpm -C mcp-servers/legal-data install    # only if testing CourtListener research
+pnpm -C trace-store install        # execution trace spine (M1–M4) — the gate
+                                   # links this package, so a MISSING node_modules
+                                   # here fails gate startup with
+                                   # ERR_MODULE_NOT_FOUND while every unit test
+                                   # still passes. bin/smoke-trace catches it.
+pnpm -C firm-overview install      # only if testing the cross-matter board
+pnpm -C orchestration-eval install # only if running the Harvey LAB A/B
 ```
 Globals the launcher checks: Node ≥ 20, pnpm, python3, curl.
+
+> **Pin the runtime first.** `.nvmrc` pins **24.18.0** and `bin/verify`
+> string-compares `node --version` against it exactly, so a newer Node fails
+> before a single test runs. Use `fnm install && fnm use` (or `nvm use`) in the
+> repo root. Every package also declares `engines.node: ">=24.18.0 <25"`.
+>
+> Fastest way to confirm the whole checkout is sound: `./bin/verify` — expect
+> **PASS … (50 checks)**. Three live checks SKIP by design (launcher preview,
+> the two-lawyer wall test, provider delivery/readback); they are covered in
+> sections G and H below.
 
 ## B. Pick ONE model-provider variant + authenticate (REQUIRED for live runs)
 | Variant | Manual step |
@@ -256,3 +273,34 @@ rm -rf ~/.possiblaw/gate-receipts/"$(basename "$DATA_DIR")"*   # per-run receipt
 ```
 
 Verify port 3100 is untouched: `lsof -i :3100` should return nothing (or your pre-existing instance).
+
+---
+
+## I. Matter access (C3) — NOT YET RUNNABLE
+
+The registry, the fold, and enforcement at approval resume are merged and unit
+tested. **Nothing constructs the registry at gate startup yet**, so there is no
+live test to run: the launcher must fetch the directory from Paperclip and hand
+the gate an `approverCheck`. That is the one remaining engineering unit.
+
+When it lands, this test rides on the section H rig (two lawyers, authenticated
+instance) rather than a new one. Sketch, so the shape is known in advance:
+
+1. Populate `companies/legal-operations/matter-access.json` with two real lawyer
+   emails and two real `issues.identifier` values, and set `enforcement: "on"`.
+   Give Lawyer A `LEG-x`; do **not** give Lawyer B anything.
+2. Launch authenticated (C3 refuses to start in production otherwise — an
+   unauthenticated instance records the placeholder `local-board`, which is a
+   machine, not a person).
+3. Drive a human-gated egress on `LEG-x`. **Lawyer A approves** → performs.
+4. Repeat, but **Lawyer B approves** → refused at resume, with a
+   `approver_not_entitled_to_matter` receipt and an explaining issue comment.
+   Lawyer B still sees the approval marked approved in the dashboard; that is
+   expected, and is why the denial is receipted and commented.
+5. Grant Lawyer B a time-bounded override from a *different* admin, re-run →
+   performs. A self-granted override must be refused (separation of duties).
+6. Revoke, re-run → refused. **A later revoke beats the roster.**
+
+What the operator must decide before any of this: which emails, which matter
+identifiers, and who holds each decision boundary. The roster is deny-all until
+a firm writes rows, and no one but the firm can write them.
