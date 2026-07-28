@@ -9,6 +9,8 @@ import {
   compileMatterAccess,
   loadMatterAccessDocument,
   parseMatterAccessDocument,
+  buildMatterAccessDirectory,
+  loadMatterAccessDirectory,
   type MatterAccessDirectory,
 } from "./matter-access.ts";
 
@@ -288,5 +290,88 @@ describe("matter access document — compilation against the directory", () => {
   it("does not grant a matter to a principal the document never listed", () => {
     const compiled = compileMatterAccess(parseMatterAccessDocument(DOC), DIRECTORY);
     assert.equal(compiled.matterAccess["user-owner"], undefined);
+  });
+});
+
+describe("matter access directory — ingestion from paperclip", () => {
+  const MEMBERS = {
+    members: [
+      { user: { id: "user-jane", email: "Jane.Doe@FIRM.com" } },
+      { user: { id: "user-owner", email: "owner@firm.com" } },
+      { user: null },
+      { user: { id: "user-noemail" } },
+    ],
+  };
+  const ISSUES = {
+    issues: [
+      { id: "uuid-142", identifier: "LEG-142" },
+      { id: "uuid-207", identifier: "LEG-207" },
+      { id: "uuid-none", identifier: null },
+    ],
+  };
+
+  it("indexes users by lower-cased email and issues by identifier", () => {
+    const d = buildMatterAccessDirectory({ members: MEMBERS, issues: ISSUES });
+    assert.deepEqual(d.usersByEmail["jane.doe@firm.com"], ["user-jane"]);
+    assert.deepEqual(d.issuesByIdentifier["LEG-142"], ["uuid-142"]);
+  });
+
+  it("skips records with no usable email or identifier instead of failing startup", () => {
+    // A company legitimately holds users and issues the roster never names;
+    // one of them must not be able to block the gate from booting.
+    const d = buildMatterAccessDirectory({ members: MEMBERS, issues: ISSUES });
+    assert.equal(Object.keys(d.usersByEmail).length, 2);
+    assert.equal(Object.keys(d.issuesByIdentifier).length, 2);
+  });
+
+  it("keeps duplicates multi-valued so compilation can refuse the ambiguity", () => {
+    const d = buildMatterAccessDirectory({
+      members: { members: [
+        { user: { id: "user-a", email: "dup@firm.com" } },
+        { user: { id: "user-b", email: "DUP@firm.com" } },
+      ] },
+      issues: { issues: [
+        { id: "uuid-a", identifier: "LEG-9" },
+        { id: "uuid-b", identifier: "LEG-9" },
+      ] },
+    });
+    assert.equal(d.usersByEmail["dup@firm.com"]?.length, 2);
+    assert.equal(d.issuesByIdentifier["LEG-9"]?.length, 2);
+    // And compiling against it must throw rather than pick one.
+    assert.throws(
+      () => compileMatterAccess(
+        parseMatterAccessDocument({ version: 1, default: "deny", matterAccess: { "dup@firm.com": ["LEG-9"] } }),
+        d,
+      ),
+      MatterAccessError,
+    );
+  });
+
+  it("accepts a flat {id,email} member shape as well as the nested one", () => {
+    const d = buildMatterAccessDirectory({
+      members: [{ id: "user-flat", email: "flat@firm.com" }],
+      issues: [],
+    });
+    assert.deepEqual(d.usersByEmail["flat@firm.com"], ["user-flat"]);
+  });
+
+  it("treats absent sections as empty rather than throwing", () => {
+    const d = buildMatterAccessDirectory({ members: undefined, issues: undefined });
+    assert.deepEqual(Object.keys(d.usersByEmail), []);
+    assert.deepEqual(Object.keys(d.issuesByIdentifier), []);
+  });
+
+  it("loads a bundle from disk and refuses malformed JSON", () => {
+    const file = writeDoc({ members: MEMBERS.members, issues: ISSUES.issues });
+    const d = loadMatterAccessDirectory(file);
+    assert.deepEqual(d.usersByEmail["owner@firm.com"], ["user-owner"]);
+    assert.throws(() => loadMatterAccessDirectory(writeDoc("{nope")), MatterAccessError);
+    assert.throws(() => loadMatterAccessDirectory(path.join(os.tmpdir(), "absent-dir.json")), MatterAccessError);
+  });
+
+  it("builds null-prototype indexes", () => {
+    const d = buildMatterAccessDirectory({ members: MEMBERS, issues: ISSUES });
+    assert.equal(Object.getPrototypeOf(d.usersByEmail), null);
+    assert.equal(d.usersByEmail["constructor"], undefined);
   });
 });

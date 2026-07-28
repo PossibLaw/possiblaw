@@ -351,8 +351,12 @@ describe("checkApprover", () => {
 
   it("never puts matter content in the denial reason", () => {
     const v = check("on", { approverUserId: OWNER, boundary: "MONEY_MOVEMENT", matters: [M142, M207] });
-    assert.equal(v.reason?.includes("jane.doe@firm.com"), false);
-    assert.equal(v.reason?.includes("LEG-"), false);
+    assert.equal(v.ok, false);
+    // Narrowed by the discriminant, so the deny branch must carry a reason.
+    if (v.ok) throw new Error("expected a denial");
+    assert.equal(v.reason.includes("jane.doe@firm.com"), false);
+    assert.equal(v.reason.includes("LEG-"), false);
+    assert.equal(v.code, APPROVER_DENIAL.notEntitled);
   });
 
   it("denies over a corrupt chain even with enforcement on and a valid approver", () => {

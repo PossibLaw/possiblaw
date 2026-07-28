@@ -367,3 +367,83 @@ export function compileMatterAccess(
     ),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Directory ingestion — C3 PR 1b
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a resolution directory from what the launcher fetched out of Paperclip,
+ * read-only: `GET /api/companies/:id/members` and
+ * `GET /api/companies/:id/issues`.
+ *
+ * Both indexes are MULTI-VALUED on purpose. Collapsing duplicates here would
+ * hide exactly the ambiguity `compileMatterAccess` must refuse: two users
+ * sharing an email, or two issues sharing an identifier, mean the firm's roster
+ * cannot be resolved to one person or one matter, and the gate must not guess.
+ *
+ * Records missing an email or identifier are skipped rather than rejected — a
+ * company legitimately contains users and issues the roster never names, and
+ * failing on those would make an unrelated record able to block startup.
+ */
+export function buildMatterAccessDirectory(input: {
+  members: unknown;
+  issues: unknown;
+}): MatterAccessDirectory {
+  const usersByEmail: Record<string, string[]> = Object.create(null) as Record<string, string[]>;
+  const issuesByIdentifier: Record<string, string[]> = Object.create(null) as Record<string, string[]>;
+
+  const memberList = Array.isArray(input.members)
+    ? input.members
+    : isPlainObject(input.members) && Array.isArray(input.members["members"])
+      ? (input.members["members"] as unknown[])
+      : [];
+  for (const raw of memberList) {
+    if (!isPlainObject(raw)) continue;
+    // Accepts both the nested `{ user: { id, email } }` shape returned by
+    // /members and a flat `{ id, email }`, so the launcher can hand over either.
+    const user = isPlainObject(raw["user"]) ? raw["user"] : raw;
+    const id = user["id"];
+    const email = user["email"];
+    if (typeof id !== "string" || id === "") continue;
+    if (typeof email !== "string" || !SAFE_EMAIL_RE.test(email)) continue;
+    const key = email.toLowerCase();
+    (usersByEmail[key] ??= []).push(id);
+  }
+
+  const issueList = Array.isArray(input.issues)
+    ? input.issues
+    : isPlainObject(input.issues) && Array.isArray(input.issues["issues"])
+      ? (input.issues["issues"] as unknown[])
+      : [];
+  for (const raw of issueList) {
+    if (!isPlainObject(raw)) continue;
+    const id = raw["id"];
+    const identifier = raw["identifier"];
+    if (typeof id !== "string" || id === "") continue;
+    if (typeof identifier !== "string" || !SAFE_MATTER_IDENTIFIER_RE.test(identifier)) continue;
+    (issuesByIdentifier[identifier] ??= []).push(id);
+  }
+
+  return { usersByEmail, issuesByIdentifier };
+}
+
+/** Read a launcher-written `{ members, issues }` bundle from disk, fail-closed. */
+export function loadMatterAccessDirectory(filePath: string): MatterAccessDirectory {
+  let text: string;
+  try {
+    text = fs.readFileSync(filePath, "utf8");
+  } catch {
+    throw new MatterAccessError(`matter access directory could not be read: ${filePath}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new MatterAccessError(`matter access directory is not valid JSON: ${filePath}`);
+  }
+  if (!isPlainObject(parsed)) {
+    throw new MatterAccessError("matter access directory must be a JSON object");
+  }
+  return buildMatterAccessDirectory({ members: parsed["members"], issues: parsed["issues"] });
+}

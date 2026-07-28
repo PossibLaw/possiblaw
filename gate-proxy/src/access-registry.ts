@@ -350,13 +350,19 @@ export const APPROVER_DENIAL = {
   notEntitled: "approver_not_entitled_to_matter",
 } as const;
 
-export interface ApproverVerdict {
-  ok: boolean;
-  /** Machine-readable reason; one of APPROVER_DENIAL. Absent when ok. */
-  code?: string;
-  /** Human-readable, for the issue comment. Carries ids only, never matter facts. */
-  reason?: string;
-}
+/**
+ * Discriminated on `ok` so a caller cannot read `reason` off an allow, and
+ * cannot forget it on a deny.
+ */
+export type ApproverVerdict =
+  | { ok: true }
+  | {
+      ok: false;
+      /** Machine-readable; one of APPROVER_DENIAL. */
+      code: string;
+      /** For the issue comment. Carries ids only, never matter facts. */
+      reason: string;
+    };
 
 /**
  * Decide whether the human who approved may actually have it performed.
