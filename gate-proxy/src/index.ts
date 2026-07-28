@@ -34,6 +34,12 @@ import {
   withFetchTimeout,
 } from "./fetch-timeout.ts";
 import {
+  compileMatterAccess,
+  loadMatterAccessDocument,
+  loadMatterAccessDirectory,
+} from "./matter-access.ts";
+import { MatterAccessRegistry, checkApprover } from "./access-registry.ts";
+import {
   DEFAULT_GATE_AUTHORIZATION,
   loadGateAuthorization,
 } from "./authorization.ts";
@@ -87,6 +93,29 @@ const authorization = inboundAuthEnvironment.requireAuth
       inboundAuthEnvironment.companyId,
     )
   : DEFAULT_GATE_AUTHORIZATION;
+// ---------------------------------------------------------------------------
+// C3 — matter access baseline
+// ---------------------------------------------------------------------------
+// Both paths must be set for the roster to load at all; either alone is a
+// misconfiguration and says so rather than silently running unenforced.
+// Compilation refuses ambiguity outright, so a bad roster stops the gate here
+// instead of producing a policy nobody can explain.
+const MATTER_ACCESS_PATH = process.env["MATTER_ACCESS_PATH"];
+const MATTER_ACCESS_DIRECTORY_PATH = process.env["MATTER_ACCESS_DIRECTORY_PATH"];
+if ((MATTER_ACCESS_PATH === undefined) !== (MATTER_ACCESS_DIRECTORY_PATH === undefined)) {
+  throw new Error(
+    "MATTER_ACCESS_PATH and MATTER_ACCESS_DIRECTORY_PATH must be set together: " +
+      "a roster without a directory cannot be resolved, and a directory without a roster grants nothing",
+  );
+}
+const matterAccessBaseline =
+  MATTER_ACCESS_PATH !== undefined && MATTER_ACCESS_DIRECTORY_PATH !== undefined
+    ? compileMatterAccess(
+        loadMatterAccessDocument(MATTER_ACCESS_PATH),
+        loadMatterAccessDirectory(MATTER_ACCESS_DIRECTORY_PATH),
+      )
+    : null;
+
 const outboundFetch = withFetchTimeout(
   globalThis.fetch,
   resolveFetchTimeoutMs(process.env),
@@ -208,6 +237,29 @@ const log = (line: string): void => {
 // Start server
 // ---------------------------------------------------------------------------
 
+// The registry is built AFTER the receipt chain exists, because effective access
+// is the roster folded with receipted overrides. Recording the epoch on every
+// boot is what stops a stale runtime revoke outliving the firm's own edit.
+const matterAccessRegistry =
+  matterAccessBaseline !== null ? new MatterAccessRegistry(receipts, matterAccessBaseline) : null;
+if (matterAccessRegistry !== null && matterAccessBaseline !== null && !matterAccessRegistry.corrupt) {
+  matterAccessRegistry.recordDocumentEpoch(matterAccessBaseline.documentSha256);
+}
+const approverCheck =
+  matterAccessRegistry !== null && matterAccessBaseline !== null
+    ? (input: Parameters<typeof checkApprover>[2]) =>
+        checkApprover(matterAccessRegistry, matterAccessBaseline.enforcement, input)
+    : undefined;
+if (matterAccessBaseline !== null) {
+  // Surfaced at startup rather than left implicit in a config file: a firm that
+  // never flips the switch gets no enforcement, and should be told so out loud.
+  log(
+    `matter_access loaded enforcement=${matterAccessBaseline.enforcement} ` +
+      `principals=${Object.keys(matterAccessBaseline.matterAccess).length} ` +
+      `document=${matterAccessBaseline.documentSha256.slice(0, 12)}`,
+  );
+}
+
 const server = createGateServer({
   policy,
   receipts,
@@ -225,6 +277,7 @@ const server = createGateServer({
   policyDigest,
   tsaUrl,
   traceSink,
+  ...(approverCheck !== undefined ? { approverCheck } : {}),
   ...(startupAttestation.startupSecret !== undefined
     ? { startupSecret: startupAttestation.startupSecret }
     : {}),

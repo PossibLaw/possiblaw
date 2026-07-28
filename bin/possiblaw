@@ -1302,6 +1302,9 @@ start_gate_proxy_for() {
     local receipts_dir action_package_root action_package_dir gate_require_auth="false"
     local gate_instance_id gate_startup_secret attested_gate_instance_id gate_verified_listen_pid=""
     local authorization_path="" authorization_bindings_path="" authorization_agents_file="" authorization_http_code=""
+    # C3 — declared here so the non-production path leaves them empty rather
+    # than unbound; set -u would otherwise abort the launch.
+    local matter_access_template="" matter_access_directory_path="" members_tmp="" issues_tmp="" members_code="" issues_code=""
     local expected_gate_policy_digest=""
     GATE_START_ATTEMPTED="false"
     if [ -n "$(lsof -nP -iTCP:"$gate_port" -sTCP:LISTEN -t 2>/dev/null || true)" ]; then
@@ -1387,6 +1390,48 @@ start_gate_proxy_for() {
             return 1
         fi
         rm -f "$authorization_agents_file"
+
+        # C3 — matter access directory. The firm roster names people by email and
+        # matters by issue identifier; the gate resolves those to control-plane
+        # ids at startup and REFUSES to boot on any ambiguity. We only collect the
+        # inputs here; the resolution and its fail-closed rules live in
+        # gate-proxy/src/matter-access.ts so there is one implementation, not a
+        # bash one and a TypeScript one that drift.
+        #
+        # Best-effort by design: a firm that has not written a roster should not
+        # be blocked from launching. A roster that EXISTS but cannot be resolved
+        # does stop the gate — that check is in the gate, not here.
+        matter_access_template="$REPO_ROOT/companies/legal-operations/matter-access.json"
+        matter_access_directory_path=""
+        if [ -f "$matter_access_template" ]; then
+            matter_access_directory_path="${pid_file%.pid}.matter-directory.json"
+            members_tmp="$(mktemp -t possiblaw-members.XXXXXX.json)"
+            issues_tmp="$(mktemp -t possiblaw-issues.XXXXXX.json)"
+            members_code="$(curl --silent --max-time 10 ${AUTH_ARGS+"${AUTH_ARGS[@]}"} \
+                --output "$members_tmp" --write-out '%{http_code}' \
+                "$API_BASE/api/companies/$company_id/members" || echo 000)"
+            issues_code="$(curl --silent --max-time 20 ${AUTH_ARGS+"${AUTH_ARGS[@]}"} \
+                --output "$issues_tmp" --write-out '%{http_code}' \
+                "$API_BASE/api/companies/$company_id/issues" || echo 000)"
+            if [ "$members_code" = "200" ] && [ "$issues_code" = "200" ]; then
+                if python3 -c '
+import json, sys
+members = json.load(open(sys.argv[1]))
+issues = json.load(open(sys.argv[2]))
+json.dump({"members": members, "issues": issues}, open(sys.argv[3], "w"))
+' "$members_tmp" "$issues_tmp" "$matter_access_directory_path"; then
+                    chmod 600 "$matter_access_directory_path" 2>/dev/null || true
+                else
+                    warn "[$label] could not assemble the matter-access directory; starting without matter-access enforcement"
+                    matter_access_directory_path=""
+                fi
+            else
+                warn "[$label] could not fetch matter-access principals (members HTTP $members_code, issues HTTP $issues_code); starting without matter-access enforcement"
+                matter_access_directory_path=""
+            fi
+            rm -f "$members_tmp" "$issues_tmp"
+        fi
+
         expected_gate_policy_digest="$(cd "$REPO_ROOT/gate-proxy" && \
             node --import tsx --input-type=module -e \
             'import {loadPolicy} from "./src/policy.ts"; import {loadGateAuthorization} from "./src/authorization.ts"; import {canonicalJson, sha256hex} from "./src/receipts.ts"; const policy=loadPolicy(process.argv[1]); const authorization=loadGateAuthorization(process.argv[2], process.argv[3]); process.stdout.write(sha256hex(canonicalJson({policy,authorization})));' \
@@ -1429,6 +1474,8 @@ start_gate_proxy_for() {
             GATE_STARTUP_SECRET="$gate_startup_secret" \
             GATE_REQUIRE_AUTH="$gate_require_auth" \
             GATE_ACTION_PACKAGE_DIR="$action_package_dir" \
+            ${matter_access_directory_path:+MATTER_ACCESS_PATH="$matter_access_template"} \
+            ${matter_access_directory_path:+MATTER_ACCESS_DIRECTORY_PATH="$matter_access_directory_path"} \
             pnpm -C "$REPO_ROOT/gate-proxy" start
     ) >>"$log_file" 2>&1 </dev/null &
     local gate_proxy_pid="$!"
