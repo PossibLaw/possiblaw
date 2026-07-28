@@ -74,6 +74,24 @@ const SAFE_MATTER_IDENTIFIER_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 export interface MatterAccessDocument {
   version: 1;
   default: "deny";
+  /**
+   * Whether the gate ACTS on this roster. Default "off".
+   *
+   * This is deliberately opt-in, and the reasoning is worth keeping. The
+   * document ships deny-all, so a strictly fail-closed reading would refuse
+   * every human-gated egress the moment this merges — turning a security
+   * feature into a firm-wide outage for anyone already running the gate.
+   *
+   * So enforcement is a switch the firm throws once its roster is complete.
+   * With "off" the registry still loads, still folds, and still receipts, but
+   * no decision changes; the firm can populate and inspect the roster before it
+   * bites. With "on" deny-by-default applies in full.
+   *
+   * The honest cost: a deployment that never flips this gets no enforcement.
+   * That is why it is surfaced at startup and in the Matter Trust Report rather
+   * than left implicit in a config file.
+   */
+  enforcement: "off" | "on";
   /** Lower-cased principal email → matter identifiers, as written by the firm. */
   matterAccess: Record<string, string[]>;
   /** Boundary → lower-cased principal emails. */
@@ -83,6 +101,7 @@ export interface MatterAccessDocument {
 export interface CompiledMatterAccess {
   version: 1;
   default: "deny";
+  enforcement: "off" | "on";
   /** Paperclip user id → issue uuids. */
   matterAccess: Record<string, string[]>;
   /** Boundary → Paperclip user ids. */
@@ -100,6 +119,7 @@ export interface CompiledMatterAccess {
 export const DEFAULT_MATTER_ACCESS: Readonly<MatterAccessDocument> = Object.freeze({
   version: 1,
   default: "deny",
+  enforcement: "off",
   matterAccess: {},
   decisionAuthority: {},
 }) as Readonly<MatterAccessDocument>;
@@ -123,6 +143,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 const ALLOWED_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set([
   "version",
   "default",
+  "enforcement",
   "matterAccess",
   "decisionAuthority",
 ]);
@@ -184,6 +205,11 @@ export function parseMatterAccessDocument(raw: unknown): MatterAccessDocument {
   if (raw["default"] !== "deny") {
     throw new MatterAccessError('matter access document requires default "deny"');
   }
+  const enforcementRaw = raw["enforcement"];
+  if (enforcementRaw !== undefined && enforcementRaw !== "off" && enforcementRaw !== "on") {
+    throw new MatterAccessError('enforcement must be exactly "off" or "on"');
+  }
+  const enforcement: "off" | "on" = enforcementRaw === "on" ? "on" : "off";
 
   const matterAccess: Record<string, string[]> = Object.create(null) as Record<string, string[]>;
   const matterAccessRaw = raw["matterAccess"];
@@ -240,7 +266,7 @@ export function parseMatterAccessDocument(raw: unknown): MatterAccessDocument {
     }
   }
 
-  return { version: 1, default: "deny", matterAccess, decisionAuthority };
+  return { version: 1, default: "deny", enforcement, matterAccess, decisionAuthority };
 }
 
 /**
@@ -325,6 +351,7 @@ export function compileMatterAccess(
   return {
     version: 1,
     default: "deny",
+    enforcement: doc.enforcement,
     matterAccess,
     decisionAuthority,
     // Hash the SOURCE document, not the compiled output: the epoch should change
@@ -333,6 +360,7 @@ export function compileMatterAccess(
       canonicalJson({
         version: doc.version,
         default: doc.default,
+        enforcement: doc.enforcement,
         matterAccess: doc.matterAccess,
         decisionAuthority: doc.decisionAuthority,
       }),

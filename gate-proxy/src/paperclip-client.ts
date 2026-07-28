@@ -32,6 +32,21 @@ export interface ApprovalRecord {
   id: string;
   status: "pending" | "approved" | "rejected" | "revision_requested";
   payload: Record<string, unknown>;
+  /**
+   * C3 — the human who decided, as recorded by paperclip
+   * (`approvals.decided_by_user_id`). Already present in the API response; this
+   * only surfaces it to our types.
+   *
+   * It is the ONE verified human principal in the egress path. The gate
+   * authenticates agents, `EgressMeta` has no user field, and `requestedBy` is
+   * agent-supplied — so an injected agent can claim any of those. This it
+   * cannot: paperclip authenticated the approver, whether they signed in or
+   * used a board key (board keys are foreign-keyed to a named user).
+   *
+   * Absent on an unauthenticated local instance, where paperclip records the
+   * placeholder `local-board` because nobody logged in.
+   */
+  decidedByUserId?: string;
 }
 
 /**

@@ -32,13 +32,35 @@ function writeDoc(body: unknown): string {
 }
 
 describe("matter access document — defaults", () => {
-  it("defaults to deny with nothing granted", () => {
+  it("defaults to deny with nothing granted and enforcement off", () => {
     assert.deepEqual(DEFAULT_MATTER_ACCESS, {
       version: 1,
       default: "deny",
+      enforcement: "off",
       matterAccess: {},
       decisionAuthority: {},
     });
+  });
+
+  it("defaults enforcement to off when the document omits it", () => {
+    assert.equal(parseMatterAccessDocument({ version: 1, default: "deny" }).enforcement, "off");
+  });
+
+  it("accepts an explicit enforcement value", () => {
+    assert.equal(parseMatterAccessDocument({ ...DOC, enforcement: "on" }).enforcement, "on");
+    assert.equal(parseMatterAccessDocument({ ...DOC, enforcement: "off" }).enforcement, "off");
+  });
+
+  it("rejects any other enforcement value rather than coercing it", () => {
+    for (const bad of ["true", true, "ON", "enabled", 1, null]) {
+      assert.throws(() => parseMatterAccessDocument({ ...DOC, enforcement: bad }), MatterAccessError);
+    }
+  });
+
+  it("changes the document sha when enforcement flips, so the epoch moves", () => {
+    const off = compileMatterAccess(parseMatterAccessDocument({ ...DOC, enforcement: "off" }), DIRECTORY);
+    const on = compileMatterAccess(parseMatterAccessDocument({ ...DOC, enforcement: "on" }), DIRECTORY);
+    assert.notEqual(off.documentSha256, on.documentSha256);
   });
 });
 
