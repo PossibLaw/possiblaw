@@ -58,9 +58,11 @@ print_plan() {
     "bash -n bin/eval" \
     "bash -n bin/verify" \
     "bash -n bin/test-possiblaw-production-safety.sh" \
+    "bash -n bin/smoke-trace" \
     "bash -n tests/verify.test.sh" \
     "python3 -m unittest discover -s config/tests -v" \
-    "deployments/firm-single-tenant/tests/run.sh"
+    "deployments/firm-single-tenant/tests/run.sh" \
+    "bin/smoke-trace (loopback gate boot + egress -> receipt/trace binding)"
   for helper in "${HELPERS[@]}"; do
     printf 'python3 %s --self-test\n' "$helper"
   done
@@ -196,10 +198,18 @@ run_check shell:possiblaw bash -n "$REPO_ROOT/bin/possiblaw"
 run_check shell:eval bash -n "$REPO_ROOT/bin/eval"
 run_check shell:verify bash -n "$REPO_ROOT/bin/verify"
 run_check shell:production-safety-test bash -n "$REPO_ROOT/bin/test-possiblaw-production-safety.sh"
+run_check shell:smoke-trace bash -n "$REPO_ROOT/bin/smoke-trace"
 run_check shell:verify-test bash -n "$REPO_ROOT/tests/verify.test.sh"
 run_check launcher:production-safety bash "$REPO_ROOT/bin/test-possiblaw-production-safety.sh"
 run_check config:v1 python3 -m unittest discover -s "$REPO_ROOT/config/tests" -v
 run_check deployment:firm-single-tenant "$REPO_ROOT/deployments/firm-single-tenant/tests/run.sh"
+
+# End-to-end: boots the gate on loopback and asserts an egress produces a
+# receipt bound to a trace. Credential-free — a stub model endpoint, no
+# Paperclip, no provider keys. This is the only check that exercises module
+# RESOLUTION in a separate process, which is how a dependency-linking bug
+# reaches production past a fully green unit suite.
+run_check smoke:trace "$REPO_ROOT/bin/smoke-trace"
 
 for helper in "${HELPERS[@]}"; do
   run_check "helper:$(basename "$helper" .py)" python3 "$REPO_ROOT/$helper" --self-test
