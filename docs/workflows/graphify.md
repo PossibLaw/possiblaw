@@ -1,45 +1,108 @@
-# Graphify Indexing (Optional)
+# Graphify Indexing (Tier 2 — Scale Mode)
 
-Graphify is an optional codebase-indexing tool. It reads source files, builds a queryable knowledge graph, and emits a short report (`GRAPH_REPORT.md`) plus a JSON graph.
+Graphify is the engine behind **Tier 2 Scale mode**. It reads your source files,
+builds a queryable knowledge graph, and writes a pre-summarized **wiki layer** plus
+a JSON graph. The whole point: once the index exists, **query the index instead of
+re-reading files**. On a large repo that is dramatically cheaper than re-reading
+source every session.
 
-Use Graphify when generated structure would cut orientation time on a repo too large to read top-to-bottom each session. For small or simple repos, the file-based artifact pipeline is enough — do not use Graphify as a default.
+(Reference: Graphify ~v0.1.8. PyPI package is `graphifyy` — the double-y is correct.
+The CLI entry point is `graphify`. Upstream: <https://github.com/safishamsi/graphify>.)
 
-Source of truth: live code and tests. Graphify output is advisory only.
+Source of truth is always live code and tests. Graphify output is **advisory** and
+must be verified against source before you implement anything.
 
 ## When to Use
 
-- Repo is large enough that "where does X live?" takes >15 minutes of searching.
-- Same repo is picked up across 3+ sessions and re-orientation is costly.
-- A non-developer user asks for "codebase indexing", "create a codebase graph", or similar.
+Turn this on with `/possiblaw-starter:scale` when:
 
-Skip when:
-- The repo is small or the task is narrowly scoped.
-- The user has not asked for persistent context.
-- Adding a generated artifact would create confusion over what is authoritative.
+- the repo is large (roughly 40–50+ source files) and "where does X live?" keeps
+  costing real search time, or
+- you're working inside an existing large codebase across several sessions.
 
-## Graphify Indexing Request Contract
+Skip it (stay in Tier 1) when:
 
-Use this contract when a non-developer user asks for "Graphify indexing", "codebase indexing", "create a codebase graph", "make a wiki graph", or similar wording.
+- the repo is small or the task is narrowly scoped,
+- the user hasn't asked for persistent context, or
+- a generated artifact would just add confusion over what's authoritative.
 
-The agent should do the setup and run the workflow. Do not hand the user a list of developer commands unless blocked by permissions or missing approvals.
+## Install
 
-Required steps:
+The agent does the setup — don't hand a non-developer a wall of commands unless
+you're blocked on permissions. **Ask for approval before installing anything.**
 
-1. Resolve the repo root with `git rev-parse --show-toplevel` and confirm it is not a temp directory.
-2. Read `.agent/WIKI.md` and this file.
-3. Update `.agent/WIKI.md` so `Enabled` is `ON` and `Wiki backend` is `graphify`.
-4. Set `Graphify output root` to `graphify-out/` unless the user requested another path.
-5. Create or update `.graphifyignore` before running Graphify.
-6. Add `graphify-out/` to `.gitignore` unless the user explicitly wants generated graph output committed.
-7. Check whether the `graphify` command is available.
-8. If Graphify is missing, ask for approval before installing the official package. The upstream PyPI package is `graphifyy` (the double-y is correct — the CLI entry point is `graphify`). Canonical install: `pip install graphifyy`. Upstream project: <https://github.com/safishamsi/graphify>.
-9. Run a one-time graph build for the repo root, normally `graphify .`.
-10. If the user asked for Obsidian output, use Graphify's Obsidian option and write to the configured vault path. Otherwise keep output in `graphify-out/`.
-11. Read `graphify-out/GRAPH_REPORT.md` enough to confirm the graph was created.
-12. Update `.agent/WIKI.md` Last Sync with timestamp, output root, and notes.
-13. Report the exact output paths and remind the user that generated graph claims must be verified against source before implementation.
+Install the CLI (package `graphifyy`, command `graphify`):
+
+```bash
+uv tool install graphifyy   # preferred
+# or
+pipx install graphifyy
+# or
+pip install graphifyy
+```
+
+## Build the Index
+
+From the repo root:
+
+```bash
+/graphify .
+```
+
+Run inside the IDE session: **no API key is needed**, and extraction uses
+tree-sitter **locally**, so your code never leaves the machine. An LLM is only
+involved for non-code content (e.g. summarizing prose), and the local run is free.
+
+For an incremental rebuild after changes — much cheaper than a full re-index:
+
+```bash
+/graphify --update
+```
+
+## Query Instead of Re-Reading
+
+Once the index exists, ask it questions rather than re-opening source files:
+
+```bash
+/graphify query "how does authentication work"
+/graphify path "LoginForm" "Database"     # how two things connect
+/graphify explain "PaymentService"          # explain a symbol or module
+```
+
+**Consult the wiki layer first.** `graphify-out/wiki/index.md` is a pre-summarized,
+human-readable memory tier — cheaper to read than the raw graph. Start there for
+orientation, then drill into focused queries, and only open `graphify-out/graph.json`
+for targeted lookups. Do not paste the whole `graph.json` into a prompt.
+
+## Optional MCP Server
+
+If the user approves, expose the graph to tools over MCP:
+
+```bash
+/graphify ./ --mcp
+```
+
+Tools exposed: `query_graph`, `get_node`, `get_neighbors`, `shortest_path`,
+`god_nodes`.
+
+## Expected Local Output
+
+```text
+graphify-out/
+├── wiki/
+│   └── index.md        # pre-summarized memory tier — read this first
+├── graph.json          # the queryable graph
+├── graph.html          # optional visual
+└── cache/
+```
+
+Record the mode after a successful build: set `Tier: 2 (Scale)` and
+`Scale mode: ON` in `.agent/HANDOFF.md`, and `Wiki backend: graphify` in
+`.agent/WIKI.md` (with the output root and a Last Sync timestamp).
 
 ## Baseline `.graphifyignore`
+
+Create or update this before running Graphify so secrets and noise stay out:
 
 ```gitignore
 .env
@@ -60,38 +123,27 @@ graphify-out/
 .agent/
 ```
 
-## Do Not Install Without Explicit User Approval
+Add `graphify-out/` to `.gitignore` unless the user explicitly wants generated
+graph output committed.
 
-- always-on assistant hooks
-- git hooks
-- watch mode
-- MCP server
-- Neo4j export or push
-- Obsidian sync
+## Contract
 
-## Expected Local Output
-
-```text
-graphify-out/
-├── graph.html
-├── GRAPH_REPORT.md
-├── graph.json
-└── cache/
-```
+- **Ask before installing** the CLI or any optional piece.
+- **Output is advisory.** Verify any graph- or wiki-derived claim against the
+  source before implementing. If they disagree, the source code wins; treat the
+  graph as stale and regenerate or ignore it.
+- **Do not install always-on tooling without explicit user approval** — that
+  includes watch mode, git hooks, the MCP server, Neo4j export/push, and Obsidian
+  sync.
 
 ## Final Response Shape (Non-Technical)
 
 - state whether indexing completed
-- give the output folder
-- identify the report file to open first
+- give the output folder and name the wiki index to open first
+  (`graphify-out/wiki/index.md`)
 - list any skipped optional integrations
 - list any blocker and the exact approval or missing dependency needed
 
-## Using the Output
-
-- Read `GRAPH_REPORT.md` for high-level structure.
-- Use focused graph queries for specific questions; do not paste raw `graph.json` wholesale into prompts.
-- Verify any graph-derived claim against source code before using it in implementation.
-- If graph output contradicts the code, treat the graph as stale and either regenerate or ignore it.
-
-For "review the entire repo" requests: start with the wiki index and map pages first, then verify critical claims in code. See `docs/workflows/wiki.md` for wiki-mode trust order.
+For "review the entire repo" requests: start with the wiki index, then verify
+critical claims in code. See `docs/workflows/wiki.md` for wiki-mode trust order and
+`docs/workflows/token-management.md` for why querying the index beats re-reading.

@@ -8,9 +8,9 @@ Short, beginner-friendly definitions of terms used across this starter pack's in
 - **Artifact**: A Markdown file under `.agent/` or `.claude/` that the agent writes and reads to stay coherent across sessions. Examples: `PLAN.md`, `TEST.md`, `HANDOFF.md`. Artifacts are the pack's working memory.
 - **Contract**: A typed agreement between files in the pack — e.g., `TEST.md` must reference eval IDs from `PLAN.md`. See `docs/workflows/contracts.md`.
 - **Role**: A named job (e.g., `reviewer`, `qa-validator`). Each role has a canonical contract under `docs/roles/` plus thin Claude/Codex wrappers.
-- **Handoff**: A short note left by one agent session for the next one — decisions, open questions, next actions. Lives in `.agent/HANDOFF.md`.
-- **Continuity checkpoint**: A forced save point (update `PLAN`, `HANDOFF`, append `history`) at sprint close, before a git cycle, before ending a session, or when context fills up.
-- **Progress file**: Local-only continuity files (`.claude/history.md`, `.agent/PLAN.md`, etc.) that should not be committed.
+- **Handoff / continuity file**: The single continuity file `.agent/HANDOFF.md`. The **Current Baton** on top holds decisions, open questions, and next actions for the next session; below a STOP marker is a newest-first dated **Session Timeline**. (This single file replaces the older separate handoff and session-history files.)
+- **Continuity checkpoint**: A forced save point (update `.agent/PLAN.md` and `.agent/HANDOFF.md` — Current Baton plus a prepended Session Timeline entry) at sprint close, before a git cycle, before ending a session, or when context fills up.
+- **Progress file**: Local-only continuity files (`.agent/PLAN.md`, `.agent/HANDOFF.md`, etc.) that should not be committed.
 
 ## Testing and evaluation terms
 
@@ -30,10 +30,13 @@ Short, beginner-friendly definitions of terms used across this starter pack's in
 
 ## Pack-specific terms
 
-- **MemPalace**: Optional, local-only memory backend that ingests completed artifacts for later semantic retrieval. Default OFF. Local files always remain source of truth.
-- **Graphify**: Optional code-indexing tool that builds a queryable knowledge graph of the repo. Output is advisory. See `docs/workflows/graphify.md`.
-- **Wiki mode**: Optional persistent-context layer (manual Markdown or Graphify-generated). Accelerates orientation; does not replace source.
-- **Learning Mode**: A per-task switch (`OFF` / `CAPTURE` / `APPLY`) that controls whether the agent writes to `.agent/LEARNINGS.md`. Default OFF.
+- **Tier 1 / Tier 2**: The two tiers of the harness. **Tier 1 (Starter, default)** is the everyday workflow most projects need — `PLAN → TEST → REVIEW → HANDOFF`, single-file continuity, guardrails, the simplicity ladder, and token discipline. **Tier 2 (Scale, opt-in)** adds Graphify indexing, wiki orientation, and deeper review. Tier 2 only adds to Tier 1; it never removes its rules.
+- **Scale mode**: Tier 2, default OFF. Turn it on with `/possiblaw-starter:scale` when the codebase grows large (roughly 40–50+ source files) or you start working in an existing large repo. It builds a queryable Graphify index and configures `.agent/WIKI.md` so you query the index instead of re-reading files.
+- **Simplicity ladder**: An always-on Tier-1 rule: after understanding the problem, prefer the simplest option that works, in order — skip unneeded work → reuse existing code → standard library → native platform feature → existing dependency → small one-liner → only then a minimal new solution. See the `applying-simplicity-ladder` skill.
+- **Token management**: Keeping the prompt/context small and the prompt cache warm so the harness stays fast and cheap — read only the top of `.agent/HANDOFF.md` on resume, load files on demand, keep stable blocks stable. See `docs/workflows/token-management.md`.
+- **Graphify**: Optional Tier-2 code-indexing tool that builds a queryable knowledge graph of the repo. Output is advisory. See `docs/workflows/graphify.md`.
+- **Wiki mode**: Optional Tier-2 persistent-context layer (manual Markdown or Graphify-generated). Accelerates orientation; does not replace source.
+- **Learning Mode**: A per-task switch (`OFF` / `CAPTURE` / `APPLY`) that controls whether the agent writes to `.agent/LEARNINGS.md`. Default OFF. Validation-gated: a lesson is promoted only after it recurs at least twice or you confirm it.
 - **UNCONFIRMED**: Marker used wherever a value is genuinely unknown. The agent must ask or verify rather than invent. Never ship code with `UNCONFIRMED` values silently replaced.
 - **BLOCKED**: Return value meaning "I can't safely proceed; here's why and what I need." Used instead of guessing or taking a destructive action.
 

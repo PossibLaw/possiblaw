@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Advisory continuity-checkpoint printer (single-file continuity model).
+# It prints the PLAN/HANDOFF updates you should make. It does NOT write state
+# and does NOT call any backend.
+
 usage() {
   cat <<'USAGE'
-Flag a continuity checkpoint for a target repository.
+Flag a continuity checkpoint for a target repository (advisory only).
 
 Usage:
-  run-checkpoint.sh [target-repo] [--reason <reason>] [--skip-mempalace]
+  run-checkpoint.sh [target-repo] [--reason <reason>]
 
 Reasons:
   sprint-closeout
@@ -14,6 +18,8 @@ Reasons:
   context-50
   task-end
   handoff
+
+This helper only prints the required updates. It never writes state for you.
 USAGE
 }
 
@@ -24,7 +30,6 @@ if [[ $# -gt 0 && "$1" != -* ]]; then
 fi
 
 REASON="task-end"
-SKIP_MEMPALACE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -36,10 +41,6 @@ while [[ $# -gt 0 ]]; do
       fi
       REASON="$2"
       shift 2
-      ;;
-    --skip-mempalace)
-      SKIP_MEMPALACE=1
-      shift
       ;;
     -h|--help)
       usage
@@ -66,11 +67,9 @@ fi
 
 PLAN_FILE="$REPO_ROOT/.agent/PLAN.md"
 HANDOFF_FILE="$REPO_ROOT/.agent/HANDOFF.md"
-HISTORY_FILE="$REPO_ROOT/.claude/history.md"
 LEARNINGS_FILE="$REPO_ROOT/.agent/LEARNINGS.md"
-MEMPALACE_HELPER="$REPO_ROOT/.agent/integrations/mempalace-ingest.sh"
 
-for required in "$PLAN_FILE" "$HANDOFF_FILE" "$HISTORY_FILE"; do
+for required in "$PLAN_FILE" "$HANDOFF_FILE"; do
   if [[ ! -f "$required" ]]; then
     echo "BLOCKED: missing required checkpoint file: $required"
     exit 1
@@ -88,15 +87,16 @@ fi
 
 echo "CHECKPOINT: $REASON"
 echo "Repo root: $REPO_ROOT"
-echo "Required updates:"
-echo "  1. Update $PLAN_FILE"
-echo "  2. Update $HANDOFF_FILE"
-echo "  3. Append $HISTORY_FILE"
+echo "Required updates (make these yourself; this helper does not write state):"
+echo "  1. Update $PLAN_FILE (milestone/sprint status, assumptions, task checklist)"
+echo "  2. Update $HANDOFF_FILE:"
+echo "       - refresh the Current Baton at the top (decisions, open questions, next actions)"
+echo "       - prepend a short dated entry to the Session Timeline below the STOP marker"
 
 if [[ "$LEARNING_MODE" == "CAPTURE" || "$LEARNING_MODE" == "APPLY" ]]; then
-  echo "  4. Append $LEARNINGS_FILE (Learning Mode: $LEARNING_MODE)"
+  echo "  3. Append $LEARNINGS_FILE (Learning Mode: $LEARNING_MODE; promote only gated lessons)"
 else
-  echo "  4. Skip learnings (Learning Mode: $LEARNING_MODE)"
+  echo "  3. Skip learnings (Learning Mode: $LEARNING_MODE)"
 fi
 
 if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -105,11 +105,4 @@ if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git -C "$REPO_ROOT" diff --stat || true
 fi
 
-if [[ "$SKIP_MEMPALACE" -eq 0 && -x "$MEMPALACE_HELPER" ]]; then
-  echo "Running MemPalace ingest helper: $MEMPALACE_HELPER"
-  "$MEMPALACE_HELPER" "$REPO_ROOT" "$REASON"
-else
-  echo "MemPalace: skipped (no local helper or explicitly skipped)"
-fi
-
-echo "DONE: checkpoint flagged for $REPO_ROOT"
+echo "DONE: checkpoint flagged for $REPO_ROOT (advisory only — no state written)"

@@ -73,7 +73,7 @@ When new source material is added:
 2. Update relevant wiki pages with summaries and cross-links.
 3. Tag uncertain claims as `UNCONFIRMED`.
 4. Record exact file path and timestamp for each new claim.
-5. Update `.agent/HANDOFF.md` and `.claude/history.md` with wiki sync details.
+5. Update `.agent/HANDOFF.md` (Wiki Sync section) with wiki sync details.
 
 ## Required Page Metadata
 

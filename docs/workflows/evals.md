@@ -11,7 +11,7 @@ Repeat this loop for every user-visible feature or behavior change:
 4. **Implement the smallest change** to make it pass.
 5. **Run checks and record receipts** in `.agent/TEST.md`.
 6. **Review for regressions and security** using `.agent/REVIEW.md` when applicable.
-7. **Handoff** with clear next steps in `.agent/HANDOFF.md` (or `.claude/history.md`).
+7. **Handoff** with clear next steps in `.agent/HANDOFF.md`.
 
 For stage linkage and required artifact headers, use `docs/workflows/contracts.md`.
 
