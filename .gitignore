@@ -60,3 +60,6 @@ layer/evals/results/*.md
 /businesses/*
 !/businesses/_template/
 !/businesses/_template/**
+
+# Timestamped instruction-file backups (redundant with git history)
+*.bak.[0-9]*
