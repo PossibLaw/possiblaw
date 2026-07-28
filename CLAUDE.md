@@ -11,7 +11,8 @@ PossibLaw is a proof-of-concept layer on the paperclip control plane that demons
    - Planning request → `.agent/PLAN.md`
    - Test request → `.agent/TEST.md`
    - Review request → `.agent/REVIEW.md`
-   - Handoff, resume, or parallel worktree → `.agent/HANDOFF.md` or `.claude/history.md`
+   - Handoff, resume, or parallel worktree → `.agent/HANDOFF.md` or `.claude/history.md` (both local-only; ABSENT in a fresh clone — fall through to the committed handoff below)
+   - Trace spine, audit/receipt work, or "what's next on M4/M5/C3" → `docs/builds/trace-spine-next-steps.md` (committed; the durable handoff, current as of PR #31)
    - Contract workflow, artifact schema, or stage handoff questions → `docs/workflows/contracts.md`
    - Role workflow, routing, or specialization questions → `docs/roles/README.md` plus the relevant role file in `docs/roles/`
    - Matter intake, delegation, or "how a matter flows / who assigns" questions → `docs/workflows/matter-intake.md`
