@@ -1,0 +1,74 @@
+# .gitleaks.toml — secret scanning configuration for PossibLaw.
+#
+# Runs in CI on every pull request and push to main (.github/workflows/
+# secret-scan.yml), and is usable locally with `gitleaks dir .`.
+#
+# This is the SECOND layer. GitHub secret scanning with push protection is the
+# first and blocks a recognised credential before it reaches the remote at all.
+# gitleaks catches what GitHub's partner-pattern list does not — notably this
+# repo's own `pcp_`-prefixed board tokens and generic high-entropy assignments.
+#
+# Tuning principle: a noisy scanner is an ignored scanner. Every allowlist entry
+# below is justified in a comment. Do not add a bare path exclusion to silence a
+# finding — confirm it is a false positive first, and say why here.
+
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Repo-specific rules — credential shapes GitHub's partner list does not know
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "possiblaw-board-token"
+description = "Paperclip board API token (pcp_board_… / pcp_…)"
+regex = '''pcp_(board_)?[A-Za-z0-9]{16,}'''
+keywords = ["pcp_"]
+
+[[rules]]
+id = "possiblaw-better-auth-secret"
+description = "BETTER_AUTH_SECRET assigned a literal value"
+regex = '''BETTER_AUTH_SECRET\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{16,}["']?'''
+keywords = ["BETTER_AUTH_SECRET"]
+
+# ---------------------------------------------------------------------------
+# Allowlist
+# ---------------------------------------------------------------------------
+
+[allowlist]
+description = "Vendored submodules, dependencies, and documented test sentinels"
+
+paths = [
+  # Pinned submodules. We never modify them (layer-not-fork), so their contents
+  # are upstream's problem, not ours. Scanning them produced 7 findings that we
+  # can neither fix nor accept responsibility for.
+  '''^paperclip/''',
+  '''^harvey-lab/''',
+  # Installed dependencies.
+  '''(^|/)node_modules/''',
+  '''(^|/)\.pnpm-store/''',
+  '''(^|/)\.venv/''',
+  # Local continuity files. Gitignored by contract (.gitignore:49-56) so they
+  # can never be committed; scanning them only produces local noise.
+  '''^\.agent/''',
+  '''^\.claude/history\.md$''',
+  # This file: the rule regexes above necessarily contain credential shapes.
+  '''^\.gitleaks\.toml$''',
+]
+
+# These match against the SECRET VALUE, not the surrounding line, and they are
+# deliberately ANCHORED. An unanchored substring like `example` would suppress a
+# genuine credential that merely happens to contain that word — verified during
+# setup: an unanchored `(?i)example` silently swallowed a planted AWS key
+# (`AKIA...EXAMPLE`). Keep these anchored, and re-run the canary test in the
+# workflow comment after any edit.
+regexes = [
+  # Documented fake sentinels used to PROVE a secret does not leak — the
+  # launcher e2e asserts `dummy-sentinel-123` is absent from every agent config
+  # after a run. Redacting it would defeat the test's readability.
+  '''^dummy-sentinel-[0-9]+$''',
+  # Placeholder conventions used across docs and examples.
+  '''^\$\{[A-Za-z_][A-Za-z0-9_]*\}$''',
+  '''^<[A-Za-z_][A-Za-z0-9_-]*>$''',
+  '''^(?i)(your-[a-z0-9-]+|placeholder|redacted|changeme|x{4,}|dummy|fake|test)$''',
+]
