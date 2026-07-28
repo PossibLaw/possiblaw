@@ -28,8 +28,14 @@ Verified end-to-end against a live gate process before merge: egress performed
 per-matter partition → the receipt's `traceSha256` equalled the record's
 `contentSha256` → `tools/verify-receipts.mjs` accepted the chain.
 
-Two units remain: **C3** and **M5**. M4 ships in this PR (see below for the
-one decision it deliberately left open).
+**UPDATE 2026-07-27 (later): C3 IS COMPLETE AND MERGED.** Shipped as PRs
+#37 (schema + fail-closed loader), #38 (the fold + enforcement at approval
+resume), #40 (startup wiring). Design spec: `docs/superpowers/specs/
+2026-07-27-c3-matter-access-registry-design.md`. Runbook:
+`docs/workflows/matter-access.md`. Live test procedure:
+`docs/operator-test-checklist.md` section I.
+
+**One unit remains: M5.** M4 is built but still unscheduled (below).
 
 ---
 
@@ -179,7 +185,30 @@ on disk; with the shim killed mid-run the agent still completes.
 
 ---
 
-## C3 — User→matter access registry
+## C3 — User→matter access registry — SHIPPED (PRs #37, #38, #40)
+
+**Everything below is retained as the original contract.** What was actually
+built differs in three ways worth knowing before touching it:
+
+1. **The principal is the APPROVER, not the requester.** The original sketch
+   assumed a human principal that does not exist: the gate authenticates agents,
+   `EgressMeta` has no user field, and C0's `requestedBy` was declared but set by
+   none of the four `performAndReceipt` call sites. The one verified human in the
+   path is `approvals.decidedByUserId`, which paperclip authenticates — an
+   injected agent cannot forge it. So C3 enforces at approval resume.
+2. **Two orthogonal authorities, and decision authority does NOT imply matter
+   entitlement.** An owner can approve a wire on a matter they cannot read
+   (the human gate shows only a hash). If seniority implied entitlement, C3
+   would hole the ethical walls `--add-wall` exists to build.
+3. **Enforcement is opt-in** (`enforcement: "on"` in `matter-access.json`),
+   because the roster ships deny-all and enforcing it unpopulated would refuse
+   every human-gated egress. This is the one place C3 is deliberately not
+   strictly fail-closed. A firm that never flips the switch gets no enforcement.
+
+Denial semantics also changed on operator ruling: **no fabricated answers.** A
+screened matter says it is screened; only a genuine not-found returns not-found.
+Hiding existence was rejected — a lawyer may legitimately need to know they are
+screened in order to raise it.
 
 **Size: largest by volume. Risk: moderate, with one sharp edge.**
 
@@ -244,11 +273,24 @@ access until its expiry and is itself receipted; a revoke after a grant wins.
 
 ## Suggested order
 
-**C3 → M5.** (M4 is done.) C3 delivers the most user-visible value. M5 last: it
-deserves the most care and benefits from the trace spine being fully exercised
-first.
+**M5 is what remains.** C3 and M4 are done; M5 deserves the most care and now
+benefits from a fully exercised trace spine.
 
-Before either, decide how M4's poller gets scheduled — it is built but inert.
+Still open, and unchanged: **nothing schedules M4's poller.** It is built and
+inert. A launcher hook, a cron, or on-demand from firm-overview are all
+defensible; the choice has operational consequences (poll frequency vs.
+control-plane load, and who owns the failure when a poll silently stops).
+
+**Also open — four staged benchmarks with no adapters.** `layer/evals/datasets/`
+holds ACORD, LEDGAR, MAUD and UNFAIR-ToS with fetch scripts and METADATA, but
+`eval-harness/src/benchmarks.ts` registers only `cuad` and `lab`, so
+`./bin/eval run --benchmark ledgar` cannot work. Each needs a loader in
+`eval-harness/src/adapters/` plus a `BENCHMARKS` entry, following `cuad.ts`.
+They are four different task shapes — classification (LEDGAR, UNFAIR-ToS),
+multiple-choice reading comprehension (MAUD), structured field extraction
+(ACORD) — so the grader, not the loader, is the real work. Licences differ:
+LEDGAR/MAUD/UNFAIR-ToS are CC BY 4.0; **ACORD is research/evaluation only and
+must not be redistributed or used commercially.**
 
 ---
 
@@ -272,8 +314,21 @@ deliberately and say so.
 
 ## Open questions for the operator
 
-1. **Retention default (90 days).** Set by an engineer, not by the firm. One
-   line in `gate-policy.yaml`.
+0. **RESOLVED 2026-07-27 — retention.** The operator specified: **5 years for a
+   law firm**; legal departments set it by their own policy (90 days to several
+   years); and a **litigation hold** must retain per-matter, indefinitely,
+   overriding the clock. None of that exists yet — today it is a single global
+   `retentionDays: 90`. Tracked as **R1**, spec section 9 of the C3 design doc.
+   The sharp edge: a hold that can be silently lifted is worse than none, so
+   placement *and* lifting must both be receipted with separation of duties.
+   Sequence R1 after C3 — it reuses the same receipted-override machinery.
+
+0b. **RESOLVED 2026-07-27 — email recipient allowlist. Not building it.**
+   Operator ruling: recipients are decided by the firm and the user. C3 checks
+   the *approver*, not the *recipient*, so "prove no client communication went
+   to a non-matter recipient" remains unprovable, and that is accepted.
+
+1. **Retention default (90 days).** Superseded by item 0 above.
 2. **Email recipient allowlist.** Dropped early as an email-triage concern,
    which was right on safety grounds. The verification lens later reframed it:
    the human gate is pre-action but *not deterministic*, so "prove no client
