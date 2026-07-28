@@ -4,7 +4,8 @@
 separate questions. It is checked in, human-readable, and authored by the firm —
 not by an agent.
 
-Ships **deny-all**. Nothing is granted until the firm writes a row.
+Ships **deny-all** and **enforcement off**. Nothing is granted until the firm
+writes a row, and nothing is *acted on* until the firm flips the switch.
 
 ## The two questions
 
@@ -39,6 +40,7 @@ authorize on a matter they are walled off from without ever seeing it.
 {
   "version": 1,
   "default": "deny",
+  "enforcement": "on",
   "matterAccess": {
     "jane.doe@firm.com": ["LEG-142", "LEG-207"]
   },
@@ -56,6 +58,23 @@ and audit this file. Both are resolved to ids when the launcher compiles it.
 
 Valid boundaries: `THIRD_PARTY_EGRESS`, `CONFIDENTIAL_TO_CLOUD`, `COURT_FILING`,
 `SIGNATURE`, `MONEY_MOVEMENT`, `IRREVERSIBLE_EXTERNAL_OP`.
+
+## `enforcement` — the switch, and why it is off by default
+
+`"off"` (the default) loads the roster, folds it, and receipts every override,
+but changes no decision. `"on"` applies deny-by-default in full.
+
+This is deliberately not strict fail-closed, and the reason should be visible
+rather than buried: the document ships deny-all, so enforcing it the moment the
+code merged would refuse **every** human-gated egress — turning a security
+feature into a firm-wide outage with deadlines attached. The switch lets a firm
+populate and inspect its roster before it bites.
+
+**The honest cost: a deployment that never flips this gets no enforcement.**
+That is why it is surfaced at startup rather than left implicit here.
+
+Turn it on once every lawyer who needs a matter is listed for it. Until then,
+run with `"off"` and read the receipts.
 
 ## Fail closed
 

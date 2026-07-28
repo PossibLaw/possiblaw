@@ -12,7 +12,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ReceiptChain } from "./receipts.ts";
-import { MatterAccessRegistry, MatterAccessRegistryError } from "./access-registry.ts";
+import {
+  APPROVER_DENIAL,
+  MatterAccessRegistry,
+  MatterAccessRegistryError,
+  checkApprover,
+} from "./access-registry.ts";
 import { compileMatterAccess, parseMatterAccessDocument } from "./matter-access.ts";
 import type { CompiledMatterAccess } from "./matter-access.ts";
 
@@ -285,5 +290,93 @@ describe("access registry — entitlement across contributing matters", () => {
   it("de-duplicates repeated matters without changing the answer", () => {
     const r = registry(tmpChain(), JANE_HAS_142);
     assert.equal(r.isEntitledToAll(JANE, [M142, M142, M142]), true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkApprover — the C3 PR 3 enforcement adapter
+// ---------------------------------------------------------------------------
+
+describe("checkApprover", () => {
+  const OWNER_MONEY_AND_142 = baseline(
+    { "owner@firm.com": ["LEG-142"] },
+    { MONEY_MOVEMENT: ["owner@firm.com"] },
+  );
+
+  function check(
+    enforcement: "off" | "on",
+    input: { approverUserId: string | undefined; boundary: Parameters<typeof checkApprover>[2]["boundary"]; matters: readonly string[] },
+    base = OWNER_MONEY_AND_142,
+  ) {
+    return checkApprover(registry(tmpChain(), base), enforcement, input);
+  }
+
+  it("passes everything when enforcement is off — the roster loads but does not bite", () => {
+    const v = check("off", { approverUserId: undefined, boundary: "MONEY_MOVEMENT", matters: [M207] });
+    assert.equal(v.ok, true);
+  });
+
+  it("allows an approver holding both authority and entitlement", () => {
+    const v = check("on", { approverUserId: OWNER, boundary: "MONEY_MOVEMENT", matters: [M142] });
+    assert.equal(v.ok, true);
+  });
+
+  it("denies when no authenticated human is named", () => {
+    const v = check("on", { approverUserId: undefined, boundary: "MONEY_MOVEMENT", matters: [M142] });
+    assert.equal(v.ok, false);
+    assert.equal(v.code, APPROVER_DENIAL.noHuman);
+  });
+
+  it("denies the local-board placeholder — it is a machine, not a person", () => {
+    for (const placeholder of ["local-board", "board", ""]) {
+      const v = check("on", { approverUserId: placeholder, boundary: "MONEY_MOVEMENT", matters: [M142] });
+      assert.equal(v.ok, false);
+      assert.equal(v.code, APPROVER_DENIAL.noHuman);
+    }
+  });
+
+  it("denies an approver without decision authority for that boundary", () => {
+    const v = check("on", { approverUserId: OWNER, boundary: "COURT_FILING", matters: [M142] });
+    assert.equal(v.ok, false);
+    assert.equal(v.code, APPROVER_DENIAL.noAuthority);
+  });
+
+  it("denies when the approver is not entitled to a CONTRIBUTING matter", () => {
+    // Owner holds the boundary and the filed matter, but LEG-207 contributed
+    // context and they are not on it. This is the contamination case.
+    const v = check("on", { approverUserId: OWNER, boundary: "MONEY_MOVEMENT", matters: [M142, M207] });
+    assert.equal(v.ok, false);
+    assert.equal(v.code, APPROVER_DENIAL.notEntitled);
+  });
+
+  it("never puts matter content in the denial reason", () => {
+    const v = check("on", { approverUserId: OWNER, boundary: "MONEY_MOVEMENT", matters: [M142, M207] });
+    assert.equal(v.reason?.includes("jane.doe@firm.com"), false);
+    assert.equal(v.reason?.includes("LEG-"), false);
+  });
+
+  it("denies over a corrupt chain even with enforcement on and a valid approver", () => {
+    const chain = tmpChain();
+    registry(chain, OWNER_MONEY_AND_142).revoke({ subject: JANE, matter: M142, actor: ADMIN });
+    const lines = fs.readFileSync(chain.path, "utf8").trimEnd().split("\n");
+    lines[0] = lines[0]!.replace(/"tool":"[^"]*"/, '"tool":"tampered"');
+    fs.writeFileSync(chain.path, `${lines.join("\n")}\n`);
+    const v = checkApprover(
+      new MatterAccessRegistry(new ReceiptChain(chain.path), OWNER_MONEY_AND_142),
+      "on",
+      { approverUserId: OWNER, boundary: "MONEY_MOVEMENT", matters: [M142] },
+    );
+    assert.equal(v.ok, false);
+  });
+
+  it("honours a receipted override: a grant makes an unentitled approver entitled", () => {
+    const chain = tmpChain();
+    registry(chain, OWNER_MONEY_AND_142).grant({
+      subject: OWNER, matter: M207, actor: ADMIN, expiresAt: futureIso(),
+    });
+    const v = checkApprover(registry(chain, OWNER_MONEY_AND_142), "on", {
+      approverUserId: OWNER, boundary: "MONEY_MOVEMENT", matters: [M142, M207],
+    });
+    assert.equal(v.ok, true);
   });
 });

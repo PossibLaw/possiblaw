@@ -260,3 +260,104 @@ describe("humanGate — re-entry still pending", () => {
     assert.equal(r.approvalId, "appr-still");
   });
 });
+
+// ---------------------------------------------------------------------------
+// C3 — approver check at resume
+// ---------------------------------------------------------------------------
+
+describe("humanGate — C3 approver check", () => {
+  const approvedRecord = (decidedByUserId?: string): ApprovalRecord => ({
+    id: "appr-1",
+    status: "approved",
+    payload: { payloadSha256: "sha-ok" },
+    ...(decidedByUserId !== undefined ? { decidedByUserId } : {}),
+  });
+
+  const reqWith = (meta: Record<string, unknown>): EgressRequest => ({
+    tool: "send_email",
+    payload: { body: "never passed to paperclip" },
+    meta: { approvalId: "appr-1", ...meta } as EgressRequest["meta"],
+  });
+
+  it("approves when no check is supplied — enforcement stays opt-in", async () => {
+    const { client } = makeClient({ getApprovalResult: approvedRecord("user-owner") });
+    const result = await humanGate(client, reqWith({ issueId: "m1" }), "MONEY_MOVEMENT", "sha-ok");
+    assert.equal(result.status, "approved");
+  });
+
+  it("passes the approver, boundary, and every matter to the check", async () => {
+    const { client } = makeClient({ getApprovalResult: approvedRecord("user-owner") });
+    let seen: unknown;
+    await humanGate(
+      client,
+      reqWith({ issueId: "m1", contextIssueIds: ["m2", "m3"] }),
+      "MONEY_MOVEMENT",
+      "sha-ok",
+      (input) => {
+        seen = input;
+        return { ok: true };
+      },
+    );
+    assert.deepEqual(seen, {
+      approverUserId: "user-owner",
+      boundary: "MONEY_MOVEMENT",
+      matters: ["m1", "m2", "m3"],
+    });
+  });
+
+  it("blocks when the check refuses, carrying the reason through", async () => {
+    const { client } = makeClient({ getApprovalResult: approvedRecord("user-owner") });
+    const result = await humanGate(
+      client,
+      reqWith({ issueId: "m1" }),
+      "MONEY_MOVEMENT",
+      "sha-ok",
+      () => ({ ok: false, reason: "approver_not_entitled_to_matter" }),
+    );
+    assert.equal(result.status, "blocked");
+    assert.equal((result as { reason: string }).reason, "approver_not_entitled_to_matter");
+  });
+
+  it("surfaces an undefined approver to the check rather than inventing one", async () => {
+    const { client } = makeClient({ getApprovalResult: approvedRecord() });
+    let seenApprover: unknown = "unset";
+    await humanGate(client, reqWith({ issueId: "m1" }), "SIGNATURE", "sha-ok", (input) => {
+      seenApprover = input.approverUserId;
+      return { ok: true };
+    });
+    assert.equal(seenApprover, undefined);
+  });
+
+  it("runs the bait-and-switch check BEFORE the approver check", async () => {
+    // A tampered payload must be blocked for tampering, not for entitlement —
+    // the more specific failure is the more useful one in an audit.
+    const { client } = makeClient({ getApprovalResult: approvedRecord("user-owner") });
+    let called = false;
+    const result = await humanGate(
+      client,
+      reqWith({ issueId: "m1" }),
+      "MONEY_MOVEMENT",
+      "sha-DIFFERENT",
+      () => {
+        called = true;
+        return { ok: true };
+      },
+    );
+    assert.equal(result.status, "blocked");
+    assert.match((result as { reason: string }).reason, /bait_and_switch_attempt/);
+    assert.equal(called, false);
+  });
+
+  it("does not run the check on a rejected approval", async () => {
+    const { client } = makeClient({
+      getApprovalResult: { id: "appr-1", status: "rejected", payload: {} },
+    });
+    let called = false;
+    const result = await humanGate(client, reqWith({}), "MONEY_MOVEMENT", "sha-ok", () => {
+      called = true;
+      return { ok: true };
+    });
+    assert.equal(result.status, "blocked");
+    assert.equal(called, false);
+  });
+});

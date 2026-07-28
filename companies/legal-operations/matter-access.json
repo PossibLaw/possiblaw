@@ -1,6 +1,7 @@
 {
   "version": 1,
   "default": "deny",
+  "enforcement": "off",
   "matterAccess": {},
   "decisionAuthority": {}
 }

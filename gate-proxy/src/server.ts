@@ -25,6 +25,7 @@ import { decide } from "./policy.ts";
 import { evaluateTierFloor } from "./gates/tier-floor.ts";
 import { anonymize, deanonymize } from "./anonymize.ts";
 import { humanGate } from "./gates/human.ts";
+import type { ApproverCheck } from "./gates/human.ts";
 import type { EgressMeta, EgressRequest } from "./types.ts";
 import type { CitationRegistry } from "./quality/citation-registry.ts";
 import type { AuthorityRegistry } from "./quality/authority-registry.ts";
@@ -115,6 +116,15 @@ export interface GateServerDeps {
    * trace-sink.ts for why this is the one non-fail-closed path in the gate.
    */
   traceSink?: TraceSink | null;
+  /**
+   * C3 — checks the human who approved a gated egress, at resume.
+   *
+   * Absent means no matter-access enforcement, which is the shipped default:
+   * the firm document starts deny-all, so enforcing unconditionally would
+   * refuse every human-gated egress rather than protect anything. The launcher
+   * supplies this once the firm sets `enforcement: "on"`.
+   */
+  approverCheck?: ApproverCheck | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -1492,7 +1502,7 @@ export function createGateServer(deps: GateServerDeps): http.Server {
           tool,
           req,
           res,
-          { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, authorityRegistry: deps.authorityRegistry, matterClassifications, log, maxUploadBytes, paperclipReadiness: deps.paperclipReadiness ?? null, instanceId, companyId, policyDigest, traceSink: deps.traceSink ?? null },
+          { policy, receipts, client, performers, localModelAvailable, citationRegistry: deps.citationRegistry, authorityRegistry: deps.authorityRegistry, matterClassifications, log, maxUploadBytes, paperclipReadiness: deps.paperclipReadiness ?? null, instanceId, companyId, policyDigest, traceSink: deps.traceSink ?? null, approverCheck: deps.approverCheck },
           authenticatedAgentId,
           authorization,
         );
@@ -1548,8 +1558,12 @@ async function handleEgress(
       | "tsaUrl"
       | "anchorTokenDir"
       | "requestTimestampImpl"
+      // C3 — supplied only once a firm turns matter-access enforcement on, so
+      // it stays optional rather than being demanded by Required<>.
+      | "approverCheck"
     >
-  >,
+  > &
+    Pick<GateServerDeps, "approverCheck">,
   authenticatedAgentId?: string,
   authorization: Readonly<GateAuthorizationPolicy> = DEFAULT_GATE_AUTHORIZATION,
 ): Promise<void> {
@@ -2288,7 +2302,7 @@ async function handleEgress(
         }
         // Bind the approval to humanGateSha256 (full payload), not the receipt
         // sha — see the humanGateSha256 computation above.
-        gateResult = await humanGate(client, egressReq, boundary!, humanGateSha256);
+        gateResult = await humanGate(client, egressReq, boundary!, humanGateSha256, deps.approverCheck);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log(`human_gate_error tool=${tool}`);

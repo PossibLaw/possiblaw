@@ -26,11 +26,33 @@ const RESUME_HINT =
   "(heartbeat reason: approval_approved). On wake, re-call the same egress endpoint with " +
   "the IDENTICAL payload plus meta.approvalId set to the approvalId returned here.";
 
+/**
+ * C3 — checks the human who actually approved, at resume.
+ *
+ * Deliberately a callback rather than the registry itself, so this module stays
+ * free of registry imports and testable without a receipt chain.
+ *
+ * Checked at RESUME rather than pre-flight because at approval-creation time the
+ * gate does not know who will approve. The cost is that a human can see
+ * "approved" in the dashboard while the action does not proceed — which is why
+ * the denial must be receipted and explained on the issue.
+ */
+export interface ApproverCheck {
+  (input: {
+    /** `approvals.decidedByUserId`; undefined when paperclip recorded no human. */
+    approverUserId: string | undefined;
+    boundary: BoundaryType;
+    /** The filed matter plus every matter that contributed context. */
+    matters: readonly string[];
+  }): { ok: true } | { ok: false; reason: string };
+}
+
 export async function humanGate(
   client: PaperclipClient,
   req: EgressRequest,
   boundary: BoundaryType,
   payloadSha256: string,
+  approverCheck?: ApproverCheck,
 ): Promise<HumanGateResult> {
   // ------------------------------------------------------------------
   // Re-entry path
@@ -49,6 +71,29 @@ export async function humanGate(
               `bait_and_switch_attempt: approval was granted for payload sha=${String(storedSha)} ` +
               `but re-entry presents sha=${payloadSha256}. These must be identical.`,
           };
+        }
+        // C3 — the approver must hold authority over this decision class AND be
+        // entitled to every matter involved. Entitlement covers the contributing
+        // matters too, not just the filed one: that is the contamination case
+        // C1/C2 expose, where work filed under a matter the approver holds draws
+        // on one they do not.
+        if (approverCheck) {
+          const matters = [
+            ...(req.meta.issueId !== undefined ? [req.meta.issueId] : []),
+            ...(req.meta.contextIssueIds ?? []),
+          ];
+          const verdict = approverCheck({
+            approverUserId: record.decidedByUserId,
+            boundary,
+            matters,
+          });
+          if (!verdict.ok) {
+            return {
+              status: "blocked",
+              approvalId: req.meta.approvalId,
+              reason: verdict.reason,
+            };
+          }
         }
         return { status: "approved", approvalId: req.meta.approvalId };
       }
