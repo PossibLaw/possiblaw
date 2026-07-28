@@ -17,7 +17,9 @@ you are starting from a clean, green baseline, not a half-landed branch.
 | #26 | A3 receipt meta bounds, M2 receipt↔trace binding | `cdc79c4` |
 | #27 | C1 context provenance, C2 provenance-derived floor | `39ae510` |
 | #28 | M3 static lane resolution | `ef140ef` |
-| #29 | Dev setup + this plan | (this PR) |
+| #29 | Dev setup + this plan | `8b94b4d` |
+| #30 | `bin/smoke-trace` end-to-end check, wired into `bin/verify` | (open) |
+| #31 | **M4** — run poller + durable cursor | (this PR) |
 
 **1005 tests across eight components, 0 failures on Node 24.18.0.**
 
@@ -26,7 +28,8 @@ Verified end-to-end against a live gate process before merge: egress performed
 per-matter partition → the receipt's `traceSha256` equalled the record's
 `contentSha256` → `tools/verify-receipts.mjs` accepted the chain.
 
-Three units remain: **M4**, **M5**, **C3**.
+Two units remain: **C3** and **M5**. M4 ships in this PR (see below for the
+one decision it deliberately left open).
 
 ---
 
@@ -60,12 +63,42 @@ are deliberately counterintuitive.
 
 ---
 
-## M4 — Paperclip run poller
+## M4 — Paperclip run poller — SHIPPED (this PR)
 
-**Size: smallest of the three. Risk: low.** Good first pickup.
+`trace-store/src/poller.ts` + `cursor.ts`, 22 tests. Reconstructs the run
+skeleton — agent assignment, timing, work products, delegation, cost — from
+what the control plane already exposes.
 
-Reconstructs the run skeleton — agent assignment, timing, work products,
-delegation, cost — by polling endpoints we already have clients for.
+**One decision deliberately left open: nothing schedules it.** A launcher hook,
+a cron, or on-demand from firm-overview are all defensible and the choice has
+operational consequences (poll frequency vs. control-plane load, and who owns
+the failure when a poll silently stops). That belongs to whoever wires it, not
+to the PR that built the mechanism.
+
+The design notes below are retained because they explain *why* it is shaped the
+way it is — particularly the cursor, which is the part most likely to be
+"simplified" into a bug.
+
+### What was built
+
+- Cursor is a **set of emitted source ids**, not a timestamp watermark. Clocks
+  move backwards, two items can share a second, and a paused matter can gain an
+  item *older* than one already emitted. There is a test for that case.
+- Cursor is written **after** the records it accounts for: a crash between the
+  two re-emits (visible duplicate), the reverse order drops records (invisible
+  gap). In an audit trail, prefer the duplicate.
+- Ids are namespaced by kind (`wp:` / `sub:`) so a work product and a sub-issue
+  sharing an id cannot collide.
+- Polled records carry a `work-product` contextRef and never the `connector`
+  ref the gate sink writes, so a reader can distinguish an action the gate
+  **witnessed at a control point** from one **reconstructed from the system
+  being audited**. Different evidential weight.
+- Cost is attributed **once per matter**, not divided across steps — the
+  control plane reports per-matter cost and splitting it would invent
+  precision.
+- A closed config returns before any network call.
+
+### Original contract (retained for reference)
 
 ### Existing surface
 `orchestration-eval/src/paperclip-client.ts` already wraps: `GET /api/issues/:id`,
@@ -211,9 +244,54 @@ access until its expiry and is itself receipted; a revoke after a grant wins.
 
 ## Suggested order
 
-**M4 → C3 → M5.** M4 is quick and makes traces materially richer. C3 delivers
-the most user-visible value. M5 last: it deserves the most care and benefits
-from the trace spine being fully exercised first.
+**C3 → M5.** (M4 is done.) C3 delivers the most user-visible value. M5 last: it
+deserves the most care and benefits from the trace spine being fully exercised
+first.
+
+Before either, decide how M4's poller gets scheduled — it is built but inert.
+
+---
+
+## Decisions already taken, and why
+
+Do not re-litigate these silently. If one turns out wrong, change it
+deliberately and say so.
+
+| Decision | Status |
+|---|---|
+| Two stores, not one — receipts hash-only and shareable, traces content-bearing and perimeter-bound | ACCEPTED |
+| Trace capture defaults OFF, fail-closed on every malformed value | ACCEPTED |
+| `hashes-only` proves which prompt ran without storing it | ACCEPTED |
+| `capture: full` requires ≥1 `contentRoles` — content nobody may read is liability with no benefit | ACCEPTED |
+| Content retention 90 days; record + hash retained forever | **DEFAULT, not a decision** — a firm-policy call nobody has made yet |
+| Tracing is fail-soft; every other control fails closed | ACCEPTED |
+| Role denial is redaction, not an error path | ACCEPTED |
+| Confidentiality is raise-only, including provenance contributors | ACCEPTED |
+| M5 adapter wrapper is in scope — customer-tenant deployments need prompt access | APPROVED by the operator |
+| NOT adopting a compile-to-logic + SAT solver for policy | ACCEPTED — determinism is the requirement; a lookup table over 6 boundaries × 4 decisions is more auditable than a solver |
+
+## Open questions for the operator
+
+1. **Retention default (90 days).** Set by an engineer, not by the firm. One
+   line in `gate-policy.yaml`.
+2. **Email recipient allowlist.** Dropped early as an email-triage concern,
+   which was right on safety grounds. The verification lens later reframed it:
+   the human gate is pre-action but *not deterministic*, so "prove no client
+   communication went to a non-matter recipient" is not currently provable.
+   Whether that reopens it is a firm call.
+3. **Scheduling for M4's poller** (above).
+
+## Where this work came from
+
+An evaluation of `github.com/cmtopbas/Sentinel-Gateway`, requested to see
+whether anything was worth copying. **Verdict: copy nothing** — a two-file
+prototype with no tests, tokens not bound to the calling agent, bypassable
+path/URL/SQL filters, and a global cross-matter memory readable by every agent,
+which is hostile to ethical walls by design.
+
+Its value was diagnostic. It made visible that we had excellent records of
+*what left the building* and almost none of *how the decision was reached*.
+Everything in this document followed from that observation.
 
 ## Working notes
 
@@ -226,4 +304,26 @@ from the trace spine being fully exercised first.
   install list. A runtime contract check fails the build otherwise — this cost
   a full red round across all six PRs when trace-store was added without it.
 - Local continuity lives in `.agent/PLAN.md` and `.agent/HANDOFF.md`; they do
-  not travel with a fresh clone, which is why this file is committed.
+  not travel with a fresh clone, which is why this file is committed. If you
+  learn something durable, put it HERE, not only there.
+
+### Traps that have already cost time
+
+- **`pnpm file:` snapshots a directory dependency** at install time. Caused
+  `ERR_MODULE_NOT_FOUND` at gate startup while every unit test passed. Use
+  `link:` for in-repo packages. `bin/smoke-trace` now catches this class.
+- **`Buffer.from(s, "hex").buffer` exposes Node's shared 8 KB pool**, not just
+  your bytes. Use `Uint8Array.from`.
+- **`pkill -f <pattern>` matches your own shell** when the pattern appears in
+  the command line, killing the process running the script. Kill by recorded
+  PID, or by port via `ss -lntp`.
+- **A failed `git cherry-pick` leaves HEAD unchanged**, so a following
+  `git commit --amend` silently rewrites the *previous* commit. Check
+  `git log` parentage rather than trusting the command sequence.
+- **`git commit -m` with unescaped quotes** in a long message half-executes it
+  as shell. Use `-F <file>`.
+- **Receipt `meta` is bounded** (4096 B total, 512 chars/string, 8 deep). A new
+  meta writer with an unbounded string makes `append()` throw — truncate at the
+  write site, see `boundedErrorMessage`.
+- **Unit tests did not catch either integration bug** in this work. Both needed
+  a real process. Run `bin/smoke-trace` before claiming done.
