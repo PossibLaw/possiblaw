@@ -84,6 +84,8 @@ Choose the path that matches the operator and the data involved:
 
 Never publish Paperclip's port `3100` directly to the internet. The reference Compose file binds it to host loopback. Use a firm VPN or SSH tunnel for bootstrap, then a reviewed TLS reverse proxy/private ingress for users.
 
+> **Step-by-step from a clean machine:** [docs/getting-to-a-working-instance.md](docs/getting-to-a-working-instance.md) — prerequisites, launch, matter-access setup, and the same three host paths, as commands to type. The sections below cover architecture and security posture; that document covers sequence.
+
 ### Local: clone → launch → see the receipt
 
 Use this path for a single operator on a trusted workstation. Install Git, Python 3, `curl`, Node `24.18.0`, and pnpm `9.15.4`, then verify the versions:
@@ -396,6 +398,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and [SECURI
 ---
 
 ## Evals
+
+> Which benchmarks we run, which we cannot, and what each actually measures about PossibLaw rather than about the model: [docs/benchmarks.md](docs/benchmarks.md). Short version — CUAD and Harvey LAB run today; LEDGAR, UNFAIR-ToS, MAUD and ACORD are staged without adapters; LegalBench needs a curated subset with per-task licence checks; **PrinzBench cannot be self-run** because its questions are permanently held out.
+
 
 The Paperclip-native eval convention lives at [companies/legal-operations/evals/README.md](companies/legal-operations/evals/README.md): eval cases run as Paperclip issues, a judge agent scores results, and receipts land in the **Eval Results** project. Dataset source material (CUAD, MAUD, ACORD, UNFAIR-ToS, LEDGAR) remains under `layer/evals/`.
 
