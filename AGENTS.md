@@ -4,6 +4,10 @@ Repo Root (absolute path, required): /Users/salvadorcarranza/possiblaw
 
 Codex project instruction file for PossibLaw — a proof-of-concept layer on the paperclip control plane demonstrating how to operate a legal business with AI (practice + marketing + finance + admin + ops). Public, Apache 2.0, layer-not-fork; paperclip is wired as a pinned git submodule and never modified.
 
+## Two Tiers (How This Pack Grows With You)
+- **Tier 1 — Starter (default):** small-app workflow — `PLAN → TEST → REVIEW → HANDOFF`, single-file continuity, guardrails, and the simplicity ladder. This is everything most projects need.
+- **Tier 2 — Scale (gated as the codebase grows):** indexed retrieval (Graphify), wiki orientation, deeper review. When a repo gets large the harness will suggest Scale mode; you opt in. Tier 2 never removes Tier 1 rules — it adds to them.
+
 ## Startup Contract
 1. This file is the only startup instruction. Do not read other files unless triggered.
 2. Do the requested task immediately.
@@ -23,6 +27,25 @@ Codex project instruction file for PossibLaw — a proof-of-concept layer on the
 4. If more repo context is needed, read `.claude/history.md` next — not the whole repo.
 5. Global continuity stays in `~/.codex/AGENTS.md`. Repo continuity is optional and on-demand.
 6. When a sprint is wrapping, work is about to pause or ship, or context feels roughly half full, run a continuity checkpoint before losing state.
+
+## Token Discipline (Always On)
+Keep context small so the harness stays fast and cheap (full guide: `docs/workflows/token-management.md`):
+- On resume, read only the newest section of `.claude/history.md` or `.agent/HANDOFF.md` — stop at the STOP marker; never read the whole file.
+- Load the trigger files in the Startup Contract on demand — never read the whole repo or all docs at startup.
+- Keep stable blocks (this file, `.agent/PLAN.md`) stable within a session so the prompt cache keeps paying off; avoid churning them mid-task.
+- Apply the simplicity ladder (below) — less generated code is less to read, review, and maintain.
+- At Tier 2, query the Graphify index instead of re-reading source files.
+
+## Simplicity Ladder (Always On)
+After you understand the problem, prefer the simplest option that works, in this order:
+1. Does this even need to exist? (skip unneeded work)
+2. Reuse something already in the codebase.
+3. Use the language standard library.
+4. Use a native platform feature.
+5. Use an existing dependency already in the project.
+6. A small, well-understood one-liner.
+7. Only then write a minimal new solution.
+Analyze thoroughly; build minimally.
 
 ## Repo Root & State File Paths (Required)
 1. Before writing any state file (`.agent/PLAN.md`, `.agent/HANDOFF.md`, `.agent/WIKI.md`, `.claude/history.md`), resolve the repo root using `git rev-parse --show-toplevel` and confirm with `pwd`.
@@ -76,6 +99,7 @@ When resuming prior work, read `${REPO_ROOT}/.claude/history.md` first.
   - `OFF`: no learning entries and no skill/plugin updates.
   - `CAPTURE`: append observations to `.agent/LEARNINGS.md` only.
   - `APPLY`: capture observations and propose specific skill/plugin/instruction updates.
+- **Promotion gate:** only add a lesson that has earned its place — it recurred at least twice, or the user explicitly confirmed it. One-off observations stay out. This keeps the learnings file small and trustworthy (it does not rot).
 - This is additive. Do not replace `.claude/history.md` or `.agent/HANDOFF.md`.
 
 ## Canonical Roles
@@ -115,7 +139,13 @@ When resuming prior work, read `${REPO_ROOT}/.claude/history.md` first.
 - Keep deterministic file-based fallback active at all times.
 - Do not require plugin/runtime-specific tooling for baseline operation.
 
-## Optional Wiki Mode (Default OFF)
+## Scale Mode (Tier 2, Default OFF)
+- For small projects, stay in Tier 1. When the codebase grows large (roughly 40–50+ source files) or you start working inside an existing large codebase, switch on Scale mode.
+- Scale mode builds a queryable index of the code (Graphify) so you query the index instead of re-reading files, and configures `.agent/WIKI.md`. See `docs/workflows/graphify.md`.
+- Record `Tier: 2 (Scale)` and `Scale mode: ON` in `.agent/HANDOFF.md` when enabled.
+- This repo is past the Tier-2 threshold by file count; Scale mode remains opt-in.
+
+## Optional Wiki Mode (Tier 2, Default OFF)
 - Configure vault and wiki paths in `.agent/WIKI.md` before first use.
 - Use `docs/workflows/wiki.md` for startup flow, metadata, and lint rules.
 - Wiki pages accelerate orientation; source code and tests remain authoritative.
