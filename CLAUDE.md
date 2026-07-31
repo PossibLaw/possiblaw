@@ -110,6 +110,7 @@ When resuming prior work, read `${REPO_ROOT}/.claude/history.md` first.
 `./bin/possiblaw --dry-run --variant codex --non-interactive --yes --mission "smoke test"` - Validate the import body against `/api/companies/import/preview` without writing (`--non-interactive` requires `--mission`).
 `./bin/possiblaw --list-variants` - Show available variants and their requirements.
 `./bin/smoke-trace` - End-to-end: boots the gate on loopback against a stub model endpoint, drives one egress, asserts the receipt/trace binding and that the standalone verifier accepts the chain. Credential-free; also runs inside `./bin/verify`.
+`./bin/conformance-paperclip` - Behavioral conformance gate for the pinned Paperclip runtime: boots a real Paperclip on a disposable port/data dir, builds two tenants over HTTP, and asserts tenant isolation, unauthenticated refusal, non-disclosure of tenant existence, and the `issuePrefix` derivation `--add-wall` depends on. Credential-free, ~3 min. `--negative-control` proves the assertions discriminate instead of passing vacuously; `--allow-pin-drift` evaluates a candidate commit before the gitlink moves. **This is the required gate for any Paperclip pin bump** — see "Paperclip Pin Cadence" below.
 `bash -n bin/possiblaw` - Static-check the launcher.
 `python3 bin/_possiblaw_variants.py --self-test && python3 bin/_possiblaw_inline_source.py --self-test && python3 bin/_possiblaw_eval_coverage.py --self-test && python3 bin/_possiblaw_vendor_skill.py --self-test && python3 bin/_possiblaw_walls.py --self-test` - Self-test the Python helpers.
 `pnpm -C paperclip install` - Install the paperclip submodule's dependencies (the only pnpm usage left).
@@ -122,6 +123,25 @@ When resuming prior work, read `${REPO_ROOT}/.claude/history.md` first.
 `git submodule update --init harvey-lab` - Initialize the pinned Harvey LAB dataset submodule (not auto-initialized by the launcher).
 
 Run the launcher dry-run + helper self-tests before handoff. Expected dry-run plan summary: 0 warnings, 0 errors.
+
+## Paperclip Pin Cadence
+Paperclip moves fast (~800 commits per 10 weeks). The pin is deliberate, never automatic — a submodule gitlink only advances when someone commits a new one, and a gitlink can only point at a commit in upstream's history (you cannot cherry-pick into a submodule; that would require a fork).
+
+- **Cadence:** review drift monthly, or when you need a specific upstream capability. `.github/workflows/paperclip-drift.yml` checks weekly and opens/updates a tracking issue past the threshold. Do not chase upstream HEAD daily — the gate exists so bumps are cheap *and* rare.
+- **Never bump without the gate.** Behavioral conformance is the merge condition, not a source diff.
+
+```bash
+git -C paperclip fetch origin
+git -C paperclip checkout <candidate-sha>
+pnpm -C paperclip install                      # deps/migrations move between pins
+bin/conformance-paperclip --allow-pin-drift    # must be green
+bin/conformance-paperclip --allow-pin-drift --negative-control  # must also be green
+./bin/verify                                   # full credential-free battery
+# green? adopt:   git add paperclip && git commit
+# red?   restore: git -C paperclip checkout <recorded-sha> && pnpm -C paperclip install
+```
+
+Do **not** reintroduce source-regex assertions against Paperclip internals. `bin/_possiblaw_paperclip_contract.py` used to carry them; its docstring records why they were retired (they false-alarmed on a refactor that strengthened the property, and would have passed silently had the property been removed).
 
 ## Stack
 - Runtime: paperclip (git submodule, pinned, never modified) owns UI, auth, orchestration, budgets, adapters, audit.

@@ -1,0 +1,122 @@
+name: paperclip-drift
+
+# Paperclip moves ~800 commits per 10 weeks. The pin is deliberate and never
+# automatic, so drift is invisible until something needs it. This checks weekly
+# and opens (or refreshes) a single tracking issue once drift crosses the
+# threshold, with the exact gated runbook. It never moves the pin itself —
+# adopting a candidate requires bin/conformance-paperclip to be green, and that
+# is a human decision.
+
+on:
+  schedule:
+    - cron: "0 13 * * 1" # Mondays 13:00 UTC
+  workflow_dispatch:
+    inputs:
+      threshold:
+        description: "Commits of drift before an issue is opened"
+        required: false
+        default: "150"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: paperclip-drift
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Measure drift
+        id: measure
+        run: |
+          set -euo pipefail
+          THRESHOLD="${{ github.event.inputs.threshold || '150' }}"
+          PINNED="$(git ls-tree HEAD paperclip | awk '{print $3}')"
+          [ -n "$PINNED" ] || { echo "::error::could not read the Paperclip gitlink"; exit 1; }
+
+          git -C paperclip fetch origin --quiet
+          CANDIDATE="$(git -C paperclip rev-parse origin/master)"
+          DRIFT="$(git -C paperclip rev-list --count "$PINNED..origin/master")"
+          PINNED_DATE="$(git -C paperclip show -s --format=%cs "$PINNED")"
+          CANDIDATE_DATE="$(git -C paperclip show -s --format=%cs "$CANDIDATE")"
+
+          {
+            echo "pinned=$PINNED"
+            echo "candidate=$CANDIDATE"
+            echo "drift=$DRIFT"
+            echo "threshold=$THRESHOLD"
+            echo "pinned_date=$PINNED_DATE"
+            echo "candidate_date=$CANDIDATE_DATE"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Pinned    $PINNED ($PINNED_DATE)"
+          echo "Candidate $CANDIDATE ($CANDIDATE_DATE)"
+          echo "Drift     $DRIFT commits (threshold $THRESHOLD)"
+
+      - name: Open or refresh the tracking issue
+        if: steps.measure.outputs.drift >= steps.measure.outputs.threshold
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED: ${{ steps.measure.outputs.pinned }}
+          CANDIDATE: ${{ steps.measure.outputs.candidate }}
+          DRIFT: ${{ steps.measure.outputs.drift }}
+          PINNED_DATE: ${{ steps.measure.outputs.pinned_date }}
+          CANDIDATE_DATE: ${{ steps.measure.outputs.candidate_date }}
+        run: |
+          set -euo pipefail
+          TITLE="Paperclip pin is $DRIFT commits behind upstream"
+
+          {
+            echo "Automated drift check. **This does not move the pin** — adopting a"
+            echo "candidate requires \`bin/conformance-paperclip\` to be green, which is a"
+            echo "human decision."
+            echo
+            echo "| | commit | date |"
+            echo "|---|---|---|"
+            echo "| Pinned | \`${PINNED:0:12}\` | $PINNED_DATE |"
+            echo "| Upstream \`master\` | \`${CANDIDATE:0:12}\` | $CANDIDATE_DATE |"
+            echo
+            echo "Drift: **$DRIFT commits**"
+            echo
+            echo "### Gated runbook"
+            echo
+            echo '```bash'
+            echo "git -C paperclip fetch origin"
+            echo "git -C paperclip checkout $CANDIDATE"
+            echo "pnpm -C paperclip install"
+            echo "bin/conformance-paperclip --allow-pin-drift"
+            echo "bin/conformance-paperclip --allow-pin-drift --negative-control"
+            echo "./bin/verify"
+            echo '```'
+            echo
+            echo "All green → \`git add paperclip && git commit\`."
+            echo
+            echo "Any red → \`git -C paperclip checkout $PINNED && pnpm -C paperclip install\`,"
+            echo "and investigate before retrying. A red conformance run means an isolation"
+            echo "property PossibLaw depends on changed behavior upstream."
+            echo
+            echo "Context: \`CLAUDE.md\` → \"Paperclip Pin Cadence\"."
+          } > /tmp/drift-body.md
+
+          EXISTING="$(gh issue list --state open --label paperclip-drift --limit 1 --json number --jq '.[0].number // empty')"
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --title "$TITLE" --body-file /tmp/drift-body.md
+            echo "Refreshed issue #$EXISTING"
+          else
+            gh issue create --title "$TITLE" --body-file /tmp/drift-body.md --label paperclip-drift
+          fi
+
+      - name: Report when within threshold
+        if: steps.measure.outputs.drift < steps.measure.outputs.threshold
+        run: |
+          echo "Drift ${{ steps.measure.outputs.drift }} is within the threshold ${{ steps.measure.outputs.threshold }}; no issue opened."
