@@ -355,8 +355,81 @@ info "issue-prefix derivation"
 # PossibLaw derives ethical-wall issue prefixes from company names; --add-wall
 # depends on this being the first three alphabetic characters, uppercased.
 ZETA_JSON="$(create_company "Zeta & Co")"
+ZETA_ID="$(printf '%s' "$ZETA_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("id",""))' 2>/dev/null)"
 ZETA_PREFIX="$(printf '%s' "$ZETA_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("issuePrefix",""))' 2>/dev/null)"
 expect_equal "PC-007 'Zeta & Co' derives issuePrefix ZET" "$ZETA_PREFIX" "ZET"
+
+# ---------------------------------------------------------------------------
+# C3 — matter-level read scope for AGENT actors
+#
+# C3 (matter access) enforces at the egress outlet: it stops content reaching an
+# unentitled human. The open question is whether Paperclip can stop an agent
+# READING a matter it is not entitled to, which is what a real conflicts screen
+# needs. These checks answer that in behavior rather than by reading source.
+#
+# The finding they pin: a `standard`-scope agent key reads ANY issue in its
+# company, so the outlet-not-source limitation is real. A `task_bridge`-scope
+# key does not — it is confined to issues assigned to its agent or created by
+# that key. That is the primitive a source-enforcing C3 would have to use.
+# ---------------------------------------------------------------------------
+
+info ""
+info "matter-level read scope for agents (C3)"
+
+json_field() { python3 -c 'import sys,json;print(json.load(sys.stdin).get("'"$1"'",""))' 2>/dev/null; }
+
+create_issue() {
+    body_of -b "$BOARD_JAR" -X POST "$BASE/api/companies/$1/issues" \
+        -H 'Content-Type: application/json' -H "Origin: $BASE" \
+        -d "{\"title\":\"$2\"}" | json_field id
+}
+
+mint_key() {
+    # $1 agent id, $2 key name, $3 scope JSON
+    body_of -b "$BOARD_JAR" -X POST "$BASE/api/agents/$1/keys" \
+        -H 'Content-Type: application/json' -H "Origin: $BASE" \
+        -d "{\"name\":\"$2\",\"scope\":$3}" | json_field token
+}
+
+AGENT_ID="$(body_of -b "$BOARD_JAR" -X POST "$BASE/api/companies/$ALPHA_ID/agents" \
+    -H 'Content-Type: application/json' -H "Origin: $BASE" \
+    -d '{"name":"Conformance Specialist","role":"general"}' | json_field id)"
+[ -n "$AGENT_ID" ] || setup_failure "could not create an agent in the board actor's company"
+
+ANCHOR_ISSUE="$(create_issue "$ALPHA_ID" "Anchor matter")"
+SCREENED_ISSUE="$(create_issue "$ALPHA_ID" "Screened matter - agent not assigned")"
+OTHER_TENANT_ISSUE="$(create_issue "$ZETA_ID" "Other tenant matter")"
+[ -n "$ANCHOR_ISSUE" ] && [ -n "$SCREENED_ISSUE" ] && [ -n "$OTHER_TENANT_ISSUE" ] \
+    || setup_failure "could not create the C3 fixture issues"
+
+STANDARD_KEY="$(mint_key "$AGENT_ID" "conformance-standard" '{"kind":"standard"}')"
+BRIDGE_KEY="$(mint_key "$AGENT_ID" "conformance-bridge" "{\"kind\":\"task_bridge\",\"parentIssueId\":\"$ANCHOR_ISSUE\"}")"
+[ -n "$STANDARD_KEY" ] && [ -n "$BRIDGE_KEY" ] || setup_failure "could not mint the C3 agent keys"
+
+# The negative control swaps the confined key for the unconfined one, which is
+# exactly the regression being guarded against: shipping standard-scope keys and
+# believing matters are screened.
+AGENT_SCOPED_KEY="$BRIDGE_KEY"
+if [ "$NEG" = "1" ]; then
+    AGENT_SCOPED_KEY="$STANDARD_KEY"
+    info "  NEGATIVE CONTROL: the confined agent key is now a standard-scope key"
+fi
+
+expect_status "C3-001 a standard-scope agent key reads an unassigned same-company matter (the known C3 gap)" \
+    "$(status_of -H "Authorization: Bearer $STANDARD_KEY" "$BASE/api/issues/$SCREENED_ISSUE")" 200
+
+expect_status "C3-002 a task_bridge-scope agent key is refused an unassigned same-company matter" \
+    "$(status_of -H "Authorization: Bearer $AGENT_SCOPED_KEY" "$BASE/api/issues/$SCREENED_ISSUE")" 403 isolation
+
+body_of -b "$BOARD_JAR" -X PATCH "$BASE/api/issues/$SCREENED_ISSUE" \
+    -H 'Content-Type: application/json' -H "Origin: $BASE" \
+    -d "{\"assigneeAgentId\":\"$AGENT_ID\"}" >/dev/null
+
+expect_status "C3-003 the same bridge key reads that matter once it is assigned" \
+    "$(status_of -H "Authorization: Bearer $BRIDGE_KEY" "$BASE/api/issues/$SCREENED_ISSUE")" 200
+
+expect_status "C3-004 an agent key cannot read another tenant's matter" \
+    "$(status_of -H "Authorization: Bearer $STANDARD_KEY" "$BASE/api/issues/$OTHER_TENANT_ISSUE")" 404
 
 # ---------------------------------------------------------------------------
 # Summary
