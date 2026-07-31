@@ -1,0 +1,384 @@
+#!/usr/bin/env bash
+#
+# conformance-paperclip — behavioral conformance suite for the pinned Paperclip
+# runtime. Boots a real Paperclip on loopback, builds two tenants, and asserts
+# the isolation properties PossibLaw's trust story actually depends on.
+#
+# WHY THIS EXISTS. bin/_possiblaw_paperclip_contract.py guards the same
+# properties by regex-matching Paperclip's *source*. That has both failure
+# modes, and both have now been observed:
+#
+#   1. FALSE ALARM. Upstream refactored
+#        const issue = await svc.getById(id);
+#        assertCompanyAccess(req, issue.companyId);
+#      into
+#        const issue = await getAccessibleResource(req, res, svc.getById(id), ...);
+#        if (!(await assertIssueReadAllowed(req, res, issue))) return;
+#      The security property was preserved and strengthened. The regex failed
+#      anyway, because it asserts syntax rather than behavior.
+#
+#   2. FALSE CONFIDENCE. The regex would pass unchanged if assertCompanyAccess
+#      were weakened internally, or if a new route shipped with no check at
+#      all. Nothing that greps a call site can see what a running server
+#      actually returns to an unentitled caller.
+#
+# This suite asserts observable behavior over HTTP, so it survives refactors
+# and catches real regressions. It is the gate that makes moving the submodule
+# pin a reviewable operation instead of a leap.
+#
+# Credential-free and self-contained: disposable data dir, disposable port,
+# no provider keys, no network egress, no browser.
+#
+# Usage:  bin/conformance-paperclip [--keep] [--port N] [--negative-control]
+#                                   [--allow-pin-drift]
+#           --keep              leave the work directory in place
+#           --port N            Paperclip port (default 3199; never 3100)
+#           --negative-control  prove the isolation assertions discriminate,
+#                               by handing the outsider the board actor's
+#                               session. PC-002/003/004/006 must all FAIL.
+#           --allow-pin-drift   skip PC-008 so a CANDIDATE checkout can be
+#                               evaluated before the pin is moved.
+#
+# Evaluating a candidate pin (the reason this suite exists):
+#
+#   git -C paperclip fetch origin
+#   git -C paperclip checkout <candidate-sha>
+#   pnpm -C paperclip install            # deps/migrations may have moved
+#   bin/conformance-paperclip --allow-pin-drift
+#   # green? adopt it:      git add paperclip && git commit
+#   # red?  restore:        git -C paperclip checkout <recorded-sha>
+#
+# Exit 0 all assertions held, 1 an assertion failed, 2 setup failed.
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PAPERCLIP_DIR="$REPO_ROOT/paperclip"
+
+KEEP=0
+NEG=0
+PORT=3199
+ALLOW_DRIFT=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --keep) KEEP=1; shift ;;
+        --negative-control) NEG=1; shift ;;
+        --allow-pin-drift) ALLOW_DRIFT=1; shift ;;
+        --port) PORT="${2:-}"; shift 2 ;;
+        -h|--help) sed -n '3,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) printf 'conformance-paperclip: unknown argument: %s\n' "$1" >&2; exit 2 ;;
+    esac
+done
+
+if [ "$PORT" = "3100" ]; then
+    printf 'conformance-paperclip: refusing port 3100 (the standing operator port)\n' >&2
+    exit 2
+fi
+
+WORK="$(mktemp -d)"
+BASE="http://127.0.0.1:$PORT"
+SERVER_PID=""
+FAILURES=0
+VACUOUS=0
+CHECKS=0
+
+BOARD_JAR="$WORK/board.jar"
+OUTSIDER_JAR="$WORK/outsider.jar"
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+
+pass() { CHECKS=$((CHECKS + 1)); printf '  ok    %s\n' "$1"; }
+fail() { CHECKS=$((CHECKS + 1)); FAILURES=$((FAILURES + 1)); printf '  FAIL  %s\n' "$1"; }
+info() { printf '%s\n' "$1"; }
+
+setup_failure() {
+    printf 'conformance-paperclip: setup failed: %s\n' "$1" >&2
+    if [ -f "$WORK/server.log" ]; then
+        printf -- '--- server log (tail) ---\n' >&2
+        tail -25 "$WORK/server.log" >&2
+    fi
+    exit 2
+}
+
+cleanup() {
+    # Job-control reaping prints "Terminated" to stderr as the subshell dies;
+    # silence the teardown so it never looks like a failure.
+    {
+        if [ -n "$SERVER_PID" ]; then
+            pkill -P "$SERVER_PID"
+            kill "$SERVER_PID"
+            wait "$SERVER_PID"
+        fi
+        # The onboard CLI spawns descendants that outlive their parent.
+        pkill -f "paperclipai onboard --data-dir $WORK"
+    } >/dev/null 2>&1
+    if [ "$KEEP" = "1" ]; then
+        printf '\nwork directory retained: %s\n' "$WORK"
+    else
+        rm -rf "$WORK"
+    fi
+}
+trap cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# Assertion helpers
+#
+# In negative-control mode the outsider is handed the board actor's session,
+# so every isolation assertion must fail. A check that still holds under that
+# substitution is not discriminating — it is vacuous, and reported as such.
+# ---------------------------------------------------------------------------
+
+# expect_status <label> <actual> <expected> [<isolation>]
+expect_status() {
+    local label="$1" actual="$2" expected="$3" isolation="${4:-no}"
+    if [ "$NEG" = "1" ] && [ "$isolation" = "isolation" ]; then
+        if [ "$actual" = "$expected" ]; then
+            CHECKS=$((CHECKS + 1)); VACUOUS=$((VACUOUS + 1))
+            printf '  VACUOUS  %s (still %s with the board session — not discriminating)\n' "$label" "$actual"
+        else
+            pass "$label discriminates (got $actual, not $expected)"
+        fi
+        return
+    fi
+    if [ "$actual" = "$expected" ]; then
+        pass "$label ($actual)"
+    else
+        fail "$label expected $expected, got $actual"
+    fi
+}
+
+# expect_absent <label> <haystack> <needle> [<isolation>]
+expect_absent() {
+    local label="$1" haystack="$2" needle="$3" isolation="${4:-no}"
+    if [ "$NEG" = "1" ] && [ "$isolation" = "isolation" ]; then
+        if printf '%s' "$haystack" | grep -q -- "$needle"; then
+            pass "$label discriminates (board session does see it)"
+        else
+            CHECKS=$((CHECKS + 1)); VACUOUS=$((VACUOUS + 1))
+            printf '  VACUOUS  %s (absent even with the board session — not discriminating)\n' "$label"
+        fi
+        return
+    fi
+    if printf '%s' "$haystack" | grep -q -- "$needle"; then
+        fail "$label leaked '$needle'"
+    else
+        pass "$label"
+    fi
+}
+
+# expect_present <label> <haystack> <needle>
+expect_present() {
+    local label="$1" haystack="$2" needle="$3"
+    if printf '%s' "$haystack" | grep -q -- "$needle"; then
+        pass "$label"
+    else
+        fail "$label expected '$needle' in response"
+    fi
+}
+
+# expect_equal <label> <actual> <expected>
+expect_equal() {
+    local label="$1" actual="$2" expected="$3"
+    if [ "$actual" = "$expected" ]; then
+        pass "$label ($actual)"
+    else
+        fail "$label expected '$expected', got '$actual'"
+    fi
+}
+
+status_of() { curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$@"; }
+body_of()   { curl -s --max-time 20 "$@"; }
+
+# ---------------------------------------------------------------------------
+# PC-008 — pin integrity (cheap, and everything below is meaningless without it)
+# ---------------------------------------------------------------------------
+
+info "conformance-paperclip: pinned Paperclip behavioral conformance"
+[ "$NEG" = "1" ] && info "MODE: negative control — isolation assertions must fail"
+info ""
+info "pin integrity"
+
+RECORDED="$(git -C "$REPO_ROOT" ls-tree HEAD paperclip 2>/dev/null | awk '{print $3}')"
+ACTUAL="$(git -C "$PAPERCLIP_DIR" rev-parse HEAD 2>/dev/null)"
+if [ -z "$RECORDED" ] || [ -z "$ACTUAL" ]; then
+    setup_failure "could not resolve the Paperclip gitlink or checkout"
+fi
+if [ "$ALLOW_DRIFT" = "1" ]; then
+    if [ "$ACTUAL" = "$RECORDED" ]; then
+        info "  --   PC-008 skipped (--allow-pin-drift); checkout is the recorded pin anyway"
+    else
+        info "  --   PC-008 skipped (--allow-pin-drift)"
+        info "       evaluating CANDIDATE $ACTUAL against recorded pin $RECORDED"
+    fi
+else
+    expect_equal "PC-008 submodule checkout matches the recorded gitlink" "$ACTUAL" "$RECORDED"
+fi
+
+# ---------------------------------------------------------------------------
+# Boot
+# ---------------------------------------------------------------------------
+
+info ""
+info "booting Paperclip on $BASE (disposable data dir)"
+
+[ -d "$PAPERCLIP_DIR/node_modules" ] || setup_failure "Paperclip deps missing. Run: pnpm -C paperclip install"
+
+AUTH_SECRET="$(python3 "$REPO_ROOT/bin/_possiblaw_auth_secret.py" --read-or-create "$WORK/better-auth.secret")" \
+    || setup_failure "could not generate a better-auth secret"
+
+(
+    cd "$PAPERCLIP_DIR" || exit 2
+    exec env \
+        PAPERCLIP_DEPLOYMENT_MODE=authenticated \
+        BETTER_AUTH_SECRET="$AUTH_SECRET" \
+        PAPERCLIP_OPEN_ON_LISTEN=false \
+        PORT="$PORT" \
+        pnpm paperclipai onboard --data-dir "$WORK/data" --bind loopback --yes
+) >"$WORK/server.log" 2>&1 </dev/null &
+SERVER_PID=$!
+
+DEADLINE=$((SECONDS + 180))
+until [ "$(status_of "$BASE/api/health")" = "200" ]; do
+    if [ "$SECONDS" -ge "$DEADLINE" ]; then
+        setup_failure "Paperclip did not become healthy on $BASE within 180s"
+    fi
+    sleep 3
+done
+info "  server healthy"
+
+# ---------------------------------------------------------------------------
+# Fixtures: a board actor with a company, and an outsider with none
+# ---------------------------------------------------------------------------
+
+info ""
+info "building two tenants"
+
+CONFIG_PATH="$WORK/data/instances/default/config.json"
+[ -f "$CONFIG_PATH" ] || setup_failure "instance config not found at $CONFIG_PATH"
+
+INVITE_URL="$(cd "$PAPERCLIP_DIR" && pnpm --filter @paperclipai/db exec tsx \
+    "$PAPERCLIP_DIR/packages/db/scripts/create-auth-bootstrap-invite.ts" \
+    --config "$CONFIG_PATH" --base-url "$BASE" 2>/dev/null | tail -1)" \
+    || setup_failure "could not mint a bootstrap invite"
+INVITE_TOKEN="${INVITE_URL##*/}"
+[ -n "$INVITE_TOKEN" ] || setup_failure "bootstrap invite token was empty"
+
+signup() {
+    local jar="$1" email="$2" password="$3" name="$4"
+    curl -s -c "$jar" -o /dev/null --max-time 20 \
+        -X POST "$BASE/api/auth/sign-up/email" \
+        -H 'Content-Type: application/json' \
+        -d "{\"email\":\"$email\",\"password\":\"$password\",\"name\":\"$name\"}"
+}
+
+RUN_ID="$$-$(date +%s)"
+signup "$BOARD_JAR" "board-$RUN_ID@possiblaw.test" "conformance-board-pw" "Board Actor" \
+    || setup_failure "board user signup failed"
+signup "$OUTSIDER_JAR" "outsider-$RUN_ID@possiblaw.test" "conformance-outsider-pw" "Outsider" \
+    || setup_failure "outsider signup failed"
+
+# Board mutations require a trusted browser origin (CSRF guard) and the
+# bootstrap acceptance declares which principal kind is claiming it.
+ACCEPT_BODY="$(body_of -b "$BOARD_JAR" -X POST "$BASE/api/invites/$INVITE_TOKEN/accept" \
+    -H 'Content-Type: application/json' -H "Origin: $BASE" -d '{"requestType":"human"}')"
+printf '%s' "$ACCEPT_BODY" | grep -q '"bootstrapAccepted":true' \
+    || setup_failure "bootstrap acceptance did not succeed: $ACCEPT_BODY"
+
+create_company() {
+    body_of -b "$BOARD_JAR" -X POST "$BASE/api/companies" \
+        -H 'Content-Type: application/json' -H "Origin: $BASE" \
+        -d "{\"name\":\"$1\"}"
+}
+
+ALPHA_JSON="$(create_company "Alpha Firm")"
+ALPHA_ID="$(printf '%s' "$ALPHA_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("id",""))' 2>/dev/null)"
+[ -n "$ALPHA_ID" ] || setup_failure "could not create the board actor's company: $ALPHA_JSON"
+info "  board actor owns Alpha Firm ($ALPHA_ID)"
+info "  outsider holds a valid session and no membership"
+
+# The whole point of the negative control: simulate a broken membership filter
+# by giving the outsider the board actor's session. Every isolation assertion
+# below must then fail. Any that still passes was never discriminating.
+if [ "$NEG" = "1" ]; then
+    cp "$BOARD_JAR" "$OUTSIDER_JAR"
+    info "  NEGATIVE CONTROL: outsider is now using the board actor's session"
+fi
+
+# ---------------------------------------------------------------------------
+# Assertions
+# ---------------------------------------------------------------------------
+
+info ""
+info "tenant isolation"
+
+BOARD_LIST="$(body_of -b "$BOARD_JAR" "$BASE/api/companies")"
+expect_present "PC-001 board actor sees its own company" "$BOARD_LIST" "$ALPHA_ID"
+
+OUTSIDER_LIST="$(body_of -b "$OUTSIDER_JAR" "$BASE/api/companies")"
+expect_absent "PC-002 outsider listing excludes the other tenant" "$OUTSIDER_LIST" "$ALPHA_ID" isolation
+
+expect_status "PC-003 outsider read of another tenant's issues is refused" \
+    "$(status_of -b "$OUTSIDER_JAR" "$BASE/api/companies/$ALPHA_ID/issues")" 403 isolation
+
+expect_status "PC-004 outsider read of another tenant's approvals is refused" \
+    "$(status_of -b "$OUTSIDER_JAR" "$BASE/api/companies/$ALPHA_ID/approvals")" 403 isolation
+
+info ""
+info "unauthenticated access"
+
+expect_status "PC-005 unauthenticated company listing is refused" \
+    "$(status_of "$BASE/api/companies")" 403
+
+info ""
+info "existence disclosure"
+
+# A forbidden company and a nonexistent one must be indistinguishable at the
+# tenant boundary, or the error itself becomes an existence oracle for tenants.
+NONEXISTENT="00000000-0000-4000-8000-000000000000"
+FORBIDDEN_STATUS="$(status_of -b "$OUTSIDER_JAR" "$BASE/api/companies/$ALPHA_ID/issues")"
+NONEXISTENT_STATUS="$(status_of -b "$OUTSIDER_JAR" "$BASE/api/companies/$NONEXISTENT/issues")"
+if [ "$NEG" = "1" ]; then
+    expect_status "PC-006 forbidden and nonexistent are indistinguishable" \
+        "$FORBIDDEN_STATUS" "$NONEXISTENT_STATUS" isolation
+else
+    expect_equal "PC-006 forbidden and nonexistent companies return the same status" \
+        "$FORBIDDEN_STATUS" "$NONEXISTENT_STATUS"
+fi
+
+info ""
+info "issue-prefix derivation"
+
+# PossibLaw derives ethical-wall issue prefixes from company names; --add-wall
+# depends on this being the first three alphabetic characters, uppercased.
+ZETA_JSON="$(create_company "Zeta & Co")"
+ZETA_PREFIX="$(printf '%s' "$ZETA_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("issuePrefix",""))' 2>/dev/null)"
+expect_equal "PC-007 'Zeta & Co' derives issuePrefix ZET" "$ZETA_PREFIX" "ZET"
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+
+info ""
+if [ "$NEG" = "1" ]; then
+    if [ "$VACUOUS" -gt 0 ]; then
+        info "NEGATIVE CONTROL FAILED: $VACUOUS of $CHECKS checks did not discriminate"
+        info "Those assertions pass whether isolation holds or not. Fix them before trusting this suite."
+        exit 1
+    fi
+    info "NEGATIVE CONTROL PASSED: every isolation assertion failed as required ($CHECKS checks)"
+    info "The suite discriminates. A real isolation regression would be caught."
+    exit 0
+fi
+
+if [ "$FAILURES" -gt 0 ]; then
+    info "CONFORMANCE FAILED: $FAILURES of $CHECKS checks failed against pin $ACTUAL"
+    info "Do not move the pin until these are understood."
+    exit 1
+fi
+
+info "CONFORMANCE PASSED: $CHECKS checks held against pin $ACTUAL"
+exit 0
