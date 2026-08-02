@@ -39,9 +39,14 @@ WP-F2/WP-F3 land — see `.agent/PLAN.md` Sprint F.
 **Known sharp edges to avoid on camera** (`docs/known-limitations.md`):
 - Do not re-import into the same data dir without `--reset` (issue-prefix
   collision).
-- Routines (intake sweep etc.) need manual wiring in the paperclip UI after
-  import — do NOT claim "fully automatic intake" on camera until the WP-F4
-  live verification of the auto-provision path is done. `UNCONFIRMED`.
+- The launcher auto-provisions the `matter-intake-sweep` routine on live
+  launches (`provision_intake_routine`, best-effort, `--no-routines` to opt
+  out). During the rehearsal, confirm the log line
+  `matter-intake-sweep active (every 15 min, Mon-Fri 8-18 Central)` — if you
+  see a `routines:` warning instead, wire it manually per the warning text
+  before claiming automatic intake on camera. The OTHER sweeps
+  (delivery/learning/skill-improvement) are intent declarations that DO need
+  manual UI wiring — don't claim those as automatic.
 - Stay off Notion delivery (no write path) and CRM writes (hard-blocked by
   design — fine to *mention* as a fail-closed feature, not as a workflow).
 
