@@ -58,6 +58,13 @@ Versioning: [SemVer](https://semver.org/).
   to the Model Rules (1.1, 1.3, 1.6, conflicts/screening, 3.3, 5.1/5.3,
   1.15, 7.1, 5.5, 1.5 + ABA Op. 512) with honest limits per row and a
   verify-it-yourself section; linked from the README docs table.
+- **Launcher wires the conflicts screen's env:** `POSSIBLAW_WALLS_FILE`
+  (`$DATA_DIR/walls.json`) and `POSSIBLAW_REPO_ROOT` are now injected into
+  every agent's env on gated launches, so `legal-conflicts-check` finds the
+  helper and screens against the walls registry with no manual setup. A
+  missing walls file reads as zero walls (fail-open only in the count, never
+  in the verdict semantics). Closes the residual recorded in
+  `docs/designs/deterministic-conflicts-screen.md`.
 
 ## [0.39.0] — 2026-07-03 — Launcher reattaches to a live server instead of spawning duplicates
 

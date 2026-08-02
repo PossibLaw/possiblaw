@@ -3546,6 +3546,20 @@ d["POSSIBLAW_REPO_ROOT"] = rroot
 json.dump(d, open(path, "w"))
 PY
 fi
+# Always inject POSSIBLAW_WALLS_FILE + POSSIBLAW_REPO_ROOT so the conflicts
+# party-screen (skills/legal-conflicts-check -> bin/_possiblaw_conflicts_screen.py)
+# can locate the helper and screen intake parties against the walls registry.
+# $DATA_DIR/walls.json may not exist yet (it appears on first --add-wall); the
+# screen treats a missing file as zero walls, so the path is safe to inject
+# unconditionally. REPO_ROOT is idempotent with the --business block above.
+python3 - "$PLAIN_ENV_FILE" "$DATA_DIR/walls.json" "$REPO_ROOT" <<'PY'
+import json, sys
+path, walls, rroot = sys.argv[1], sys.argv[2], sys.argv[3]
+d = json.load(open(path))
+d["POSSIBLAW_WALLS_FILE"] = walls
+d["POSSIBLAW_REPO_ROOT"] = rroot
+json.dump(d, open(path, "w"))
+PY
 
 if [ "$SKIP_IMPORT" != "true" ] && [ -n "$COMPANY_ID" ] && { [ -n "$SECRET_ENV_TSV" ] || [ "$NO_GATE_PROXY" != "true" ] || [ -n "$BUSINESS_DIR" ]; }; then
     patch_agent_envs "$COMPANY_ID" "$IMPORT_RESPONSE_FILE" "$OVERRIDES_FILE" "$SECRET_IDS_FILE" "$PLAIN_ENV_FILE"
