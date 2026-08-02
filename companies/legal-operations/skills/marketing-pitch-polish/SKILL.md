@@ -42,3 +42,26 @@ Use this skill to transform a rough pitch draft into a crisp, compelling version
 - Preserve operator-specified facts, party names, jurisdiction, and proprietary statistics.
 - Do not invent client names, metrics, or testimonials. Replace unsupported claims with placeholders like `[QUANTIFIED RESULT]` when the underlying evidence is missing.
 - Include the "Changes made" section after the polished pitch.
+
+## Boundaries
+
+- Never-Send Rule: the polished pitch is a draft. Sending, publishing, or
+  posting it is human-owned — this skill never transmits anything.
+- Lawyer-advertising compliance: attorney marketing is regulated
+  communication (ABA Model Rule 7.1 and state analogs). Never add
+  "specialist," "expert," "certified," guaranteed-outcome, or
+  past-results-imply-future-results language; if the draft contains such
+  claims, flag them for operator review instead of silently keeping them.
+  Jurisdiction-specific requirements (e.g. "Attorney Advertising" labels)
+  are surfaced as bracketed placeholders for counsel confirmation.
+- Confidentiality: never introduce client names, matter facts, or
+  work-product details into marketing copy. If the source draft contains
+  them, flag for confirmation that informed client consent exists — do not
+  assume it.
+- Conflicts guard: a pitch that names a target, adverse party, or
+  counterparty routes back through `bd-lead` for a conflicts check before
+  polishing continues (same guard as `bd-proposal-playbook`).
+- No comparative claims against named competitors or other firms.
+- Preserve meaning: polish is editorial, not substantive. If a claim seems
+  wrong or unverifiable, question it in "Changes made" — never "improve" a
+  fact.

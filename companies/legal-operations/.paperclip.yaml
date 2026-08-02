@@ -4796,14 +4796,12 @@ tasks:
       possiblaw:
         routine: weekly-renewal-scan
 routines:
-  nightly-conflicts-check:
-    triggers:
-      - kind: schedule
-        cronExpression: "0 2 * * *"
-        timezone: America/Chicago
-        enabled: true
-    concurrencyPolicy: coalesce_if_active
-    catchUpPolicy: skip_missed
+  # nightly-conflicts-check was removed 2026-08-01: it declared a schedule but
+  # never named an owning agent, no skill references it, and automated conflicts
+  # screening is not implemented in this package (see
+  # skills/legal-conflicts-check — the screen is a human-confirmation step).
+  # Reintroduce it only together with the deterministic conflicts party-screen
+  # (Sprint F WP-F2 item 4) and an explicit agent binding.
   delivery-sweep:
     # Intent declaration: deliverables-courier scans recently completed work
     # products and files `mode: auto` policy matches. The importer does not

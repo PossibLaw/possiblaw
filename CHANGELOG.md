@@ -7,6 +7,29 @@ Versioning: [SemVer](https://semver.org/).
 
 ---
 
+## [Unreleased] — Sprint F: focused firm
+
+- **`--teams flagship` preset** (PR #45): the focused demo firm — commercial,
+  litigation, research + the six business teams (63 agents / 90 skills).
+  Curation, not pruning; the full catalog stays importable.
+- **Depth fixes in the focus set** (this branch): `## Boundaries` added to
+  `marketing-intake-form` (no-attorney-client-relationship disclaimer,
+  data-minimization, conflicts-seed scope) and `marketing-pitch-polish`
+  (never-send, ABA Model Rule 7.1 advertising limits, confidentiality,
+  conflicts guard); stale single-specialist Mission/routing/handoff text
+  corrected in `marketing-lead` (4 specialists) and `admin-lead`
+  (3 specialists); `missing-info-gate` added to `calendar-coordinator`
+  frontmatter (was the only specialist missing it); orphan
+  `nightly-conflicts-check` routine removed from `.paperclip.yaml` (declared
+  a schedule with no owning agent for a screen that is not implemented —
+  reintroduce only with the deterministic conflicts party-screen and an
+  explicit binding).
+- **New spec:** `docs/designs/deterministic-conflicts-screen.md` —
+  fail-closed deterministic conflicts party-screen (deadline-engine posture
+  applied to intake); awaiting operator review before implementation.
+- **New demo script** (PR #45): `docs/demos/operator-day-demo.md` (video 1,
+  operator layer).
+
 ## [0.39.0] — 2026-07-03 — Launcher reattaches to a live server instead of spawning duplicates
 
 Fixes a resource leak in `bin/possiblaw`: every run (and every `--dry-run`)
