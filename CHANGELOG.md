@@ -24,9 +24,22 @@ Versioning: [SemVer](https://semver.org/).
   a schedule with no owning agent for a screen that is not implemented —
   reintroduce only with the deterministic conflicts party-screen and an
   explicit binding).
-- **New spec:** `docs/designs/deterministic-conflicts-screen.md` —
-  fail-closed deterministic conflicts party-screen (deadline-engine posture
-  applied to intake); awaiting operator review before implementation.
+- **Deterministic conflicts party-screen — implemented** (spec:
+  `docs/designs/deterministic-conflicts-screen.md`; deadline-engine posture
+  applied to intake). New stdlib-only `bin/_possiblaw_conflicts_screen.py`
+  (`--register` / `--screen` / `--self-test`, 12 checks incl. CS-001..003):
+  normalized exact matching against the per-business party index
+  (`businesses/<slug>/conflicts/parties.jsonl`, append-only) and the
+  ethical-walls registry (all statuses — a decommissioned wall is still a
+  former client). HIT blocks pending operator decision; NO_HIT upgrades—
+  never replaces—the mandatory human confirmation; EMPTY_INDEX and every
+  error fail closed to the manual procedure. `legal-conflicts-check`
+  rewritten around the screen (verdict reported verbatim as a paperclip
+  comment; gate-proxy receipt is a recorded follow-up); `bd-lead` adverse-
+  party guard now runs the screen and attaches the verdict;
+  `new-matter-conflicts-screener` required-skills text updated;
+  `businesses/_template/conflicts/README.md` added; CLAUDE.md self-test
+  chain extended to six helpers.
 - **New demo script** (PR #45): `docs/demos/operator-day-demo.md` (video 1,
   operator layer).
 

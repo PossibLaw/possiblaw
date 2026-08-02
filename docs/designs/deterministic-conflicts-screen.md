@@ -1,6 +1,6 @@
 # Deterministic conflicts party-screen (Sprint F WP-F2 item 4) — mini-spec
 
-Status: **SPEC — awaiting operator review before implementation.**
+Status: **IMPLEMENTED 2026-08-01** (`bin/_possiblaw_conflicts_screen.py`, 12-check `--self-test` green covering CS-001..003). Operator decisions: (1) index at `businesses/<slug>/conflicts/parties.jsonl` — confirmed; (2) gate-proxy receipt deferred to follow-up, v1 verdict lands as a paperclip comment — confirmed; (3) `bd-lead` adverse-party guard runs the screen — confirmed. Residual: the launcher does not yet export `POSSIBLAW_WALLS_FILE`, so the walls source engages only when the operator sets it (the skill reports "walls not screened" otherwise); launcher wiring is a follow-up.
 Philosophy: the deadline-engine posture applied to intake — deterministic
 where determinism counts, fail-closed to human review, never a clearance
 authority.
