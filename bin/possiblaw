@@ -133,9 +133,11 @@ OPTIONS:
                         capability builder, and the meta-reviewers, with the
                         skills they reference. Presets: "boutique"
                         (commercial, employment, litigation, real-estate,
-                        family-law, estates + business teams) and "inhouse"
+                        family-law, estates + business teams), "inhouse"
                         (commercial, employment, privacy, corporate,
-                        regulatory, ai-governance + business teams).
+                        regulatory, ai-governance + business teams), and
+                        "flagship" (the focused demo firm: commercial,
+                        litigation, research + business teams).
                         Default: the full catalog. The catalog is the menu —
                         import what your firm practices; re-import to add
                         teams later.
@@ -2098,10 +2100,12 @@ milestone "pre-flight complete"
 
 TEAMS_PRESET_BOUTIQUE="commercial,employment,litigation,real-estate,family-law,estates,bd,ops,finance,marketing,admin,legal-ops"
 TEAMS_PRESET_INHOUSE="commercial,employment,privacy,corporate,regulatory,ai-governance,legal-ops,bd,ops,finance,marketing,admin"
+TEAMS_PRESET_FLAGSHIP="commercial,litigation,research,bd,ops,finance,marketing,admin,legal-ops"
 if [ -n "$TEAMS" ]; then
     case "$TEAMS" in
         boutique) TEAMS="$TEAMS_PRESET_BOUTIQUE"; log "teams: preset 'boutique' -> $TEAMS" ;;
         inhouse)  TEAMS="$TEAMS_PRESET_INHOUSE"; log "teams: preset 'inhouse' -> $TEAMS" ;;
+        flagship) TEAMS="$TEAMS_PRESET_FLAGSHIP"; log "teams: preset 'flagship' -> $TEAMS" ;;
     esac
     VALID_TEAMS="$(python3 "$INLINE_PY" --package-root "$PACKAGE" --list-teams)" || {
         err "could not read the team roster from $PACKAGE"
@@ -2119,7 +2123,7 @@ if [ -n "$TEAMS" ]; then
     IFS="$OLD_IFS"
     if [ -n "$INVALID_TEAMS" ]; then
         err "Unknown team(s):$INVALID_TEAMS"
-        err "Valid teams (lead slugs without -lead), or presets boutique|inhouse:"
+        err "Valid teams (lead slugs without -lead), or presets boutique|inhouse|flagship:"
         printf '%s\n' "$VALID_TEAMS" | while IFS= read -r t; do err "  - $t"; done
         exit 1
     fi
