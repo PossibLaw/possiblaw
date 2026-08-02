@@ -20,8 +20,15 @@ test("cases have correct structure from CUAD fields", () => {
   const first = cases[0];
   // id → slug
   assert.equal(first.slug, "cuad-fixture-001");
-  // question → input_brief
-  assert.ok(first.input_brief.length > 0);
+  // question → input_brief: a real extraction instruction carrying the CUAD
+  // category, not the bare category name (a bare "Governing Law" gives the
+  // model no task framing and collapses tokenF1 — observed 0.07 mean on the
+  // 2026-08-02 run vs 0.58 historical)
+  assert.ok(first.input_brief.includes("Governing Law"));
+  assert.ok(
+    /exact/i.test(first.input_brief) && /only/i.test(first.input_brief),
+    "input_brief must instruct verbatim span-only extraction",
+  );
   // gold_label → golden check value
   assert.ok(first.grading.checks?.[0].value !== undefined);
   assert.equal(first.grading.checks?.[0].threshold, 0.7);
@@ -29,4 +36,16 @@ test("cases have correct structure from CUAD fields", () => {
   assert.equal(first.target, "clause-extractor");
   assert.equal(first.targetType, "agent");
   assert.equal(first.lane, "extractive");
+});
+
+test("NOT_FOUND gold grades an empty response as correct, not tokenF1 vs the sentinel", () => {
+  const cases = loadCuadCases("../layer/evals/datasets/cuad/fixtures.jsonl");
+  const notFound = cases.find(c => c.slug === "cuad-fixture-015");
+  assert.ok(notFound, "fixture-015 is the NOT_FOUND case");
+  const check = notFound!.grading.checks?.[0];
+  // Sentinel gold must become an empty-output check — comparing "NOT_FOUND"
+  // token-wise against a (correctly) empty response scores the right
+  // behavior 0 (observed 0.00 on every 2026-08-02 run).
+  assert.equal(check?.type, "regex");
+  assert.equal(check?.pattern, "^\\s*$");
 });

@@ -58,6 +58,23 @@ Versioning: [SemVer](https://semver.org/).
   to the Model Rules (1.1, 1.3, 1.6, conflicts/screening, 3.3, 5.1/5.3,
   1.15, 7.1, 5.5, 1.5 + ABA Op. 512) with honest limits per row and a
   verify-it-yourself section; linked from the README docs table.
+- **CUAD: adapter fixed, harness gains output capture, first honest
+  comparison table.** Three defects found and fixed test-first across the
+  2026-08-02 runs: (1) the adapter sent the bare CUAD category as the entire
+  prompt (0.07 mean) — now an explicit shortest-span instruction with two
+  invented few-shot examples, frozen after one revision cycle; (2) the
+  harness discarded raw model output, making failures undebuggable —
+  `CaseRecord.output` now preserves it; (3) CUAD's `NOT_FOUND` sentinel was
+  token-scored against the output, so a correctly-empty response scored 0 —
+  sentinel gold now grades as an emptiness check. Final same-fixture
+  comparison (15/15, single runs, observed ±0.05 run variance):
+  `claude` variant (extractive → claude-haiku-4-5) **0.69** mean tokenF1,
+  9/15 pass @0.7; `codex` variant (extractive → gpt-5.5) **0.80**, 10/15.
+  Captured outputs show the residual failure modes honestly: Haiku returns
+  whole sentences instead of tight spans and answers NOT_FOUND cases in
+  prose instead of the instructed empty response; both models over-extract
+  on two long-span fixtures. Reports under `eval-harness/results/`
+  (gitignored). The 2026-05-21 retired-harness 0.5788 is not comparable.
 - **Launcher wires the conflicts screen's env:** `POSSIBLAW_WALLS_FILE`
   (`$DATA_DIR/walls.json`) and `POSSIBLAW_REPO_ROOT` are now injected into
   every agent's env on gated launches, so `legal-conflicts-check` finds the

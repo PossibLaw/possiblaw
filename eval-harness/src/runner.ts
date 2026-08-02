@@ -102,6 +102,7 @@ export async function runCase(c: Case, opts: RunOptions): Promise<CaseRecord> {
         slug: c.slug, target: c.target, mode: c.grading.mode,
         pass: false, score: 0, costUsd, ms, skipped: false,
         detail: "rubric grading mode but no rubric defined",
+        output,
       };
     }
     const graded = await runRubric(
@@ -127,6 +128,7 @@ export async function runCase(c: Case, opts: RunOptions): Promise<CaseRecord> {
     ms,
     skipped: false,
     detail,
+    output,
   };
 }
 
