@@ -1,6 +1,6 @@
 # PossibLaw
 
-**A trust pipeline for operating a legal business with AI — built on the [paperclip](https://github.com/paperclipai/paperclip) control plane.**
+**Run the business side of a legal practice with AI agents — and, when you're ready, the practice itself. Every action gated, receipted, and verifiable. Built on the [paperclip](https://github.com/paperclipai/paperclip) control plane.**
 
 > **Regulated-work note:** The practice of law is regulated. To the extent an operator is practicing law with PossibLaw, the operator needs to involve a lawyer. PossibLaw is open-source tooling, not a legal-services provider.
 
@@ -10,6 +10,18 @@
 [![paperclip layer](https://img.shields.io/badge/paperclip-layer%2C%20not%20a%20fork-lightgrey.svg)](FOUNDATION.md)
 
 Agents do the legal and business work autonomously. The product is the path that work travels: egress writes cross hard-gated trust boundaries, every gate decision lands in a tamper-evident receipt chain, and humans decide at the boundaries that matter — not on every step. PossibLaw ships this as a *layer* on the paperclip control plane (wired as a pinned git submodule, never modified), not a fork. Run it as a law firm, or as an in-house legal team that handles first-pass work with its own agents and escalates to outside counsel only for the judgment it doesn't own.
+
+## Two ways to run it
+
+**The operator layer (start here).** The business side of a practice — intake and delegation, conflicts screening, engagement letters, billing and trust-accounting prep, spend reports, BD proposals, deliverable filing — run by an agent org chart with a chief of staff, six business-function teams, and a receipt for every action. It runs *next to* your practice-management system, not instead of it: if you're on Clio, MyCase, or similar, keep it — this layer takes the 10pm operations work off the lawyer's plate. The focused firm imports with one flag and works credential-free out of the box:
+
+```bash
+./bin/possiblaw --teams flagship   # 63 agents / 90 skills: business teams + two practice lanes
+```
+
+**The whole firm (the practice layer).** The same org chart carries practice teams. Two are flagship-deep today: **commercial contracts** (NDA/MSA review with clause-level evals, engagement-to-delivery with receipts) and **litigation integrity** — *verification, not drafting*: citations checked character-by-character with court egress blocked until verification is registered, filing deadlines computed by a deterministic FRCP engine that reports a BLOCKER rather than guessing, and a conflicts party-screen that fails closed to human review. Whatever drafts your motions — an associate, or a drafting tool — this layer is what makes the output defensible. The other 25 practice teams are the extensible skeleton: import what your firm practices (`--teams`), train the rest into your own.
+
+How the trust features map to a lawyer's professional-responsibility duties — competence, confidentiality, conflicts, candor, supervision — is written up for firm evaluation committees in [docs/for-law-firms-model-rules.md](docs/for-law-firms-model-rules.md). The demo walkthrough of the operator layer is [docs/demos/operator-day-demo.md](docs/demos/operator-day-demo.md).
 
 ## The thesis: atomic units of work
 
@@ -23,7 +35,7 @@ The catalog is the supporting cast. The atomic pipeline — decompose, gate, rec
 
 ## Where this sits in the market
 
-Legal AI is sorting into a data layer (law as an API/MCP with provenance), a guardrails layer (the sign-off, audit trail, and hallucination control a regulator needs once AI did the work), and a **practice layer** — whoever runs the AI backend: a law firm, or an in-house legal team acting as its own AI-native practice, doing first-pass work with its own agents and escalating to outside counsel only for the judgment it doesn't own. **PossibLaw is the open-source guardrails + practice layer** — the audit trail, human gates, anonymization, and receipts wrapped around an atomic agent catalog — and the first slice of the **data layer** is now shipped: a trust-adapter that fronts CourtListener's official MCP (`mcp.courtlistener.com`) and **registers every retrieved authority with the gate**, so the gate can flag any authority an agent cites in an outbound filing that was never retrieved — an anti-hallucination check, not just a metadata wrapper ([`mcp-servers/legal-data/`](mcp-servers/legal-data/)). The guardrails layer is productized end-to-end — every gate decision is hash-chained and exportable as a regulator-readable [Matter Trust Report](#whats-enforced-vs-routed-vs-advisory). It competes on being *legible and open* where the rest of the market is opaque and closed. Build specs: [`docs/builds/`](docs/builds/).
+Practice management (Clio, MyCase) owns the system of record; drafting platforms (Harvey, CoCounsel, and the specialist tools) own work-product generation. PossibLaw deliberately competes with neither — it is the **operations and verification layer that runs next to them**. Within legal AI's larger sorting, the layers are: a data layer (law as an API/MCP with provenance), a guardrails layer (the sign-off, audit trail, and hallucination control a regulator needs once AI did the work), and a **practice layer** — whoever runs the AI backend: a law firm, or an in-house legal team acting as its own AI-native practice, doing first-pass work with its own agents and escalating to outside counsel only for the judgment it doesn't own. **PossibLaw is the open-source guardrails + practice layer** — the audit trail, human gates, anonymization, and receipts wrapped around an atomic agent catalog — and the first slice of the **data layer** is now shipped: a trust-adapter that fronts CourtListener's official MCP (`mcp.courtlistener.com`) and **registers every retrieved authority with the gate**, so the gate can flag any authority an agent cites in an outbound filing that was never retrieved — an anti-hallucination check, not just a metadata wrapper ([`mcp-servers/legal-data/`](mcp-servers/legal-data/)). The guardrails layer is productized end-to-end — every gate decision is hash-chained and exportable as a regulator-readable [Matter Trust Report](#whats-enforced-vs-routed-vs-advisory). It competes on being *legible and open* where the rest of the market is opaque and closed. Build specs: [`docs/builds/`](docs/builds/).
 
 ## The trust pipeline
 
@@ -413,6 +425,7 @@ Historical receipt from the retired standalone harness (2026-05-21): CUAD × cla
 | Guide | What it covers |
 |---|---|
 | [docs/operator-walkthrough.md](docs/operator-walkthrough.md) | Fresh Paperclip instance, package import, the gate demo, and starter NDA matter |
+| [docs/for-law-firms-model-rules.md](docs/for-law-firms-model-rules.md) | For firm evaluation committees: how each trust feature maps to the Model Rules of Professional Conduct — with honest limits |
 | [docs/agent-catalog.md](docs/agent-catalog.md) | The full catalog: every team, agent, and skill in the package |
 | [docs/paperclip-package.md](docs/paperclip-package.md) | Current Paperclip-native package path and import instructions |
 | [docs/known-limitations.md](docs/known-limitations.md) | Sharp edges: gate-proxy trust limits, importer non-atomicity, sidebar scale, Ollama quality caveat |
