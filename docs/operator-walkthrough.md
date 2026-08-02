@@ -611,10 +611,11 @@ Create a new issue under `NDA Matters` with body "Review this MSA: <paste>". Com
 
 ### Routines
 
-The package declares two routines in `.paperclip.yaml`:
+The package declares four routines in `.paperclip.yaml` — `matter-intake-sweep`, `delivery-sweep`, `learning-sweep`, and `skill-improvement-sweep` — plus one recurring task:
 
-- `nightly-conflicts-check` — runs `0 2 * * *` America/Chicago, intended for Chief Counsel to scan open matters for conflicts notices.
 - `weekly-renewal-scan` — runs `0 9 * * MON`, intended for Chief Counsel to run `legal-renewal-tracker` against contract artifacts.
+
+(A fifth routine, `nightly-conflicts-check`, was removed 2026-08-01: it declared a schedule with no owning agent for a screen that was not implemented. Now that the deterministic conflicts party-screen exists, it may return with an explicit agent binding — see `docs/designs/deterministic-conflicts-screen.md`.)
 
 Routine binding to a specific recurring issue is operator-configurable in the Paperclip UI after import.
 

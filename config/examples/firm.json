@@ -126,12 +126,6 @@
       "enabled": true,
       "schedule": { "cron": "0 18 * * 1-5", "timezone": "America/Chicago" },
       "concurrencyPolicy": "coalesce_if_active"
-    },
-    {
-      "id": "nightly-conflicts-check",
-      "enabled": true,
-      "schedule": { "cron": "0 2 * * *", "timezone": "America/Chicago" },
-      "concurrencyPolicy": "coalesce_if_active"
     }
   ],
   "budgets": {
