@@ -20,8 +20,15 @@ test("cases have correct structure from CUAD fields", () => {
   const first = cases[0];
   // id → slug
   assert.equal(first.slug, "cuad-fixture-001");
-  // question → input_brief
-  assert.ok(first.input_brief.length > 0);
+  // question → input_brief: a real extraction instruction carrying the CUAD
+  // category, not the bare category name (a bare "Governing Law" gives the
+  // model no task framing and collapses tokenF1 — observed 0.07 mean on the
+  // 2026-08-02 run vs 0.58 historical)
+  assert.ok(first.input_brief.includes("Governing Law"));
+  assert.ok(
+    /exact/i.test(first.input_brief) && /only/i.test(first.input_brief),
+    "input_brief must instruct verbatim span-only extraction",
+  );
   // gold_label → golden check value
   assert.ok(first.grading.checks?.[0].value !== undefined);
   assert.equal(first.grading.checks?.[0].threshold, 0.7);

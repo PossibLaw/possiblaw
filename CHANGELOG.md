@@ -58,6 +58,18 @@ Versioning: [SemVer](https://semver.org/).
   to the Model Rules (1.1, 1.3, 1.6, conflicts/screening, 3.3, 5.1/5.3,
   1.15, 7.1, 5.5, 1.5 + ABA Op. 512) with honest limits per row and a
   verify-it-yourself section; linked from the README docs table.
+- **CUAD adapter prompt fix + first current-harness CUAD receipt.** The
+  adapter passed the bare CUAD category name ("Governing Law") as the entire
+  prompt, so the model answered in prose and tokenF1 collapsed (0.07 mean,
+  2026-08-02 first run). The adapter now wraps the category in an explicit
+  verbatim-span-only instruction (test-first; stale "not yet wired" docstring
+  corrected). Re-run receipt: **mean tokenF1 0.49, 3/15 pass at the 0.7
+  threshold** — variant `claude`, extractive lane -> `claude-haiku-4-5`,
+  15/15 fixtures, 2026-08-02 (historical retired-harness receipt: 0.5788 —
+  different harness, prompt, and model version; treat 0.49 as the new
+  current-harness baseline). Reports land under `eval-harness/results/`
+  (gitignored runtime artifacts). Follow-up worth building: record raw model
+  output per case in the report JSON — both debugging rounds needed it.
 - **Launcher wires the conflicts screen's env:** `POSSIBLAW_WALLS_FILE`
   (`$DATA_DIR/walls.json`) and `POSSIBLAW_REPO_ROOT` are now injected into
   every agent's env on gated launches, so `legal-conflicts-check` finds the

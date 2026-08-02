@@ -1,12 +1,16 @@
 // eval-harness/src/adapters/cuad.ts
 // Maps CUAD fixtures.jsonl → Case[]
 // CUAD fixture schema: { id, text, question, gold_label, gold_spans }
-// Maps: id → slug, question → input_brief, text → document, gold_label → golden check value
+// Maps: id → slug, question → extraction instruction in input_brief,
+// text → document, gold_label → golden check value
 //
-// v1 STATUS: interface demonstration. This adapter proves the benchmark-adapter
-// shape on real data but is not yet wired into the runner/CLI (no --benchmark path
-// yet). The live CUAD-backed cases are the hand-authored markdown cases under
-// companies/legal-operations/evals/cases/. See spec §3 (prove the interface) and §13.
+// The fixture `question` is a bare CUAD category name ("Governing Law").
+// buildAgentPrompt sends input_brief verbatim, so the adapter must wrap the
+// category in an explicit span-extraction instruction — without it the model
+// answers in prose and tokenF1 collapses (0.07 mean observed 2026-08-02 vs
+// 0.58 historical with an instructed prompt).
+//
+// Wired into the runner/CLI via `./bin/eval run --benchmark cuad`.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Case } from "../types.ts";
@@ -32,7 +36,11 @@ export function loadCuadCases(fixturesPath: string): Case[] {
       target: "clause-extractor",
       targetType: "agent",
       lane: "extractive",
-      input_brief: row.question,
+      input_brief:
+        `Extract the exact contiguous span of text from the document below that ` +
+        `answers the CUAD category "${row.question}". Return ONLY the span, ` +
+        `verbatim from the document — no explanation, no preamble, no quotation ` +
+        `marks. If no such span exists, return an empty response.`,
       documents: [row.text],
       grading: {
         mode: "deterministic",
