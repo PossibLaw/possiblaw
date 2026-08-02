@@ -42,6 +42,22 @@ Versioning: [SemVer](https://semver.org/).
   chain extended to six helpers.
 - **New demo script** (PR #45): `docs/demos/operator-day-demo.md` (video 1,
   operator layer).
+- **Demo-spine eval cases** (PR #47): five new cases (spend report,
+  engagement letter, local delivery, conflicts HIT verdict, citation
+  refusal); coverage 9→13 of 358 targets. Demo script updated: the launcher
+  auto-provisions `matter-intake-sweep` on live launches
+  (`provision_intake_routine`) — confirm the success log line during
+  rehearsal; the other sweeps still need manual UI wiring.
+- **README reframed operator-first** (WP-F5): new "Two ways to run it"
+  section (operator layer runs next to Clio/MyCase, `--teams flagship`
+  quickstart; whole-firm adds the practice lanes — commercial contracts +
+  litigation *integrity*, verification-not-drafting), market positioning
+  updated (operations + verification layer next to practice management and
+  drafting platforms).
+- **New doc:** `docs/for-law-firms-model-rules.md` — feature-by-duty mapping
+  to the Model Rules (1.1, 1.3, 1.6, conflicts/screening, 3.3, 5.1/5.3,
+  1.15, 7.1, 5.5, 1.5 + ABA Op. 512) with honest limits per row and a
+  verify-it-yourself section; linked from the README docs table.
 
 ## [0.39.0] — 2026-07-03 — Launcher reattaches to a live server instead of spawning duplicates
 
