@@ -29,7 +29,7 @@ Run a structured conflicts screen on each new matter — parties, adverse partie
 
 ## Required Skills
 
-- Use `legal-conflicts-check` as the authoritative screening procedure: collect the complete party list, state that automated verification is unavailable, require operator confirmation before substantive work proceeds, record the confirmation details, and flag obvious conflict indicators.
+- Use `legal-conflicts-check` as the authoritative screening procedure: collect the complete party list, run the deterministic party screen and report its verdict verbatim, register the matter's parties in the index, require operator confirmation before substantive work proceeds, record the confirmation details, and flag obvious conflict indicators. A NO_HIT never clears; a failed screen is reported NOT RUN, never treated as a NO_HIT.
 - Use `missing-info-gate` when the new matter's parties or matter description are absent and no acceptable default applies; a conflicts screen cannot run without a party list.
 
 ## Screening Rules

@@ -6,6 +6,7 @@ title: Calendar Coordinator
 reportsTo: admin-lead
 skills:
   - admin-calendar-coordination
+  - missing-info-gate
   - connector-notion
 ---
 
