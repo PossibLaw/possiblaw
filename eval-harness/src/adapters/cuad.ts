@@ -37,20 +37,35 @@ export function loadCuadCases(fixturesPath: string): Case[] {
       targetType: "agent",
       lane: "extractive",
       input_brief:
-        `Extract the exact contiguous span of text from the document below that ` +
-        `answers the CUAD category "${row.question}". Return ONLY the span, ` +
-        `verbatim from the document — no explanation, no preamble, no quotation ` +
-        `marks. If no such span exists, return an empty response.`,
+        `Extract the SHORTEST exact contiguous span of text from the document ` +
+        `below that answers the CUAD category "${row.question}". Return ONLY ` +
+        `the span, verbatim from the document — no explanation, no preamble, ` +
+        `no quotation marks, and no surrounding sentence beyond the answer ` +
+        `itself. If no such span exists, return an empty response.\n\n` +
+        `Examples of correct extraction behavior (from other contracts, not ` +
+        `this one):\n` +
+        `- Category "Expiration Date"; document sentence "This Agreement ` +
+        `expires on December 31, 2027, unless renewed." -> correct answer: ` +
+        `"December 31, 2027" (not the whole sentence).\n` +
+        `- Category "Notice Period To Terminate Renewal"; document sentence ` +
+        `"Either party may opt out of renewal by giving sixty (60) days ` +
+        `written notice before the renewal date." -> correct answer: ` +
+        `"sixty (60) days written notice" (not the whole sentence).`,
       documents: [row.text],
       grading: {
         mode: "deterministic",
+        // "NOT_FOUND" is CUAD's sentinel for "the document has no such
+        // clause" — the correct model behavior is an empty response, so the
+        // check is emptiness, never tokenF1 against the sentinel string.
         checks: [
-          {
-            id: `${row.id}-gold`,
-            type: "golden",
-            value: row.gold_label,
-            threshold: 0.7,
-          },
+          row.gold_label === "NOT_FOUND"
+            ? { id: `${row.id}-gold`, type: "regex", pattern: "^\\s*$" }
+            : {
+                id: `${row.id}-gold`,
+                type: "golden",
+                value: row.gold_label,
+                threshold: 0.7,
+              },
         ],
       },
       source: { kind: "benchmark", name: "cuad" },

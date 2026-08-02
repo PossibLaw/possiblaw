@@ -17,6 +17,9 @@ test("runCase asks the model then grades deterministically", async () => {
   const rec = await runCase(c, { variant: "claude", budget: null, client,
     variantsPath: "fixtures/variants.yaml", paperclipYamlPath: "fixtures/.paperclip.yaml", casesDir: "x" });
   assert.equal(rec.pass, true);
+  // The raw model output is preserved on the record — grading detail alone is
+  // not debuggable (two CUAD rounds on 2026-08-02 stalled on exactly this).
+  assert.equal(rec.output, "Governed by the laws of Delaware.");
 });
 
 test("a skipped model call yields a skipped record, not a throw", async () => {

@@ -58,18 +58,23 @@ Versioning: [SemVer](https://semver.org/).
   to the Model Rules (1.1, 1.3, 1.6, conflicts/screening, 3.3, 5.1/5.3,
   1.15, 7.1, 5.5, 1.5 + ABA Op. 512) with honest limits per row and a
   verify-it-yourself section; linked from the README docs table.
-- **CUAD adapter prompt fix + first current-harness CUAD receipt.** The
-  adapter passed the bare CUAD category name ("Governing Law") as the entire
-  prompt, so the model answered in prose and tokenF1 collapsed (0.07 mean,
-  2026-08-02 first run). The adapter now wraps the category in an explicit
-  verbatim-span-only instruction (test-first; stale "not yet wired" docstring
-  corrected). Re-run receipt: **mean tokenF1 0.49, 3/15 pass at the 0.7
-  threshold** — variant `claude`, extractive lane -> `claude-haiku-4-5`,
-  15/15 fixtures, 2026-08-02 (historical retired-harness receipt: 0.5788 —
-  different harness, prompt, and model version; treat 0.49 as the new
-  current-harness baseline). Reports land under `eval-harness/results/`
-  (gitignored runtime artifacts). Follow-up worth building: record raw model
-  output per case in the report JSON — both debugging rounds needed it.
+- **CUAD: adapter fixed, harness gains output capture, first honest
+  comparison table.** Three defects found and fixed test-first across the
+  2026-08-02 runs: (1) the adapter sent the bare CUAD category as the entire
+  prompt (0.07 mean) — now an explicit shortest-span instruction with two
+  invented few-shot examples, frozen after one revision cycle; (2) the
+  harness discarded raw model output, making failures undebuggable —
+  `CaseRecord.output` now preserves it; (3) CUAD's `NOT_FOUND` sentinel was
+  token-scored against the output, so a correctly-empty response scored 0 —
+  sentinel gold now grades as an emptiness check. Final same-fixture
+  comparison (15/15, single runs, observed ±0.05 run variance):
+  `claude` variant (extractive → claude-haiku-4-5) **0.69** mean tokenF1,
+  9/15 pass @0.7; `codex` variant (extractive → gpt-5.5) **0.80**, 10/15.
+  Captured outputs show the residual failure modes honestly: Haiku returns
+  whole sentences instead of tight spans and answers NOT_FOUND cases in
+  prose instead of the instructed empty response; both models over-extract
+  on two long-span fixtures. Reports under `eval-harness/results/`
+  (gitignored). The 2026-05-21 retired-harness 0.5788 is not comparable.
 - **Launcher wires the conflicts screen's env:** `POSSIBLAW_WALLS_FILE`
   (`$DATA_DIR/walls.json`) and `POSSIBLAW_REPO_ROOT` are now injected into
   every agent's env on gated launches, so `legal-conflicts-check` finds the

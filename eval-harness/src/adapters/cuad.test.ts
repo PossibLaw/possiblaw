@@ -37,3 +37,15 @@ test("cases have correct structure from CUAD fields", () => {
   assert.equal(first.targetType, "agent");
   assert.equal(first.lane, "extractive");
 });
+
+test("NOT_FOUND gold grades an empty response as correct, not tokenF1 vs the sentinel", () => {
+  const cases = loadCuadCases("../layer/evals/datasets/cuad/fixtures.jsonl");
+  const notFound = cases.find(c => c.slug === "cuad-fixture-015");
+  assert.ok(notFound, "fixture-015 is the NOT_FOUND case");
+  const check = notFound!.grading.checks?.[0];
+  // Sentinel gold must become an empty-output check — comparing "NOT_FOUND"
+  // token-wise against a (correctly) empty response scores the right
+  // behavior 0 (observed 0.00 on every 2026-08-02 run).
+  assert.equal(check?.type, "regex");
+  assert.equal(check?.pattern, "^\\s*$");
+});

@@ -13,6 +13,8 @@ export interface CaseRecord {
   ms: number;
   skipped: boolean;
   detail: string;
+  /** Raw model output, preserved for debugging (absent on skipped records). */
+  output?: string;
 }
 
 export interface RunReport {
