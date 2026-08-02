@@ -83,7 +83,10 @@ OPTIONS:
                         Key-taking variants (codex-api, claude-api, opencode,
                         openrouter) bill an API key: export it (OPENAI_API_KEY,
                         ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENCODE_API_KEY,
-                        OPENROUTER_API_KEY)
+                        OPENROUTER_API_KEY) — or just launch, and the
+                        launcher prompts for it (input hidden) and stores it
+                        encrypted in paperclip's secrets store; rotate later
+                        in the dashboard Secrets page
                         before running; it is stored once as a paperclip
                         company secret, never in files.
                         Fully local variants: ollama (Ollama daemon) and
@@ -2230,6 +2233,26 @@ if [ -n "$SECRET_ENV_TSV" ]; then
                 warn "$env_key is not set. Dry-run continues (no secret is created),"
                 warn "but a live run of '$VARIANT' requires: export $env_key=..."
             else
+                # Interactive rescue: prompt for the key masked instead of
+                # demanding a shell export. The value enters this process's
+                # env and flows into the paperclip secrets store at import
+                # exactly as an exported key would — never echoed, never in
+                # argv, never written to package files. Non-interactive and
+                # non-TTY runs keep the hard error below.
+                if [ "$NON_INTERACTIVE" != "true" ] && [ -t 0 ]; then
+                    printf '%s (%s) is not set.\n' "\$$env_key" "$env_name" >&2
+                    printf 'Paste it now (input hidden; stored encrypted as a company secret), or press Enter to abort: ' >&2
+                    IFS= read -r -s secret_value
+                    printf '\n' >&2
+                    if [ -n "$secret_value" ]; then
+                        printf -v "$env_key" '%s' "$secret_value"
+                        export "$env_key"
+                        unset secret_value
+                        log "ok: \$$env_key captured ($env_name; stored as a company secret after import)"
+                        continue
+                    fi
+                    unset secret_value
+                fi
                 err "The '$VARIANT' variant requires \$$env_key ($env_name) in this shell."
                 err "Either: export $env_key=...   then re-run,"
                 case "$VARIANT" in
