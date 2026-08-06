@@ -63,3 +63,7 @@ layer/evals/results/*.md
 
 # Timestamped instruction-file backups (redundant with git history)
 *.bak.[0-9]*
+
+# machine-local artifacts
+.mcp.json
+deliverables/

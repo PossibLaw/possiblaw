@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bailey — Build your own Firm | by PossibLaw</title>
+<meta name="description" content="Bailey is the walled courtyard for AI legal work: a full firm of agents behind gates, budgets, ethical walls, and hash-chained receipts. Open source, Apache-2.0. By PossibLaw.">
+<meta property="og:title" content="Bailey — Build your own Firm">
+<meta property="og:description" content="A full firm of AI agents behind gates, budgets, walls, and receipts. Every step on the record. Open source, by PossibLaw.">
+<meta property="og:image" content="poster.jpg">
+<meta property="og:type" content="website">
+<style>
+  :root{
+    --paper:#f7f3ec; --paper-deep:#f1ebe0;
+    --ink:#132c49; --ink-soft:#3d5471; --ink-faint:#7a8ba0;
+    --pink:#cc1d8a; --pink-bright:#e8318f; --pink-wash:#fae3f1;
+    --teal:#dff3ef; --teal-deep:#bfe5dc; --teal-ink:#1d6f61;
+    --line:rgba(19,44,73,0.22); --line-strong:#132c49;
+    --mono:'SF Mono',Menlo,Consolas,monospace;
+    --sans:-apple-system,'Helvetica Neue',Helvetica,Arial,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{font-family:var(--sans); color:var(--ink); background:var(--paper); line-height:1.6}
+  a{color:var(--pink); text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1040px; margin:0 auto; padding:0 24px}
+
+  /* top rule + bar */
+  .toprule{height:5px; background:var(--pink)}
+  header{display:flex; align-items:center; justify-content:space-between; padding:20px 0; border-bottom:1.5px solid var(--line-strong)}
+  .brand{font-weight:800; font-size:25px; letter-spacing:.3px; color:var(--ink)}
+  .brand .ey{color:var(--pink)}
+  .brand small{display:block; font-weight:500; font-size:12px; color:var(--ink-faint); letter-spacing:1.2px; text-transform:uppercase; margin-top:1px}
+  .nav a{font-size:14.5px; margin-left:24px; color:var(--ink); font-weight:600}
+  .nav a.cta{background:var(--pink); color:#fff; padding:10px 18px; border-radius:6px}
+  .nav a.cta:hover{text-decoration:none; background:var(--pink-bright)}
+
+  /* hero */
+  .hero{padding:58px 0 26px}
+  .kicker{font-family:var(--mono); font-size:12.5px; letter-spacing:2.6px; color:var(--pink); text-transform:uppercase; font-weight:600}
+  h1{font-size:clamp(44px,7vw,78px); line-height:1.0; letter-spacing:-1.5px; margin:16px 0 22px; font-weight:850; text-transform:none}
+  h1 .accent{color:var(--pink)}
+  .lede{font-size:clamp(17px,2.1vw,20.5px); color:var(--ink-soft); max-width:740px}
+  .lede b{color:var(--ink)}
+  .defcard{margin-top:26px; max-width:740px; background:#fffdf8; border:1.5px solid var(--line-strong); border-radius:10px; padding:18px 24px; position:relative}
+  .defcard::before{content:""; position:absolute; left:-1.5px; top:14px; bottom:14px; width:5px; background:var(--pink); border-radius:0 4px 4px 0}
+  .defcard .word{font-weight:800; font-size:18px}
+  .defcard .pos{font-family:var(--mono); font-size:13px; color:var(--ink-faint); margin-left:8px}
+  .defcard p{color:var(--ink-soft); font-size:15.5px; margin-top:4px}
+  .ctas{margin-top:30px; display:flex; gap:14px; flex-wrap:wrap}
+  .btn{display:inline-block; padding:13px 24px; border-radius:7px; font-weight:700; font-size:16px}
+  .btn.primary{background:var(--pink); color:#fff}
+  .btn.primary:hover{background:var(--pink-bright); text-decoration:none}
+  .btn.ghost{border:1.5px solid var(--line-strong); color:var(--ink)}
+  .btn.ghost:hover{background:var(--teal); text-decoration:none}
+
+  /* video exhibit */
+  .demo{padding:46px 0 8px}
+  .exhibit{background:#fffdf8; border:1.5px solid var(--line-strong); border-radius:12px; padding:16px; box-shadow:6px 6px 0 var(--teal-deep)}
+  .exhibit video{width:100%; display:block; border-radius:6px; background:#0a1727}
+  .exhibit .plate{display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; padding:12px 6px 0}
+  .exhibit .plate .t{font-weight:700; font-size:15px}
+  .exhibit .plate .m{font-family:var(--mono); font-size:12.5px; color:var(--ink-faint); letter-spacing:.6px}
+  .stats{display:flex; gap:10px; flex-wrap:wrap; margin-top:18px}
+  .stat{font-family:var(--mono); font-size:13px; color:var(--ink); background:var(--teal); border:1px solid var(--teal-deep); border-radius:999px; padding:7px 15px}
+  .stat b{color:var(--pink); font-weight:700}
+
+  /* sections */
+  section{padding:60px 0}
+  .rule-kicker{display:flex; align-items:center; gap:16px; margin-bottom:14px}
+  .rule-kicker::after{content:""; flex:1; border-top:1.5px dashed var(--line)}
+  h2{font-size:clamp(28px,4vw,40px); letter-spacing:-.6px; margin-bottom:10px; font-weight:800}
+  .sub{color:var(--ink-soft); font-size:17px; max-width:700px}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; margin-top:32px}
+  .card{background:#fffdf8; border:1.5px solid var(--line-strong); border-radius:10px; padding:22px 24px}
+  .card .no{font-family:var(--mono); font-size:12px; color:var(--pink); letter-spacing:2px; font-weight:700}
+  .card h3{font-size:19px; margin:6px 0 8px; font-weight:750}
+  .card p{color:var(--ink-soft); font-size:15px}
+  .card p code{font-family:var(--mono); font-size:12.5px; color:var(--teal-ink); background:var(--teal); padding:1.5px 6px; border-radius:5px}
+
+  /* honesty band */
+  .honest{background:var(--pink-wash); border:1.5px solid var(--pink); border-radius:12px; padding:34px 36px; box-shadow:6px 6px 0 rgba(204,29,138,0.18)}
+  .honest h2{font-size:clamp(23px,3.1vw,31px)}
+  .honest p{color:var(--ink-soft); font-size:16px; max-width:800px; margin-top:8px}
+  .honest p b{color:var(--ink)}
+  .honest a{font-weight:700}
+
+  /* inside */
+  .inside{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:16px; margin-top:32px}
+  .num{border:1.5px solid var(--line-strong); border-radius:10px; padding:20px 22px; background:var(--teal)}
+  .num .n{font-size:36px; font-weight:850; color:var(--ink)}
+  .num .l{color:var(--ink-soft); font-size:14px; margin-top:4px}
+
+  /* footer */
+  .footband{background:var(--teal); border-top:1.5px solid var(--line-strong); margin-top:48px}
+  footer{padding:36px 0 46px; display:flex; align-items:center; justify-content:space-between; gap:22px; flex-wrap:wrap}
+  .wordmark{background:#fff; border-radius:14px; padding:10px 20px; display:inline-block; box-shadow:2px 2px 0 var(--teal-deep)}
+  .wordmark img{height:44px; display:block}
+  .foot-links{display:flex; gap:22px; flex-wrap:wrap; font-size:15px; font-weight:650}
+  .foot-links a{color:var(--ink)}
+  .foot-note{width:100%; color:var(--ink-faint); font-size:12.5px; font-family:var(--mono); letter-spacing:.4px}
+
+  @media (max-width:640px){
+    .nav a:not(.cta){display:none}
+    .honest{padding:24px 20px}
+    footer{flex-direction:column; align-items:flex-start}
+    .exhibit{box-shadow:4px 4px 0 var(--teal-deep)}
+  }
+</style>
+</head>
+<body>
+<div class="toprule"></div>
+<div class="wrap">
+
+  <header>
+    <div class="brand">Bail<span class="ey">ey</span>
+      <small>by PossibLaw</small>
+    </div>
+    <nav class="nav">
+      <a href="#demo">Demo</a>
+      <a href="#governance">Governance</a>
+      <a href="#honest">Benchmark</a>
+      <a class="cta" href="https://github.com/PossibLaw/bailey">GitHub&nbsp;→</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <div class="kicker">Field guide · the walled courtyard for AI legal work</div>
+    <h1>Build your own <span class="accent">Firm.</span></h1>
+    <p class="lede">Bailey is a whole firm of AI agents — intake, delegation, drafting, review, and the business around it — that runs behind <b>gates, budgets, ethical walls, and hash-chained receipts</b>. Not a chatbot. A firm, with controls — where every step is on the record and nothing leaves without a human.</p>
+    <div class="defcard">
+      <span class="word">bailey</span><span class="pos">(n.)</span>
+      <p>the walled courtyard of a castle, where the work happens: inside the walls, behind the gate.</p>
+    </div>
+    <div class="ctas">
+      <a class="btn primary" href="https://github.com/PossibLaw/bailey">Get the repo — Apache-2.0</a>
+      <a class="btn ghost" href="#demo">Watch the 90-second demo</a>
+    </div>
+  </div>
+
+  <div class="demo" id="demo">
+    <div class="exhibit">
+      <video controls playsinline preload="metadata" poster="poster.jpg">
+        <source src="bailey-demo.mp4" type="video/mp4">
+      </video>
+      <div class="plate">
+        <div class="t">Exhibit A — a real matter, captured live</div>
+        <div class="m">SaaS agreement risk review · no mockups · no cuts to hide anything</div>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat">specialist review + meta-review in <b>13m 31s</b></div>
+      <div class="stat"><b>1.8M tokens</b>, metered under hard budget caps</div>
+      <div class="stat"><b>zero</b> unsupervised actions</div>
+    </div>
+  </div>
+
+  <section id="governance">
+    <div class="rule-kicker"><span class="kicker">What makes it a courtyard</span></div>
+    <h2>The governance layer is the product.</h2>
+    <p class="sub">Agents are easy. Letting them touch legal work is not. Bailey wraps every agent — whatever model is behind it — in the controls a law practice actually needs.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="no">01</div>
+        <h3>On the record from word one</h3>
+        <p>Work is handed to a firm, not a chat window. Every request becomes a matter with an owner; every handoff between agents is a sub-matter you can open, read, and audit.</p>
+      </div>
+      <div class="card">
+        <div class="no">02</div>
+        <h3>Spending, governed</h3>
+        <p>Every agent runs under a hard budget cap it cannot exceed, with every token metered — per agent, per matter, per company. The spending stops before you get surprised.</p>
+      </div>
+      <div class="card">
+        <div class="no">03</div>
+        <h3>Nothing leaves without a human</h3>
+        <p>Outbound actions — a court filing, an e-signature, a document upload — stop at an egress gate and wait, hash-only, for a human to approve or reject. No exceptions, no override.</p>
+      </div>
+      <div class="card">
+        <div class="no">04</div>
+        <h3>Don't trust it. Check it.</h3>
+        <p>Every gated decision writes a hash-chained receipt you can verify offline with <code>openssl</code> — plus optional RFC&nbsp;3161 timestamp anchoring. The spec is public; a standalone verifier ships in the repo.</p>
+      </div>
+      <div class="card">
+        <div class="no">05</div>
+        <h3>Screened means screened</h3>
+        <p>Ethical walls run as separate companies with separate gates and receipt chains. A screened matter says it is screened — denied is never dressed up as nonexistent.</p>
+      </div>
+      <div class="card">
+        <div class="no">06</div>
+        <h3>Yours to extend</h3>
+        <p>Create new agents with custom skills, connectors, and tools — shaped to your business and your practice of law. Swap the models underneath: cheaper where it's routine, stronger where it counts.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="honest">
+    <div class="honest">
+      <h2>We benchmarked our own thesis. It didn't hold. We published anyway.</h2>
+      <p>Bailey began as a bet that <b>atomic, orchestrated work</b> beats a single strong agent. We ran the A/B on Harvey's public LAB benchmark, judged by Harvey's own grader — and at the tiers we could afford, <b>the thesis was not supported</b>. Orchestration showed a higher ceiling, not a higher floor. The harness, the data, and the negative result are all in the repo — because a system built on receipts should have receipts of its own.</p>
+      <p style="margin-top:14px"><a href="https://github.com/PossibLaw/bailey/blob/main/docs/builds/orchestration-ab-findings.md">Read the full findings →</a></p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rule-kicker"><span class="kicker">Open the gate</span></div>
+    <h2>What's inside</h2>
+    <p class="sub">A layer, not a fork: Bailey packages a complete legal operation on top of the open-source <a href="https://github.com/paperclip-ai/paperclip">paperclip</a> agent runtime — pinned, never modified. The governance pieces are standalone and portable.</p>
+    <div class="inside">
+      <div class="num"><div class="n">180</div><div class="l">agents in a real org chart — chief of staff, chief counsel, 34 practice &amp; business leads, 140+ specialists</div></div>
+      <div class="num"><div class="n">178</div><div class="l">skills: playbooks, checklists, connectors — from NDA triage to conflicts screens to renewal tracking</div></div>
+      <div class="num"><div class="n">28</div><div class="l">legal practice areas plus the 6 business functions a firm actually runs on</div></div>
+      <div class="num"><div class="n">400+</div><div class="l">automated tests across the gate proxy, walls, trace store, and eval harness</div></div>
+    </div>
+  </section>
+
+</div>
+<div class="footband">
+  <div class="wrap">
+    <footer>
+      <a class="wordmark" href="https://www.PossibLaw.com"><img src="possiblaw-logo.png" alt="PossibLaw"></a>
+      <div class="foot-links">
+        <a href="https://github.com/PossibLaw/bailey">GitHub</a>
+        <a href="https://github.com/PossibLaw/bailey/blob/main/docs/builds/orchestration-ab-findings.md">Benchmark findings</a>
+        <a href="https://www.PossibLaw.com">PossibLaw.com</a>
+      </div>
+      <div class="foot-note">Bailey · the walled courtyard for AI legal work · Apache-2.0 · no tracking on this page</div>
+    </footer>
+  </div>
+</div>
+</body>
+</html>

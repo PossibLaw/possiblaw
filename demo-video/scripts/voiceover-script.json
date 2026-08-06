@@ -1,0 +1,47 @@
+[
+  {
+    "id": "hook",
+    "scene": "brand-hook",
+    "text": "What if you had a whole law firm at your fingertips? Not a chatbot. A firm — with controls, and receipts."
+  },
+  {
+    "id": "request",
+    "scene": "capture-request",
+    "text": "You hand work to a firm, not a model. One request, in plain English — and unlike a chat window, everything that happens next is on the record."
+  },
+  {
+    "id": "delegation",
+    "scene": "capture-delegation",
+    "text": "The chief of staff delegates. Specialists pick it up. A risk review gets ordered — by the agents themselves. No invisible work: every handoff is a matter, with an owner."
+  },
+  {
+    "id": "custom",
+    "scene": "capture-custom",
+    "text": "And anyone can create a new agent — custom skills, connectors, and tools — shaped to your business, and your practice of law. Even the models are yours to swap: cheaper where it's routine, stronger where it counts."
+  },
+  {
+    "id": "budgets",
+    "scene": "capture-budgets",
+    "text": "Every agent runs on a budget it cannot exceed. Hard caps. Metered tokens. The spending stops before you get surprised."
+  },
+  {
+    "id": "deliverable",
+    "scene": "capture-deliverable",
+    "text": "Honestly? The deliverable is the least interesting artifact. Look at what's inside it: a conflicts notice the policy layer refuses to skip. Supervision, baked into the work."
+  },
+  {
+    "id": "gate",
+    "scene": "capture-gate",
+    "text": "And when anything tries to leave the building — it stops. A court filing, held for a human. Approve or reject. No exceptions, no override."
+  },
+  {
+    "id": "receipts",
+    "scene": "capture-receipts",
+    "text": "Underneath it all: a hash-chained receipt for every decision, verifiable offline. You don't trust the system. You check it."
+  },
+  {
+    "id": "outro",
+    "scene": "brand-outro",
+    "text": "Fully Open Source. For anyone to use and build. Take the entire OS, or just parts and make it your own. Bailey — by PossibLaw."
+  }
+]

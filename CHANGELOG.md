@@ -9,6 +9,29 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased] — Sprint F: focused firm
 
+- **Bailey.** The repo is renamed `PossibLaw/bailey` (GitHub redirects the old
+  URL; the CLI, package, and paths keep their `possiblaw` names). The name
+  points at the proven part of the system — the walls-gates-receipts
+  governance layer — after the atomic-work A/B came back unsupported. README
+  retitled with the naming note.
+- **`site/` — the Bailey landing page** (bailey.PossibLaw.com): a single
+  self-contained page (no external requests, no tracking) in the
+  PossibLaw editorial style — paper/navy/pink/teal — with the demo video
+  embedded (`bailey-demo.mp4`, web-encoded), the six governance pillars, the
+  honest-benchmark band linking `docs/builds/orchestration-ab-findings.md`,
+  and what's-inside numbers. Deploys by drag-drop to Cloudflare Pages.
+- **`demo-video/` — Remotion sources** for the three delivered videos
+  (architecture explainer, labeled orchestration demo, voiced marketing
+  promo): compositions, tour capture script (`tour.mjs`), ElevenLabs
+  voiceover generator with keychain-first key lookup and say-fallback,
+  VO manifest–driven scene timing, and brand SVG assets. Generated media
+  (node_modules, out/, captures, VO audio) is gitignored — only source and
+  the two brand SVGs are tracked.
+- **Known limitations:** two new entries — gate approval creation cannot bind
+  an `issueId` on the `24aa2f51` pin (unbound-approval workaround documented),
+  and the launcher re-imports a duplicate company when relaunching over a
+  stopped server's data dir (recovery + fix direction documented).
+
 - **Orchestration A/B campaign: harness hardened, thesis tested, findings
   published.** Eight test-first harness changes (judge-model flag, document
   format+key-slug contract for the 24aa2f51 pin, furnish-then-assign matter
