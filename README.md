@@ -4,6 +4,8 @@
 
 > **Why "Bailey"?** A bailey is the walled courtyard of a castle — where the work happens: inside the walls, behind the gate. Bailey is the project name; [PossibLaw](https://www.PossibLaw.com) is the brand behind it. Landing page and 90-second demo: [bailey.PossibLaw.com](https://bailey.PossibLaw.com). The CLI and package keep their `possiblaw` names.
 
+> **What this is (and isn't).** Bailey is side-project R&D, built for under $500 to show that kind of R&D is affordable — and, in the spirit of [Lavern](https://github.com/AnttiHero/lavern), it is published as a **source of inspiration**: ideas in a repo, yours to take. It is a test case, not a product. Development may continue or may not. Buyer beware: we make **no representations about fitness for any end use** — the Apache-2.0 license disclaims all warranties, and anything touching real legal work must be evaluated against your own professional obligations first (see the regulated-work note below and [docs/known-limitations.md](docs/known-limitations.md)). The point of the build was the learning; the repo is the receipt.
+
 > **Regulated-work note:** The practice of law is regulated. To the extent an operator is practicing law with PossibLaw, the operator needs to involve a lawyer. PossibLaw is open-source tooling, not a legal-services provider.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
