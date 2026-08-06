@@ -9,6 +9,19 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased] — Sprint F: focused firm
 
+- **Orchestration A/B campaign: harness hardened, thesis tested, findings
+  published.** Eight test-first harness changes (judge-model flag, document
+  format+key-slug contract for the 24aa2f51 pin, furnish-then-assign matter
+  setup, wake-on-todo, board-actor identity, --await-timeout,
+  cancel-on-timeout, Arm A no-delegate instruction; orchestration-eval
+  67/67), three new variants (openrouter-kimi, openrouter-deepseek,
+  claude-sonnet), and the campaign verdict published in
+  `docs/builds/orchestration-ab-findings.md`: the better-work half of the
+  atomic thesis is NOT supported at the tier tested (pre-registered rule;
+  orchestration showed a higher ceiling — the only runs ever above 10% of
+  rubric criteria — but an equal median). README claim softened to link the
+  findings. Control/auditability claims unchanged.
+
 - **`--teams flagship` preset** (PR #45): the focused demo firm — commercial,
   litigation, research + the six business teams (63 agents / 90 skills).
   Curation, not pruning; the full catalog stays importable.

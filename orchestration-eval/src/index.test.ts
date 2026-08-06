@@ -19,6 +19,20 @@ test("parseArgs defaults runs=3 and arms=A,B", () => {
   assert.deepEqual(a.arms, ["A", "B"]);
 });
 
+test("parseArgs reads --judge-model and defaults it to undefined", () => {
+  const a = parseArgs(["run", "--benchmark", "lab", "--judge-model", "gpt-5.4"]);
+  assert.equal(a.judgeModel, "gpt-5.4");
+  assert.equal(parseArgs(["run"]).judgeModel, undefined);
+});
+
+test("parseArgs reads --await-timeout in minutes as ms; default undefined", () => {
+  // 30-min default starves Opus-tier runs (16/18 timeouts on the 2026-08-03
+  // K=1 probe); the ceiling must be operator-tunable per model tier.
+  const a = parseArgs(["run", "--await-timeout", "75"]);
+  assert.equal(a.awaitTimeoutMs, 75 * 60 * 1000);
+  assert.equal(parseArgs(["run"]).awaitTimeoutMs, undefined);
+});
+
 test("parseArgs recognizes list", () => {
   assert.equal(parseArgs(["list"]).command, "list");
 });

@@ -18,8 +18,10 @@ const dir = buildAgentDirectory([
 
 function fakeClient(record: any, childIssues: Array<{ id: string; assigneeAgentId?: string | null }> = []) {
   return {
-    async createIssue(body: any) { record.created = body; return { id: "iss-1", status: "todo" }; },
-    async putDocument(_id: string, key: string) { (record.docs ||= []).push(key); },
+    async createIssue(body: any) { record.created = body; (record.order ||= []).push("create"); return { id: "iss-1", status: "todo" }; },
+    async putDocument(_id: string, key: string) { (record.docs ||= []).push(key); (record.order ||= []).push("doc"); },
+    async patchIssueAssignee(_id: string, agentId: string) { record.assigned = agentId; (record.order ||= []).push("assign"); },
+    async cancelIssue(id: string) { record.cancelled = id; },
     async getIssue() { return { id: "iss-1", status: "done" }; },
     async listWorkProducts() { return [{ id: "wp", isPrimary: true, metadata: { documentKey: "memo" } }]; },
     async getDocument() { return { id: "memo", body: "FINAL DELIVERABLE TEXT" }; },
@@ -62,7 +64,18 @@ test("1.1 happy: Arm A resolves the manifest slug to the agent's UUID before cre
     runConvert: stubConvert(record),
     awaitOpts: { intervalMs: 0, timeoutMs: 1000, sleep: async () => {} },
   });
-  assert.equal(record.created.assigneeAgentId, UUID_LEAD); // Arm A → single doer, as UUID
+  // Furnish-then-assign: the 24aa2f51 pin scopes issues to an authorization
+  // boundary once assigned (observed 403/401 on every smoke PUT 2026-08-02),
+  // so the issue is created unassigned, documents land first, and assignment
+  // fires the wake on a fully-furnished matter.
+  assert.equal(record.created.assigneeAgentId, undefined);
+  assert.equal(record.assigned, UUID_LEAD); // Arm A → single doer, as UUID
+  // Arm A is the monolithic baseline: the matter carries an explicit
+  // no-delegate instruction (leads delegated in 7 of 12 A-runs across the
+  // 2026-08-02/03 probes, gutting the baseline sample under record-and-exclude).
+  assert.ok(record.created.description.includes("Do NOT create child issues"));
+  assert.ok(record.order.indexOf("assign") > record.order.lastIndexOf("doc"),
+    "assignment must follow the last document upload");
   assert.equal(r.status, "done");
   const out = join(resultsDir, "runA", "output", "red-flag-memo.docx");
   assert.equal(existsSync(out), true);
@@ -79,7 +92,10 @@ test("1.1: Arm B resolves the chief-of-staff slug identically", async () => {
     runConvert: stubConvert(record),
     awaitOpts: { intervalMs: 0, timeoutMs: 1000, sleep: async () => {} },
   });
-  assert.equal(record.created.assigneeAgentId, UUID_COS); // Arm B → delegator, as UUID
+  assert.equal(record.created.assigneeAgentId, undefined);
+  assert.equal(record.assigned, UUID_COS); // Arm B → delegator, as UUID
+  // Arm B must stay free to decompose — no suppression text.
+  assert.equal(record.created.description.includes("Do NOT create child issues"), false);
 });
 
 test("1.1 failure: unresolvable arm_a_agent slug -> arm_a_agent_unresolved error, createIssue NEVER called", async () => {
@@ -236,6 +252,7 @@ test("1.2: decomposition records child count, assignee labels, per-child cost, a
   const client = {
     async createIssue(body: any) { record.created = body; return { id: "iss-1", status: "todo" }; },
     async putDocument() {},
+    async patchIssueAssignee(_id: string, agentId: string) { record.assigned = agentId; },
     async getIssue() { return { id: "iss-1", status: "done" }; },
     async listWorkProducts() { return [{ id: "wp", isPrimary: true, metadata: { documentKey: "memo" } }]; },
     async getDocument() { return { id: "memo", body: "TEXT" }; },
@@ -311,4 +328,8 @@ test("1.3: cancelled root surfaces failureReason 'cancelled'; timed-out run surf
   });
   assert.equal(timedOut.timedOut, true);
   assert.equal(timedOut.failureReason, "timed_out");
+  // Cancel-on-timeout: an abandoned matter must not stay alive burning the
+  // subscription and starving later sequential runs (the 2026-08-03 probe's
+  // 16/18 timeouts were largely self-inflicted background load).
+  assert.equal(record2.cancelled, "iss-1");
 });
