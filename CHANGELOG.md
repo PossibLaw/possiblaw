@@ -32,6 +32,12 @@ Versioning: [SemVer](https://semver.org/).
   VO manifest–driven scene timing, and brand SVG assets. Generated media
   (node_modules, out/, captures, VO audio) is gitignored — only source and
   the two brand SVGs are tracked.
+- **`bin/verify` inventory exemption list:** `runtime:contract` requires every
+  tracked `package.json` to be declared; `demo-video/` (Remotion media
+  project, no unit tests, deps too heavy for the credential-free battery) is
+  now declared in a new `UNVALIDATED_PACKAGES` list rather than silently
+  excluded, so the inventory check keeps its teeth. Caught by CI after PR #53
+  shipped the package unregistered.
 - **Known limitations:** two new entries — gate approval creation cannot bind
   an `issueId` on the `24aa2f51` pin (unbound-approval workaround documented),
   and the launcher re-imports a duplicate company when relaunching over a

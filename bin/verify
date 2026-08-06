@@ -16,6 +16,16 @@ PACKAGES=(
   trace-store
 )
 
+# Tracked Node packages deliberately OUTSIDE the credential-free battery.
+# demo-video is the Remotion media project: no unit tests, rendering deps far
+# too heavy for CI, output verified visually at render time. Listing it here
+# keeps runtime:contract honest instead of vacuous — any NEW package.json
+# still fails the inventory until it is declared validated (PACKAGES above)
+# or exempt (here) on purpose.
+UNVALIDATED_PACKAGES=(
+  demo-video
+)
+
 HELPERS=(
   bin/_possiblaw_agents.py
   bin/_possiblaw_auth_secret.py
@@ -103,7 +113,7 @@ check_runtime_contract() {
     -not -path "$REPO_ROOT/harvey-lab/*" \
     -not -path '*/node_modules/*' \
     -print | sed "s|^$REPO_ROOT/||" | sort)"
-  expected="$(printf '%s/package.json\n' "${PACKAGES[@]}" | sort)"
+  expected="$(printf '%s/package.json\n' "${PACKAGES[@]}" "${UNVALIDATED_PACKAGES[@]}" | sort)"
   if [[ "$discovered" != "$expected" ]]; then
     printf 'PossibLaw Node package inventory differs from bin/verify\n' >&2
     diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$discovered") >&2 || true
