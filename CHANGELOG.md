@@ -9,6 +9,11 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased] — Sprint F: focused firm
 
+- **README "what this is (and isn't)" note:** Bailey is published as a
+  source of inspiration in the spirit of Lavern — side-project R&D built for
+  under $500, a test case not a product, development may or may not continue,
+  no representations about fitness for any end use (Apache-2.0 warranty
+  disclaimer + known-limitations pointer).
 - **Bailey.** The repo is renamed `PossibLaw/bailey` (GitHub redirects the old
   URL; the CLI, package, and paths keep their `possiblaw` names). The name
   points at the proven part of the system — the walls-gates-receipts
