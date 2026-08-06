@@ -967,3 +967,32 @@ key and mint a new one.
 responses resolve locally only. For hosted deployments, update
 `PAPERCLIP_PUBLIC_URL` in the emitted config to the public base URL before
 distributing it to the outside assistant.
+
+## Gate approval creation cannot bind an issueId (July-2026 paperclip pin)
+
+On the pinned paperclip (`24aa2f51`), creating a board approval **with** an
+`issueId` from the gate proxy's egress path returns 403 — the pin's
+authorization boundary rejects issue-scoped approval creation by the gate's
+agent identity. Workaround (used in the demo captures): fire the egress
+**without** `issueId`. The approval is created unbound and appears on the
+Approvals board with the SHA-256-only summary, but the resulting receipts
+carry no `issueId`, so the per-matter Trust Report
+(`GET /receipts/bundle?issueId=…`) reports chain integrity without listing
+those receipts under the matter. Candidate fixes: an issue-scoped approval
+identity on the gate side, or an upstream grant for the gate agent — tracked
+for the next pin review.
+
+## Launcher re-imports a duplicate company when reattaching to a stopped server
+
+The 0.39.0 reattach guard only covers a **healthy** server: it probes
+`:$PORT/api/health`, reuses the live server, and skips import when a company
+exists. If the data dir exists but the server is **down**, a relaunch boots
+against the same data dir and imports a **second** company (observed
+2026-08-06: the duplicate took issuePrefix `POSA`, its auto-provisioned
+intake-sweep routine came up active, and the launcher bound the gate proxy to
+the *new* company's receipts path). Recovery: `DELETE /api/companies/<dupId>`
+(cascades agents and routines), then restart the gate proxy manually bound to
+the original company chain (`GATE_PROXY_PORT`/`GATE_POLICY_PATH`/
+`GATE_RECEIPTS_PATH`/`PAPERCLIP_*` plus the persisted gate key files in the
+data dir). Fix direction: the skip-import check should count companies in the
+data dir, not only on an already-running server.

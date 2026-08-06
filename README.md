@@ -1,6 +1,8 @@
-# PossibLaw
+# Bailey — by PossibLaw
 
-**Run the business side of a legal practice with AI agents — and, when you're ready, the practice itself. Every action gated, receipted, and verifiable. Built on the [paperclip](https://github.com/paperclipai/paperclip) control plane.**
+**Build your own firm: run the business side of a legal practice with AI agents — and, when you're ready, the practice itself. Every action gated, receipted, and verifiable. Built on the [paperclip](https://github.com/paperclipai/paperclip) control plane.**
+
+> **Why "Bailey"?** A bailey is the walled courtyard of a castle — where the work happens: inside the walls, behind the gate. Bailey is the project name; [PossibLaw](https://www.PossibLaw.com) is the brand behind it. Landing page and 90-second demo: [bailey.PossibLaw.com](https://bailey.PossibLaw.com). The CLI and package keep their `possiblaw` names.
 
 > **Regulated-work note:** The practice of law is regulated. To the extent an operator is practicing law with PossibLaw, the operator needs to involve a lawyer. PossibLaw is open-source tooling, not a legal-services provider.
 
@@ -111,8 +113,8 @@ python3 --version
 **Step 1 — clone and launch (2 min)**
 
 ```bash
-git clone https://github.com/PossibLaw/possiblaw
-cd possiblaw
+git clone https://github.com/PossibLaw/bailey
+cd bailey
 git submodule update --init --recursive
 pnpm -C paperclip install --frozen-lockfile
 ./bin/possiblaw
@@ -149,8 +151,8 @@ Use a dedicated, patched Linux host with Docker Engine and Compose v2. The bundl
 1. Clone the complete repository and verify the container runtime:
 
    ```bash
-   git clone https://github.com/PossibLaw/possiblaw
-   cd possiblaw
+   git clone https://github.com/PossibLaw/bailey
+   cd bailey
    git submodule update --init --recursive
    docker version
    docker compose version
