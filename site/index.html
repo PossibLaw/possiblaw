@@ -29,9 +29,11 @@
   /* top rule + bar */
   .toprule{height:5px; background:var(--pink)}
   header{display:flex; align-items:center; justify-content:space-between; padding:20px 0; border-bottom:1.5px solid var(--line-strong)}
-  .brand{font-weight:800; font-size:25px; letter-spacing:.3px; color:var(--ink)}
-  .brand .ey{color:var(--pink)}
-  .brand small{display:block; font-weight:500; font-size:12px; color:var(--ink-faint); letter-spacing:1.2px; text-transform:uppercase; margin-top:1px}
+  .brandrow{display:flex; align-items:center; gap:13px}
+  .brandrow img{display:block}
+  .logo-bailey{height:40px}
+  .byline{font-size:14px; color:var(--ink); font-weight:700; padding-top:8px}
+  .logo-pl{height:26px; margin-top:8px}
   .nav a{font-size:14.5px; margin-left:24px; color:var(--ink); font-weight:600}
   .nav a.cta{background:var(--pink); color:#fff; padding:10px 18px; border-radius:6px}
   .nav a.cta:hover{text-decoration:none; background:var(--pink-bright)}
@@ -96,8 +98,7 @@
   /* footer */
   .footband{background:var(--teal); border-top:1.5px solid var(--line-strong); margin-top:48px}
   footer{padding:36px 0 46px; display:flex; align-items:center; justify-content:space-between; gap:22px; flex-wrap:wrap}
-  .wordmark{background:#fff; border-radius:14px; padding:10px 20px; display:inline-block; box-shadow:2px 2px 0 var(--teal-deep)}
-  .wordmark img{height:44px; display:block}
+  .wordmark img{height:56px; display:block}
   .foot-links{display:flex; gap:22px; flex-wrap:wrap; font-size:15px; font-weight:650}
   .foot-links a{color:var(--ink)}
   .foot-note{width:100%; color:var(--ink-faint); font-size:12.5px; font-family:var(--mono); letter-spacing:.4px}
@@ -115,8 +116,10 @@
 <div class="wrap">
 
   <header>
-    <div class="brand">Bail<span class="ey">ey</span>
-      <small>by PossibLaw</small>
+    <div class="brandrow">
+      <img src="bailey-logo.svg" alt="Bailey" class="logo-bailey">
+      <span class="byline">by</span>
+      <a href="https://www.PossibLaw.com"><img src="possiblaw-horizontal.svg" alt="PossibLaw" class="logo-pl"></a>
     </div>
     <nav class="nav">
       <a href="#demo">Demo</a>
@@ -160,7 +163,7 @@
   <section id="governance">
     <div class="rule-kicker"><span class="kicker">What makes it a courtyard</span></div>
     <h2>The governance layer is the product.</h2>
-    <p class="sub">Agents are easy. Letting them touch legal work is not. Bailey wraps every agent — whatever model is behind it — in the controls a law practice actually needs.</p>
+    <p class="sub">Building a good agent is hard — and it's only the beginning. Before an agent can touch legal work, it needs walls, budgets, gates, and receipts around it. Bailey wraps every agent — whatever model is behind it — in the controls a law practice actually needs.</p>
     <div class="grid">
       <div class="card">
         <div class="no">01</div>
@@ -195,14 +198,6 @@
     </div>
   </section>
 
-  <section id="honest">
-    <div class="honest">
-      <h2>We benchmarked our own thesis. It didn't hold. We published anyway.</h2>
-      <p>Bailey began as a bet that <b>atomic, orchestrated work</b> beats a single strong agent. We ran the A/B on Harvey's public LAB benchmark, judged by Harvey's own grader — and at the tiers we could afford, <b>the thesis was not supported</b>. Orchestration showed a higher ceiling, not a higher floor. The harness, the data, and the negative result are all in the repo — because a system built on receipts should have receipts of its own.</p>
-      <p style="margin-top:14px"><a href="https://github.com/PossibLaw/bailey/blob/main/docs/builds/orchestration-ab-findings.md">Read the full findings →</a></p>
-    </div>
-  </section>
-
   <section>
     <div class="rule-kicker"><span class="kicker">Open the gate</span></div>
     <h2>What's inside</h2>
@@ -215,11 +210,20 @@
     </div>
   </section>
 
+  <section id="honest">
+    <div class="honest">
+      <h2>We benchmarked our own thesis.<br>Here's what held, and why it matters.</h2>
+      <p>Bailey began as a bet that <b>atomic work, decomposed and reassembled by an orchestrated firm</b>, would beat one strong model. On the affordable, non-frontier tiers we tested, it didn't clear that bar: on Harvey's public LAB benchmark — long-horizon graded tasks, scored by Harvey's own grader — orchestration showed a <b>higher ceiling</b> (every top-scoring run in the campaign was orchestrated) but an equal median. <b>What did hold is the governance layer.</b> The gates, budgets, walls, and receipts work identically no matter which model is underneath.</p>
+      <p style="margin-top:14px">So that's how you use Bailey: <b>keep building and keep testing.</b> Improve the skills. Improve the tools. Swap in stronger models as they arrive, and re-run the harness — it ships in the repo, with all of our data, so your next result replaces ours.</p>
+      <p style="margin-top:14px"><a href="https://github.com/PossibLaw/bailey/blob/main/docs/builds/orchestration-ab-findings.md">Read the full findings →</a></p>
+    </div>
+  </section>
+
 </div>
 <div class="footband">
   <div class="wrap">
     <footer>
-      <a class="wordmark" href="https://www.PossibLaw.com"><img src="possiblaw-logo.png" alt="PossibLaw"></a>
+      <a class="wordmark" href="https://www.PossibLaw.com"><img src="possiblaw-horizontal.svg" alt="PossibLaw"></a>
       <div class="foot-links">
         <a href="https://github.com/PossibLaw/bailey">GitHub</a>
         <a href="https://github.com/PossibLaw/bailey/blob/main/docs/builds/orchestration-ab-findings.md">Benchmark findings</a>
