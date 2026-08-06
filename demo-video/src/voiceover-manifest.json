@@ -1,0 +1,38 @@
+{
+  "hook": {
+    "seconds": 5.98,
+    "ext": "wav"
+  },
+  "request": {
+    "seconds": 7.65,
+    "ext": "wav"
+  },
+  "delegation": {
+    "seconds": 9.46,
+    "ext": "wav"
+  },
+  "budgets": {
+    "seconds": 6.82,
+    "ext": "wav"
+  },
+  "deliverable": {
+    "seconds": 10.36,
+    "ext": "wav"
+  },
+  "gate": {
+    "seconds": 7.42,
+    "ext": "wav"
+  },
+  "receipts": {
+    "seconds": 7.1,
+    "ext": "wav"
+  },
+  "outro": {
+    "seconds": 7.53,
+    "ext": "wav"
+  },
+  "custom": {
+    "seconds": 12.92,
+    "ext": "wav"
+  }
+}
