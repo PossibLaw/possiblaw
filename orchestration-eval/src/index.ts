@@ -9,7 +9,7 @@ import { aggregate, renderReport, type RunRecord } from "./report.ts";
 import { AgentResolutionError, buildAgentDirectory } from "./agent-resolver.ts";
 
 export interface ParsedArgs {
-  command: "run" | "list"; benchmark: string; limit?: number; runs: number; config: string; arms: Arm[]; budgetCents?: number;
+  command: "run" | "list"; benchmark: string; limit?: number; runs: number; config: string; arms: Arm[]; budgetCents?: number; judgeModel?: string; awaitTimeoutMs?: number;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -26,6 +26,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     config: get("--config") ?? "sota-subscription",
     arms: (get("--arms") ?? "A,B").split(",").map(s => s.trim()) as Arm[],
     budgetCents: get("--budget") ? Number(get("--budget")) : undefined,
+    judgeModel: get("--judge-model"),
+    awaitTimeoutMs: get("--await-timeout") ? Number(get("--await-timeout")) * 60 * 1000 : undefined,
   };
 }
 
@@ -103,10 +105,11 @@ export async function main(argv: string[]): Promise<void> {
       for (let k = 0; k < args.runs; k++) {
         const runId = `${task.replace(/\//g, "_")}__${arm}__${args.config}__${k}`;
         try {
-          const r = await runArm({ caseRec: c, harveyLabDir, resultsDir, runId, arm, chiefOfStaffAgentId, client, agents: agentDirectory });
+          const r = await runArm({ caseRec: c, harveyLabDir, resultsDir, runId, arm, chiefOfStaffAgentId, client, agents: agentDirectory,
+            ...(args.awaitTimeoutMs ? { awaitOpts: { timeoutMs: args.awaitTimeoutMs } } : {}) });
           // Cancelled/timed-out roots are FAILED without judging (Task 1.3).
           const record = await completeRun(r, { task, arm, config: args.config },
-            () => scoreRun(harveyLabDir, runId, task, { judgeModel: c.grading.rubric?.judge_model }));
+            () => scoreRun(harveyLabDir, runId, task, { judgeModel: args.judgeModel ?? c.grading.rubric?.judge_model }));
           // Track Arm A decomposition: any child issues indicate the lead delegated.
           if (arm === "A" && r.childIssueCount > 0) {
             armADecomposed.push({ task, childCount: r.childIssueCount });

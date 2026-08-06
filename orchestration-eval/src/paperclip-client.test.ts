@@ -32,6 +32,67 @@ test("putDocument PUTs to the issue document key (url-encoded)", async () => {
   assert.equal((calls[0].init?.method), "PUT");
 });
 
+test("putDocument satisfies the 2026-07 pin's documents contract: key slug + required format", async () => {
+  // The 24aa2f51 pin validates keys as [a-z0-9_-] (no dots, no uppercase)
+  // and requires format:"markdown" in the body — the pre-bump client 400'd
+  // on both (observed live 2026-08-02, every A/B smoke run).
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = new PaperclipEvalClient({
+    baseUrl: "http://127.0.0.1:3199", companyId: "co-1", apiKey: "k",
+    fetchImpl: fakeFetch(calls, {}) as any,
+  });
+  await client.putDocument("iss-9", "Draft Petition-Letter.docx", "hello");
+  assert.equal(calls[0].url, "http://127.0.0.1:3199/api/issues/iss-9/documents/draft-petition-letter-docx");
+  const body = JSON.parse(String(calls[0].init?.body));
+  assert.equal(body.format, "markdown");
+  assert.equal(body.body, "hello");
+});
+
+test("empty apiKey sends NO Authorization header (local_trusted board actor)", async () => {
+  // The eval must not share an identity with a working agent: the pinned
+  // paperclip session-scopes an agent key while that agent has a live run,
+  // so a chief-keyed client racing the chief's own Arm B session gets
+  // 403/409/401 on unrelated issues (observed across smokes 2-4,
+  // 2026-08-02/03). On local_trusted, credential-less loopback is the board
+  // actor with no boundary — the correct harness identity.
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = new PaperclipEvalClient({
+    baseUrl: "http://127.0.0.1:3199", companyId: "co-1", apiKey: "",
+    fetchImpl: fakeFetch(calls, {}) as any,
+  });
+  await client.getIssue("iss-1");
+  const headers = (calls[0].init?.headers ?? {}) as Record<string, string>;
+  assert.equal("Authorization" in headers, false);
+});
+
+test("patchIssueAssignee sets assignee AND moves status to todo (backlog skips the wake)", async () => {
+  // paperclip/server/src/routes/issues.ts:412 — assignment wake is skipped
+  // while status === "backlog", and unassigned-created issues default to
+  // backlog. Observed live 2026-08-03: 12/12 runs timed out with agents
+  // never woken. The PATCH must carry both fields.
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = new PaperclipEvalClient({
+    baseUrl: "http://127.0.0.1:3199", companyId: "co-1", apiKey: "k",
+    fetchImpl: fakeFetch(calls, {}) as any,
+  });
+  await client.patchIssueAssignee("iss-9", "agent-1");
+  const body = JSON.parse(String(calls[0].init?.body));
+  assert.equal(body.assigneeAgentId, "agent-1");
+  assert.equal(body.status, "todo");
+});
+
+test("cancelIssue PATCHes status cancelled", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = new PaperclipEvalClient({
+    baseUrl: "http://127.0.0.1:3199", companyId: "co-1", apiKey: "",
+    fetchImpl: fakeFetch(calls, {}) as any,
+  });
+  await client.cancelIssue("iss-9");
+  assert.equal(calls[0].url, "http://127.0.0.1:3199/api/issues/iss-9");
+  assert.equal(calls[0].init?.method, "PATCH");
+  assert.equal(JSON.parse(String(calls[0].init?.body)).status, "cancelled");
+});
+
 test("patchCompanyBudget PATCHes the budgets endpoint", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const client = new PaperclipEvalClient({

@@ -529,6 +529,136 @@ variants:
         model: openrouter/z-ai/glm-5.2
     per_agent: {}
 
+  claude-sonnet:
+    label: "Claude CLI subscription — Sonnet all lanes (fast eval arm)"
+    # Measurement variant for the orchestration A/B: every lane pins
+    # claude-sonnet-4-6 — strong enough to do real legal work (unlike the
+    # deepseek pipeline dummy), 3-5x faster than the Opus lanes (which timed
+    # out 16/18 at K=1 on 2026-08-03), and subscription-billed (zero cash).
+    # Same dataTerms posture as `claude`.
+    dataTerms:
+      tier: cloud
+      zdr: false
+      trains: false
+      humanReview: false
+      tenantIsolated: true
+      consumerEndpoint: false
+    requires_cli: claude
+    default:
+      adapterType: claude_local
+      adapterConfig:
+        model: claude-sonnet-4-6
+        timeoutSec: 600
+    lanes:
+      primary:
+        model: claude-sonnet-4-6
+      routing:
+        model: claude-sonnet-4-6
+      drafting:
+        model: claude-sonnet-4-6
+        timeoutSec: 900
+      review:
+        model: claude-sonnet-4-6
+        timeoutSec: 900
+      extractive:
+        model: claude-sonnet-4-6
+    per_agent: {}
+
+  openrouter-deepseek:
+    label: "OpenRouter DeepSeek V4 Flash (cheap smoke/pipeline lanes)"
+    # Pipeline-validation variant: every lane pins the dated DeepSeek V4
+    # Flash snapshot ($0.09/$0.18 per M vs Kimi K3's $3/$15 — ~80x cheaper
+    # output; 1M context absorbs LAB document banks). Purpose: smoke-test
+    # the orchestration A/B machinery without premium tokens; NOT a quality
+    # measurement arm. Same OpenRouter posture as its siblings.
+    dataTerms:
+      tier: cloud
+      zdr: false
+      trains: false
+      humanReview: false
+      tenantIsolated: false
+      consumerEndpoint: false
+    requires_cli: opencode
+    secret_env:
+      OPENROUTER_API_KEY: "OpenRouter API Key"
+    notes: >
+      Added 2026-08-02 after the Kimi K3 smoke burned ~$37 validating
+      plumbing (reasoning-token pricing x Arm B decomposition). Smoke runs
+      validate the pipeline, not the model — they belong on the cheapest
+      capable lane. Pinned to the dated -0731 snapshot, not the -latest
+      alias, for run-to-run comparability; the launcher's catalog preflight
+      catches slug drift.
+    default:
+      adapterType: opencode_local
+      adapterConfig:
+        model: openrouter/deepseek/deepseek-v4-flash-0731
+        timeoutSec: 600
+        dangerouslySkipPermissions: true
+    lanes:
+      primary:
+        model: openrouter/deepseek/deepseek-v4-flash-0731
+      routing:
+        model: openrouter/deepseek/deepseek-v4-flash-0731
+      drafting:
+        model: openrouter/deepseek/deepseek-v4-flash-0731
+        timeoutSec: 900
+      review:
+        model: openrouter/deepseek/deepseek-v4-flash-0731
+        timeoutSec: 900
+      extractive:
+        model: openrouter/deepseek/deepseek-v4-flash-0731
+    per_agent: {}
+
+  openrouter-kimi:
+    label: "OpenRouter Kimi K3 (single-model, all lanes)"
+    # Single-model measurement variant for the orchestration A/B: every lane
+    # pins moonshotai/kimi-k3 so Arm A vs Arm B differ ONLY in orchestration,
+    # never in model mix. Same OpenRouter posture as `openrouter` /
+    # `openrouter-cost` (ZDR not asserted uniformly upstream -> zdr: false,
+    # not confidential-capable). Kimi K3 is a reasoning model: it spends
+    # tokens thinking before answering, so lanes carry generous timeouts and
+    # no output caps. Slug validity is checked by the launcher's keyless
+    # catalog preflight at every launch (verified live 2026-08-02).
+    dataTerms:
+      tier: cloud
+      zdr: false
+      trains: false
+      humanReview: false
+      tenantIsolated: false
+      consumerEndpoint: false
+    requires_cli: opencode
+    secret_env:
+      OPENROUTER_API_KEY: "OpenRouter API Key"
+    notes: >
+      Added 2026-08-02 for the orchestration eval's atomic-decomposition A/B
+      (Phase 1 on Kimi K3, operator-selected). Cost metering rides the same
+      paperclip cost-summary rollup as `openrouter-cost` — OpenRouter-billed
+      usage produces real per-run cost_cents in metrics.json. Not a
+      general-purpose operating choice until quality is measured; treat
+      Kimi-K3-vs-frontier quality on legal tasks as UNCONFIRMED (that is what
+      the A/B measures).
+    default:
+      adapterType: opencode_local
+      adapterConfig:
+        model: openrouter/moonshotai/kimi-k3
+        timeoutSec: 900
+        dangerouslySkipPermissions: true
+    lanes:
+      primary:
+        model: openrouter/moonshotai/kimi-k3
+        timeoutSec: 900
+      routing:
+        model: openrouter/moonshotai/kimi-k3
+      drafting:
+        model: openrouter/moonshotai/kimi-k3
+        timeoutSec: 900
+      review:
+        model: openrouter/moonshotai/kimi-k3
+        timeoutSec: 900
+      extractive:
+        model: openrouter/moonshotai/kimi-k3
+    per_agent: {}
+
   # hybrid: DEFERRED.
   # Paperclip's `assigneeAdapterOverrides` can only merge config within the same
   # adapter type — it cannot swap adapter types per issue today. A true hybrid

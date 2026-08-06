@@ -116,15 +116,33 @@ export async function runArm(input: RunArmInput): Promise<RunArmResult> {
   }
 
   const startedAtMs = now(); // wall clock covers createIssue → deliverable written
-  const issue = await client.createIssue({ title: `LAB ${taskPath} [${arm}/${runId}]`, description: caseRec.input_brief, assigneeAgentId });
+  // Furnish-then-assign: once assigned, the issue enters the agent's
+  // authorization boundary (24aa2f51) and the creator's key can no longer
+  // write documents — so create unassigned, attach the document bank, then
+  // assign to fire the wake on a fully-furnished matter.
+  // Arm A is the monolithic baseline: an explicit no-delegate instruction
+  // keeps the contrast clean (leads otherwise delegate — 7/12 A-runs across
+  // the 2026-08 probes — gutting the baseline under record-and-exclude).
+  // Arm B stays free to decompose; that freedom IS the treatment.
+  const armANoDelegate = arm === "A"
+    ? "\n\nIMPORTANT: Complete this matter yourself, end to end. Do NOT create child issues and do NOT delegate any part of the work to other agents."
+    : "";
+  const issue = await client.createIssue({ title: `LAB ${taskPath} [${arm}/${runId}]`, description: caseRec.input_brief + armANoDelegate });
 
   // Attach extracted documents into the issue bank.
   const docs = await extractTaskDocuments(harveyLabDir, taskPath, input.runDoc);
   for (const d of docs) {
     if (!d.skipped && d.text) await client.putDocument(issue.id, d.name.replace(/[^a-zA-Z0-9_.-]/g, "_"), d.text);
   }
+  await client.patchIssueAssignee(issue.id, assigneeAgentId);
 
   const closed = await awaitIssueClosed(client, issue.id, input.awaitOpts);
+  if (closed.timedOut) {
+    // Cancel-on-timeout: an abandoned matter keeps its agents working and
+    // starves later sequential runs. Best-effort — the timeout verdict stands
+    // even if the cancel fails.
+    try { await client.cancelIssue(issue.id); } catch { /* best-effort */ }
+  }
   const deliverable = await extractDeliverable(client, issue.id);
 
   // Write to Harvey's expected layout: <resultsDir>/<runId>/output/<deliverable>
