@@ -105,6 +105,14 @@ Versioning: [SemVer](https://semver.org/).
   to the Model Rules (1.1, 1.3, 1.6, conflicts/screening, 3.3, 5.1/5.3,
   1.15, 7.1, 5.5, 1.5 + ABA Op. 512) with honest limits per row and a
   verify-it-yourself section; linked from the README docs table.
+- **Launcher prompts for missing API keys (masked) instead of demanding a
+  shell export.** On an interactive live launch of a key-requiring variant
+  with the key unset, the launcher now prompts (input hidden), holds the
+  value in memory only, and stores it into paperclip's encrypted secrets
+  store at import exactly as an exported key would — rotate later in the
+  dashboard Secrets page. Non-interactive and non-TTY runs keep the hard
+  error; dry-run keeps the warning; empty input aborts to the same error.
+  Kills the last `export` in non-developer onboarding.
 - **CUAD: adapter fixed, harness gains output capture, first honest
   comparison table.** Three defects found and fixed test-first across the
   2026-08-02 runs: (1) the adapter sent the bare CUAD category as the entire
